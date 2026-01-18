@@ -1,0 +1,92 @@
+.item {
+    cursor: pointer;
+}
+
+.selectedItem {
+    background: #f0f8ff;
+    color: #007bff !important;
+    font-weight: bold;
+}
+
+.selectedIcon {
+    background-color: #9DF3C2; /* 或更明显的颜色，比如 #d0e7ff */
+}
+
+.card_title {
+    text-align: center;
+    font-weight: bold;
+    display: flex;
+    align-items: center;   /* 垂直居中 */
+    position: relative;    /* 为右侧图标定位做准备 */
+    justify-content: center; /* 文字居中 */
+}
+
+.main_area {
+    background: #f0f2f5;
+    padding: 16px;
+}
+
+.background_area {
+    background: #f0f2f5;
+}
+
+/* 加到你的 CSS 里 */
+[data-diff-symbol="+"]::before {
+    content: "+";
+    color: green;
+    display: inline-block;
+    width: 1em;
+    margin-right: 0.5em;
+}
+
+[data-diff-symbol="-"]::before {
+    content: "-";
+    color: red;
+    display: inline-block;
+    width: 1em;
+    margin-right: 0.5em;
+}
+
+[data-diff-symbol=""]::before {
+    content: " ";
+    display: inline-block;
+    width: 1em;
+    margin-right: 0.5em;
+}
+
+.scrollContainer {
+    height: 100vh;
+    min-height: 300px;
+    max-height: 857px;
+    overflow-y: auto;
+}
+
+.centerButtonWrapper {
+    display: flex;
+    justify-content: center;
+    margin: 12px;
+}
+
+.moduleTitle {
+    font-weight: bold;
+    font-size: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.icon {
+    font-size: 18px;
+    border-radius: 50%;
+}
+
+.iconContainer {
+    margin-left: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end; /* 可根据需求调整对齐方式 */
+}
+
+.moduleCollapse {
+    background: #fff;
+}

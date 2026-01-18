@@ -1,0 +1,149 @@
+/* 页面背景动效 */
+.welcomePage {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(to bottom, #d0eaff, #ffffff);
+    position: relative;
+}
+
+
+@keyframes pulse {
+    0% {
+        opacity: 0.2;
+    }
+    50% {
+        opacity: 0.4;
+    }
+    100% {
+        opacity: 0.2;
+    }
+}
+
+/* LOGO 样式 */
+.logo1 {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #5a90d1;
+    margin: 10px;
+}
+.logo2 {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #4f8bcf;
+    margin: 10px;
+}
+
+/* Repo选择框 */
+.repoSelector {
+    display: flex;
+    background-color: white;
+    border-radius: 12px;
+    padding: 12px;
+    margin: 24px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    width: 60vw;
+    max-width: 750px;
+    min-width: 450px;
+    height: 10vh;
+    max-height: 250px;
+    min-height: 150px;
+}
+
+.fileInput {
+    display: none;
+}
+
+.fileLabel {
+    flex-grow: 1;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.875rem;
+    color: #32324b;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.confirmButton {
+    background-color: #3b82f6;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    margin-left: 12px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+/* 介绍文本 */
+.introText {
+    color: #6b7280;
+    font-size: 1rem;
+    /*max-width: 640px;*/
+    text-align: left;
+}
+
+
+.projectGrid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 32px;
+    padding: 0 24px;
+}
+
+.projectCard {
+    width: 300px;
+    transition: transform 0.2s ease-in-out;
+    cursor: pointer;
+    border-radius: 8px;
+}
+
+/* 悬停效果 */
+.projectCard:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.cardTitle {
+    position: relative; /* 让子元素可以绝对定位 */
+    text-align: center; /* 标题文字居中 */
+    font-weight: bold;
+    font-size: 18px;
+}
+
+.cardTitleText {
+    display: inline-block; /* 保证居中对齐时文字不会被撑开 */
+}
+
+.titleButton {
+    position: absolute;
+    right: 0;  /* 靠最右 */
+    top: 50%;
+    transform: translateY(-50%); /* 垂直居中 */
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+
+
+.buttonContainer {
+    display: flex;
+    justify-content: center;
+    margin-top: 12px;
+}
+
+.uploadModalWrapper {
+    display: flex;
+    justify-content: center;
+    margin-top: 48px;
+    margin-bottom: 24px;
+}

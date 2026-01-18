@@ -1,0 +1,14 @@
+.app{
+    text-align: center;
+}
+
+/* 自定义样式覆盖 */
+.ant-btn-primary {
+    background-color: #1890ff;
+    border-color: #1890ff;
+    color: white;
+}
+.ant-btn-primary:not([disabled]):hover {
+    background-color: #096dd9;
+    border-color: #096dd9;
+}

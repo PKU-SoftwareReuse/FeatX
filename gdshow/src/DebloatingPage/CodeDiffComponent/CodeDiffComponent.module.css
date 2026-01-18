@@ -1,0 +1,7 @@
+.diffArea{
+    height: 100vh;
+    min-height: 300px;
+    max-height: 800px;
+    overflow-y: auto;
+}
+

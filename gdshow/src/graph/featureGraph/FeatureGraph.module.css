@@ -1,0 +1,9 @@
+.graphArea {
+    width: 100%;
+    height: 100vh;
+    min-height: 300px;
+    max-height: 853px;
+    border: 2px solid #6696f1; /* 主色调边框 */
+    border-radius: 8px; /*圆角*/
+    box-shadow: 0 2px 12px rgba(53, 116, 240, 0.15); /* 与主色协调的投影 */
+}

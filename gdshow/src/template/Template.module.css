@@ -1,0 +1,13 @@
+.selected {
+    background: #f0f8ff;
+    color: #007bff !important;
+    font-weight: bold;
+}
+
+.item{
+    cursor: pointer;
+}
+
+.app{
+    text-align: center;
+}

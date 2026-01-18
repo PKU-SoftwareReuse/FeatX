@@ -1,0 +1,13 @@
+.d2h-code-linenumber{
+    position: static !important;
+    width: 50px !important;
+}
+
+.line-num1, .line-num2{
+    padding: 0 1px !important;
+    width: 25px !important;
+}
+
+.d2h-code-line {
+    padding: 0 1em;
+}
