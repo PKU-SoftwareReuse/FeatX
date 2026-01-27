@@ -9,10 +9,10 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>cn.edu.pku.lixutian</groupId>
-    <artifactId>LoTM</artifactId>
+    <artifactId>FeatX</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>LoTM</name>
-    <description>Low-Code Interaction</description>
+    <name>Backend</name>
+    <description>FeatX: A Feature-Oriented Interface for LLM-Assisted Programming</description>
     <url/>
     <licenses>
         <license/>
