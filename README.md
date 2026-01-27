@@ -169,9 +169,11 @@ After completing the deployment, open a web browser and navigate to:
 You can then access and interact with FeatX through the web-based interface.
 
 A step-by-step walkthrough of the system, including feature inspection, feature editing, and debloating workflows, is provided in our video demonstration:  
+
 👉 [https://youtu.be/YyCwPy8hf48](https://youtu.be/YyCwPy8hf48)
 
 If you prefer not to deploy the system locally, an online demo is also available at:  
+
 👉 [https://lixutian.github.io/FeatX](https://lixutian.github.io/FeatX)
 
 The online demo showcases the core interaction paradigm of FeatX and can be used for quick exploration and evaluation.
