@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="README.md">English</a> |
-  <a href="docs/other_languages/README_CN.md">中文简体</a> |
+  <a href="docs/other_languages/README_CN.md">中文简体</a>
 </p>
 <p align="center">
     <a href="https://www.java.com/">
