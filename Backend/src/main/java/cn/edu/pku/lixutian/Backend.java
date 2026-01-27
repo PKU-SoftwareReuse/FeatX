@@ -8,10 +8,10 @@ import org.springframework.context.ApplicationContext;
 import java.io.IOException;
 
 @SpringBootApplication
-public class LoCoTeM {
+public class Backend {
 
     public static void main(String[] args) throws IOException, ParseException, InterruptedException {
-        ApplicationContext context = SpringApplication.run(LoCoTeM.class, args);
+        ApplicationContext context = SpringApplication.run(Backend.class, args);
 
     }
 

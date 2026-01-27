@@ -1,0 +1,690 @@
+{
+  "dataset": [
+    {
+      "project_name": "FlappyBird",
+      "issues": [
+        {
+          "id": 1,
+          "issue": "feat: 优化记分方法(https://github.com/kingyuluk/FlappyBird/commit/2968bb8ebc7d9c606595625e26b83d1aae14e968)",
+          "description": "Optimize scoring method",
+          "methods": [
+            "com.kingyu.flappybird.component.Cloud.Cloud(BufferedImage img, int x, int y)",
+            "com.kingyu.flappybird.component.Cloud.draw(Graphics g, Bird bird)",
+            "com.kingyu.flappybird.component.Cloud.isOutFrame()",
+            "com.kingyu.flappybird.component.GameElementLayer.GameElementLayer()",
+            "com.kingyu.flappybird.component.GameElementLayer.draw(Graphics g, Bird bird)",
+            "com.kingyu.flappybird.component.GameElementLayer.pipeBornLogic(Bird bird)",
+            "com.kingyu.flappybird.component.GameElementLayer.addNormalPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addHoverPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addMovingHoverPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addMovingNormalPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.isCollideBird(Bird bird)",
+            "com.kingyu.flappybird.component.GameElementLayer.reset()",
+            "com.kingyu.flappybird.component.GameForeground.GameForeground()",
+            "com.kingyu.flappybird.component.GameForeground.draw(Graphics g, Bird bird)",
+            "com.kingyu.flappybird.component.GameForeground.cloudLogic()",
+            "com.kingyu.flappybird.component.GameFrame.GameFrame()",
+            "com.kingyu.flappybird.component.GameFrame.initFrame()",
+            "com.kingyu.flappybird.component.GameForeground.BirdKeyListener.keyPressed(KeyEvent e)",
+            "com.kingyu.flappybird.component.GameForeground.BirdKeyListener.resetGame()",
+            "com.kingyu.flappybird.component.GameForeground.BirdKeyListener.keyReleased(KeyEvent e)",
+            "com.kingyu.flappybird.component.GameForeground.BirdKeyListener.keyTyped(KeyEvent e)",
+            "com.kingyu.flappybird.component.GameForeground.initGame()",
+            "com.kingyu.flappybird.component.GameForeground.update(Graphics g)",
+            "com.kingyu.flappybird.component.GameForeground.run()",
+            "com.kingyu.flappybird.component.GameForeground.setGameState(int gameState)",
+            "com.kingyu.flappybird.component.GameReady.GameReady()",
+            "com.kingyu.flappybird.component.GameReady.draw(Graphics g)",
+            "com.kingyu.flappybird.component.GameScore.GameScore()",
+            "com.kingyu.flappybird.component.GameScore.getInstance()",
+            "com.kingyu.flappybird.component.GameScore.loadBestScore()",
+            "com.kingyu.flappybird.component.GameScore.saveBestScore(long score)",
+            "com.kingyu.flappybird.component.GameScore.getBestScore()",
+            "com.kingyu.flappybird.component.GameScore.getScore()",
+            "com.kingyu.flappybird.component.GameScore.setScore(Bird bird)",
+            "com.kingyu.flappybird.component.GameScore.isSaveScore()",
+            "com.kingyu.flappybird.component.GameScore.reset()",
+            "com.kingyu.flappybird.component.Pipe.Pipe()",
+            "com.kingyu.flappybird.component.Pipe.setAttribute(int x, int y, int height, int type, boolean visible)",
+            "com.kingyu.flappybird.component.Pipe.setRectangle(int x, int y, int height)",
+            "com.kingyu.flappybird.component.Pipe.isVisible()",
+            "com.kingyu.flappybird.component.Pipe.draw(Graphics g, Bird bird)",
+            "com.kingyu.flappybird.component.Pipe.drawTopNormal(Graphics g)",
+            "com.kingyu.flappybird.component.Pipe.drawBottomNormal(Graphics g)",
+            "com.kingyu.flappybird.component.Pipe.drawHoverNormal(Graphics g)",
+            "com.kingyu.flappybird.component.Pipe.pipeLogic()",
+            "com.kingyu.flappybird.component.Pipe.isInFrame()",
+            "com.kingyu.flappybird.component.Pipe.getX()",
+            "com.kingyu.flappybird.component.Pipe.getPipeRect()",
+            "com.kingyu.flappybird.util.GameUtil.GameUtil()",
+            "com.kingyu.flappybird.util.GameUtil.loadBufferedImage(String imgPath)",
+            "com.kingyu.flappybird.util.GameUtil.isInProbability(int numerator, int denominator)",
+            "com.kingyu.flappybird.util.GameUtil.getRandomNumber(int min, int max)",
+            "com.kingyu.flappybird.util.GameUtil.getStringWidth(Font font, String str)",
+            "com.kingyu.flappybird.util.GameUtil.getStringHeight(Font font, String str)",
+            "com.kingyu.flappybird.util.GameUtil.drawTitle(BufferedImage image, Graphics g)",
+            "com.kingyu.flappybird.util.MusicUtil.playFly()",
+            "com.kingyu.flappybird.util.MusicUtil.playCrash()",
+            "com.kingyu.flappybird.util.MusicUtil.playScore()"
+          ]
+        },
+        {
+          "id": 2,
+          "issue": "feat: 添加悬浮型水管(https://github.com/kingyuluk/FlappyBird/commit/5e5ba4bf131b5998c33474ebe34ac7e9d86187ad)",
+          "description": "Adding suspended water pipes",
+          "methods": [
+            "com.kingyu.flappybird.component.Bird.Bird()",
+            "com.kingyu.flappybird.component.GameElementLayer.pipeBornLogic(Bird bird)",
+            "com.kingyu.flappybird.component.GameElementLayer.addNormalPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addHoverPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addMovingHoverPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.GameElementLayer.addMovingNormalPipe(Pipe lastPipe)",
+            "com.kingyu.flappybird.component.MovingPipe.MovingPipe()",
+            "com.kingyu.flappybird.component.MovingPipe.setAttribute(int x, int y, int height, int type, boolean visible)",
+            "com.kingyu.flappybird.component.MovingPipe.draw(Graphics g, Bird bird)",
+            "com.kingyu.flappybird.component.MovingPipe.drawHoverHard(Graphics g)",
+            "com.kingyu.flappybird.component.MovingPipe.drawTopHard(Graphics g)",
+            "com.kingyu.flappybird.component.MovingPipe.drawBottomHard(Graphics g)",
+            "com.kingyu.flappybird.component.MovingPipe.pipeLogic()",
+            "com.kingyu.flappybird.component.PipePool.get(String className)",
+            "com.kingyu.flappybird.component.PipePool.giveBack(Pipe pipe)",
+            "com.kingyu.flappybird.util.GameUtil.getStringWidth(Font font, String str)",
+            "com.kingyu.flappybird.util.GameUtil.getStringHeight(Font font, String str)"
+          ]
+        }
+      ]
+    },
+    {
+      "project_name": "PlayEdu",
+      "issues": [
+        {
+          "id": 101,
+          "issue": "学员学习权限修改(https://github.com/PlayEdu/PlayEdu/commit/e13ff1ae253ff087c0c18e2db5f0ca43095ff36d)",
+          "description": "Modify student learning permissions",
+          "methods": [
+            "xyz.playedu.api.controller.frontend.HourController.play(@PathVariable(name = \"courseId\") Integer courseId, @PathVariable(name = \"id\") Integer id)",
+            "xyz.playedu.api.controller.frontend.HourController.ping(@PathVariable(name = \"courseId\") Integer courseId, @PathVariable(name = \"id\") Integer id)",
+            "xyz.playedu.course.bus.UserBus.canSeeCourse(Integer userId, Integer courseId)",
+            "xyz.playedu.course.caches.UserCanSeeCourseCache.check(Integer userId, Integer courseId, boolean isThrow)",
+            "xyz.playedu.course.caches.UserCanSeeCourseCache.put(Integer userId, Integer courseId, boolean result)",
+            "xyz.playedu.course.caches.UserCanSeeCourseCache.key(Integer userId, Integer courseId)"
+          ]
+        },
+        {
+          "id": 102,
+          "issue": "1.根据部门ID获取所有父级部门的课程 2.根据分类ID获取所有子分类的课程(https://github.com/PlayEdu/PlayEdu/commit/4d527cff7748a4ecb8d47e5d0cfff00616ffbd88)",
+          "description": "1. Get all parent department courses based on department ID 2. Get all sub-category courses based on category ID",
+          "methods": [
+            "xyz.playedu.api.controller.backend.DepartmentController.updateParent(@RequestBody @Validated DepartmentParentRequest req)",
+            "xyz.playedu.api.controller.backend.DepartmentController.users(@PathVariable(name = \"id\") Integer id, @RequestParam HashMap<String, Object> params)",
+            "xyz.playedu.api.controller.backend.UserController.allCourses(@PathVariable(name = \"id\") Integer id)",
+            "xyz.playedu.api.controller.frontend.UserController.courses(@RequestParam HashMap<String, Object> params)",
+            "xyz.playedu.course.service.impl.CourseServiceImpl.getOpenCoursesAndShow(Integer limit)",
+            "xyz.playedu.course.service.impl.CourseServiceImpl.getOpenCoursesAndShow(Integer limit, List<Integer> categoryIds)",
+            "xyz.playedu.course.service.impl.CourseServiceImpl.getDepCoursesAndShow(List<Integer> depIds, List<Integer> categoryIds)",
+            "xyz.playedu.course.service.impl.CourseServiceImpl.getDepCoursesAndShow(List<Integer> depIds)"
+          ]
+        },
+        {
+          "id": 103,
+          "issue": "增加管理员日志详情接口(https://github.com/PlayEdu/PlayEdu/commit/06da295d58680e013320eb7831729082e91f3d8c)",
+          "description": "Added administrator log details interface",
+          "methods": [
+            "xyz.playedu.api.controller.backend.AdminLogController.detail(@PathVariable(name = \"id\") Integer id)",
+            "xyz.playedu.common.service.impl.AdminLogServiceImpl.find(Integer id, Integer adminId)",
+            ""
+          ]
+        },
+        {
+          "id": 104,
+          "issue": "!4 优化 Merge pull request !4 from 白书科技/feat课程附件功能-2023-07-22(https://github.com/PlayEdu/PlayEdu/commit/5c1346e22cc83f163a2e79fe8a11fcc994fd03fc)",
+          "description": "!4 Optimize Merge pull request !4 from Baishu Technology/feat Course Attachment Feature - 2023-07-22",
+          "methods": [
+            "xyz.playedu.api.controller.backend.ResourceController.index( HashMap params )",
+            "xyz.playedu.api.controller.frontend.CourseController.attachmentDownload( Integer courseId, Integer id )",
+            "xyz.playedu.api.controller.backend.CourseController.edit( Integer id )",
+            "xyz.playedu.api.controller.frontend.CourseController.detail( Integer id )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentDownloadLogController.index( HashMap params )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.updateSort( Integer courseId, CourseAttachmentSortRequest req )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.destroy( Integer courseId, Integer id )",
+            "xyz.playedu.api.controller.backend.UploadController.minioMergeFile( UploadFileMergeRequest req )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.store( Integer courseId, CourseAttachmentRequest req )",
+            "xyz.playedu.api.controller.backend.AdminLogController.index( HashMap params )",
+            "xyz.playedu.api.listener.CourseDestroyListener.attachmentRelateRemove( CourseDestroyEvent event )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.storeMulti( Integer courseId, CourseAttachmentMultiRequest req )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.update( Integer courseId, Integer id, CourseAttachmentRequest req )",
+            "xyz.playedu.api.controller.backend.CourseController.store( CourseRequest req )",
+            "xyz.playedu.api.controller.backend.AdminUserController.store( AdminUserRequest req )",
+            "xyz.playedu.api.controller.backend.CourseAttachmentController.edit( Integer courseId, Integer id )"
+          ]
+        },
+        {
+          "id": 105,
+          "issue": "!9 LDAP同步优化 - 优化:[API]LDAP的部门同步逻辑 - 优化:[API]LDAP的用户同步逻辑(https://github.com/PlayEdu/PlayEdu/commit/6541c3a1918478fa7f5ce7f8172893fc753afb45)",
+          "description": "!9 LDAP synchronization optimization - Optimization: [API] LDAP department synchronization logic - Optimization: [API] LDAP user synchronization logic",
+          "methods": [
+            "xyz.playedu.api.controller.frontend.LoginController.ldap( LoginLdapRequest req )",
+            "xyz.playedu.api.bus.LoginBus.tokenByLdapTransformUser( LdapTransformUser ldapTransformUser )",
+            "xyz.playedu.common.util.ldap.LdapUtil.users( LdapConfig ldapConfig, String filterScope )",
+            "xyz.playedu.common.util.ldap.LdapUtil.loginByMailOrUid( LdapConfig ldapConfig, String mail, String uid, String password )",
+            "xyz.playedu.common.util.ldap.LdapUtil.departments( LdapConfig ldapConfig, String baseDN )",
+            "xyz.playedu.common.service.impl.LdapDepartmentServiceImpl.updateDnById( Integer id, String dn )",
+            "xyz.playedu.common.service.LdapDepartmentService.updateDnById( Integer id, String dn )"
+          ]
+        },
+        {
+          "id": 106,
+          "issue": "!7 优化 ldap登录(https://github.com/PlayEdu/PlayEdu/commit/d5e410cb1f6887d35254301188e78fffcc436594)",
+          "description": "Optimize LDAP login",
+          "methods": [
+            "xyz.playedu.common.domain.LdapUser.getDn(  )",
+            "xyz.playedu.common.domain.LdapUser.getCreatedAt(  )",
+            "xyz.playedu.common.service.impl.AppConfigServiceImpl.saveFromMap( HashMap data )",
+            "xyz.playedu.common.service.LdapUserService.updateEmail( Integer id, String email )",
+            "xyz.playedu.common.domain.LdapUser.getUid(  )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.compParentChain( Integer parentId )",
+            "xyz.playedu.common.service.DepartmentService.createWithChainList( List ou )",
+            "xyz.playedu.common.service.LdapUserService.updateOU( Integer id, String newOU )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.updateUserId( Integer id, Integer userId )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.updateEmail( Integer id, String email )",
+            "xyz.playedu.common.domain.LdapUser.setUuid( String uuid )",
+            "xyz.playedu.common.domain.LdapUser.getEmail(  )",
+            "xyz.playedu.common.service.LdapUserService.updateUserId( Integer id, Integer userId )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.updateParentChain( String newChildrenPC, String oldChildrenPC )",
+            "xyz.playedu.api.bus.LoginBus.tokenByLdapTransformUser( LdapTransformUser ldapTransformUser )",
+            "xyz.playedu.common.domain.LdapUser.getUpdatedAt(  )",
+            "xyz.playedu.api.cache.LoginLimitCache.destroy( String email )",
+            "xyz.playedu.common.domain.LdapUser.getId(  )",
+            "xyz.playedu.common.service.LdapUserService.store( LdapTransformUser ldapTransformUser )",
+            "xyz.playedu.common.domain.LdapUser.setCn( String cn )",
+            "xyz.playedu.api.controller.frontend.LoginController.ldap( LoginLdapRequest req )",
+            "xyz.playedu.common.domain.LdapUser.toString(  )",
+            "xyz.playedu.common.domain.LdapUser.setUid( String uid )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.chunks( List ids, List fields )",
+            "xyz.playedu.common.domain.LdapUser.setId( Integer id )",
+            "xyz.playedu.common.domain.LdapUser.setCreatedAt( Date createdAt )",
+            "xyz.playedu.api.controller.backend.DepartmentController.store( DepartmentRequest req )",
+            "xyz.playedu.common.service.LdapUserService.updateUid( Integer id, String uid )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.updateName( Integer id, String cn )",
+            "xyz.playedu.common.domain.LdapUser.getCn(  )",
+            "xyz.playedu.common.domain.LdapUser.equals( Object that )",
+            "xyz.playedu.common.service.AppConfigService.defaultAvatar(  )",
+            "xyz.playedu.common.service.LdapUserService.updateCN( Integer id, String cn )",
+            "xyz.playedu.common.domain.LdapUser.setEmail( String email )",
+            "xyz.playedu.common.service.DepartmentService.create( String name, Integer parentId, Integer sort )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.chunks( List ids )",
+            "xyz.playedu.common.service.AppConfigService.enabledLdapLogin(  )",
+            "xyz.playedu.api.cache.LoginLockCache.release( String username )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.chunk( List ids )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.create( String name, Integer parentId, Integer sort )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.childrenParentChain( Department department )",
+            "xyz.playedu.common.domain.LdapUser.setOu( String ou )",
+            "xyz.playedu.common.util.ldap.LdapUtil.initContext( String url, String adminUser, String adminPass )",
+            "xyz.playedu.api.controller.backend.DepartmentController.update( Integer id, DepartmentRequest req )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.findByUUID( String id )",
+            "xyz.playedu.common.service.impl.AppConfigServiceImpl.enabledLdapLogin(  )",
+            "xyz.playedu.common.domain.LdapUser.hashCode(  )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.updateEmail( Integer id, String email )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.getDepIdsGroup( List userIds )",
+            "xyz.playedu.api.controller.backend.DepartmentController.destroy( Integer id )",
+            "xyz.playedu.common.domain.LdapUser.getUserId(  )",
+            "xyz.playedu.common.service.UserService.updateDepId( Integer id, Integer depIds )",
+            "xyz.playedu.common.service.impl.AppConfigServiceImpl.defaultAvatar(  )",
+            "xyz.playedu.api.controller.frontend.SystemController.config(  )",
+            "xyz.playedu.api.controller.backend.DepartmentController.preDestroy( Integer id )",
+            "xyz.playedu.api.controller.backend.DepartmentController.updateParent( DepartmentParentRequest req )",
+            "xyz.playedu.common.domain.LdapUser.setUserId( Integer userId )",
+            "xyz.playedu.common.domain.LdapUser.getUuid(  )",
+            "xyz.playedu.api.cache.LoginLockCache.apply( String username )",
+            "xyz.playedu.common.service.UserService.updateEmail( Integer id, String email )",
+            "xyz.playedu.common.service.LdapUserService.findByUUID( String id )",
+            "xyz.playedu.api.cache.LoginLimitCache.check( String email )",
+            "xyz.playedu.api.cache.LoginLockCache.cacheKey( String username )",
+            "xyz.playedu.common.service.impl.UserServiceImpl.updateDepId( Integer id, Integer depIds )",
+            "xyz.playedu.common.service.UserService.updateName( Integer id, String cn )",
+            "xyz.playedu.common.domain.LdapUser.setUpdatedAt( Date updatedAt )",
+            "xyz.playedu.api.cache.LoginLimitCache.cacheKey( String email )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.updateUid( Integer id, String uid )",
+            "xyz.playedu.common.domain.LdapUser.setDn( String dn )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.createWithChainList( List ou )",
+            "xyz.playedu.common.util.ldap.LdapUtil.closeContext( LdapContext ldapCtx )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.updateCN( Integer id, String cn )",
+            "xyz.playedu.common.domain.LdapUser.getOu(  )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.store( LdapTransformUser ldapTransformUser )",
+            "xyz.playedu.api.bus.LoginBus.tokenByUser( User user )",
+            "xyz.playedu.common.service.impl.LdapUserServiceImpl.updateOU( Integer id, String newOU )"
+          ]
+        },
+        {
+          "id": 107,
+          "issue": "部门删除event(https://github.com/PlayEdu/PlayEdu/commit/aa5d3a21d81bced392f06c42f6b3843232cc6337)",
+          "description": "The department deleted the event.",
+          "methods": [
+            "xyz.playedu.api.listener.DepartmentDestroyListener.updateLoginInfo( DepartmentDestroyEvent event )",
+            "xyz.playedu.api.controller.backend.DepartmentController.destroy( Integer id )"
+          ]
+        },
+        {
+          "id": 108,
+          "issue": "学员部门包含子部门所有学员数量(https://github.com/PlayEdu/PlayEdu/commit/7c84e185a6a85f44c1e0c9c53ed89df77c5f9274)",
+          "description": "The number of students in the student department includes all students from its sub-departments.",
+          "methods": [
+            "xyz.playedu.api.controller.backend.DepartmentController.index(  )",
+            "xyz.playedu.common.service.impl.DepartmentServiceImpl.getChildDepartmentsByParentChain( Integer parentId, String parentChain )",
+            "xyz.playedu.common.service.DepartmentService.getChildDepartmentsByParentChain( Integer parentId, String parentChain )"
+          ]
+        },
+        {
+          "id": 109,
+          "issue": "added: 课时批量创建接口(https://github.com/PlayEdu/PlayEdu/commit/4f268732be7a3968a823f0a5f3702884f47cd35e)",
+          "description": "Added: Batch creation interface for class hours",
+          "methods": [
+            "xyz.playedu.api.controller.backend.CourseHourController.storeMulti( Integer courseId, CourseHourMultiRequest req )"
+          ]
+        },
+        {
+          "id": 110,
+          "issue": "学员的学习记录增加爱锁控制(https://github.com/PlayEdu/PlayEdu/commit/246cfe6501e4ce743536e985d96918eec9a0dd30)",
+          "description": "The learner's study record increases love lock control.",
+          "methods": [
+            "xyz.playedu.api.controller.frontend.HourController.record( Integer courseId, Integer id, CourseHourRecordRequest req )",
+            "xyz.playedu.api.controller.frontend.HourController.ping( Integer courseId, Integer id )"
+          ]
+        },
+        {
+          "id": 111,
+          "issue": "added: 管理员密码修改(https://github.com/PlayEdu/PlayEdu/commit/aa6bb1d84512777616ef98ad384192482ecc7fdf)",
+          "description": "Added: Administrator password modification",
+          "methods": [
+            "xyz.playedu.api.controller.backend.LoginController.changePassword( PasswordChangeRequest req )"
+          ]
+        },
+        {
+          "id": 112,
+          "issue": "优化权限结构(https://github.com/PlayEdu/PlayEdu/commit/82c53ed87f5710e17e97429c34a35e3663e22b4a)",
+          "description": "Optimize permission structure",
+          "methods": [
+            "xyz.playedu.common.service.AdminPermissionService.allSlugs(  )",
+            "xyz.playedu.common.service.impl.AdminPermissionServiceImpl.allSlugs(  )",
+            "xyz.playedu.system.checks.AdminPermissionCheck.run( String args )"
+          ]
+        },
+        {
+          "id": 113,
+          "issue": "系统配置隐秘信息mask(https://github.com/PlayEdu/PlayEdu/commit/a35a767514b25fe8326de82629c8fe0cc129e489)",
+          "description": "System configuration secret information mask",
+          "methods": [
+            "xyz.playedu.api.controller.backend.AppConfigController.save( AppConfigRequest req )",
+            "xyz.playedu.api.controller.backend.AppConfigController.index(  )"
+          ]
+        },
+        {
+          "id": 114,
+          "issue": "超级管理员角色(https://github.com/PlayEdu/PlayEdu/commit/bf2c5143c92c9241e25dd5386455f7cc94029477)",
+          "description": "Super Administrator Role",
+          "methods": [
+            "xyz.playedu.api.controller.backend.AdminRoleController.destroy( Integer id )",
+            "xyz.playedu.api.controller.backend.AdminRoleController.update( Integer id, AdminRoleRequest request )"
+          ]
+        },
+        {
+          "id": 115,
+          "issue": "fixed: 密码登录(https://github.com/PlayEdu/PlayEdu/commit/657d418e7adc1ba7c340dccd16062044ba183300)",
+          "description": "Fixed: Password login",
+          "methods": [
+            "xyz.playedu.api.controller.frontend.LoginController.password( LoginPasswordRequest req )"
+          ]
+        }
+      ]
+    },
+    {
+      "project_name": "NBlog",
+      "issues": [
+        {
+          "id": 201,
+          "issue": "feat: change account(https://github.com/Naccl/NBlog/commit/b0a1db2d26361e13688b759fa1e137357dbee5b7)",
+          "description": "change account",
+          "methods": [
+            "top.naccl.controller.admin.AccountAdminController.account(@RequestBody User user, @RequestHeader(value = \"Authorization\", defaultValue = \"\") String jwt)",
+            "top.naccl.mapper.UserMapper.updateUserByUsername(String username, User user)",
+            "top.naccl.service.UserService.changeAccount(User user, String jwt)",
+            "top.naccl.util.JwtUtils.setSecretKey(String secretKey)"
+          ]
+        },
+        {
+          "id": 202,
+          "issue": "feat: add upyun upload channel(https://github.com/Naccl/NBlog/commit/ec999030e489bac6268f2bfa792bfc5b29b80e77)",
+          "description": "add upyun upload channel",
+          "methods": [
+            "top.naccl.util.upload.channel.ChannelFactory.getChannel(String channelName)",
+            "top.naccl.util.upload.channel.UpyunChannel.UpyunChannel(UpyunProperties upyunProperties)",
+            "top.naccl.util.upload.channel.UpyunChannel.upload(UploadUtils.ImageResource image)"
+          ]
+        },
+        {
+          "id": 203,
+          "issue": "feat: validate comment website(https://github.com/Naccl/NBlog/commit/e2f8f363f6fcf8a5e890497ac3558bceb95b27ca)",
+          "description": "validate comment website",
+          "methods": [
+            "top.naccl.util.comment.CommentUtils.setVisitorComment(Comment comment, HttpServletRequest request)",
+            "top.naccl.util.comment.CommentUtils.isValidUrl(String url)"
+          ]
+        },
+        {
+          "id": 204,
+          "issue": "feat: add webhook message handler(https://github.com/Naccl/NBlog/commit/4d052da441e4c72efd80bea68c9f361360b0ad4a)",
+          "description": "add webhook message handler",
+          "methods": [
+            "top.naccl.controller.TelegramBotController.getUpdate(@RequestBody TgMessage message)",
+            "top.naccl.mapper.UserMapper.findById(Long id)",
+            "top.naccl.service.UserService.findUserById(Long id)",
+            "top.naccl.service.impl.UserServiceImpl.findUserById(Long id)",
+            "top.naccl.util.comment.CommentUtils.setGeneralAdminComment(Comment comment, User admin)",
+            "top.naccl.util.comment.CommentUtils.setAdminCommentByTelegramAction(Comment comment)",
+            "top.naccl.util.comment.CommentUtils.setAdminComment(Comment comment, HttpServletRequest request, User admin)",
+            "top.naccl.util.comment.channel.TelegramChannel.getContent(Comment comment)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.processCommand(String message)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.updateCommentStatus(String msgContent, boolean status)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.deleteComment(String msgContent)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.replyComment(String msgContent)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.newMoment(String content)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.handleCommandException(Exception e)",
+            "top.naccl.util.telegram.TelegramBotMsgHandler.sendResult(String message)"
+          ]
+        },
+        {
+          "id": 205,
+          "issue": "feat: comment default open state can be configured(https://github.com/Naccl/NBlog/commit/5d3c5b8062ff0f90ca59184925b9334e28c09fce)",
+          "description": "comment default open state can be configured",
+          "methods": [
+            "top.naccl.util.comment.CommentUtils.setCommentDefaultOpen(Boolean commentDefaultOpen)",
+            "top.naccl.util.comment.CommentUtils.setVisitorComment(Comment comment, HttpServletRequest request)"
+          ]
+        },
+        {
+          "id": 206,
+          "issue": "feat: Receive notify of comment by Telegram(https://github.com/Naccl/NBlog/commit/d56c6920b429b25db764dca16cdd83d0f9a5a096)",
+          "description": "Receive notify of comment by Telegram",
+          "methods": [
+            "top.naccl.config.RestTemplateConfig.restTemplate()",
+            "top.naccl.config.RestTemplateConfig.restTemplateByProxy()",
+            "top.naccl.controller.CommentController.postComment(@RequestBody Comment comment, HttpServletRequest request, @RequestHeader(value = \"Authorization\", defaultValue = \"\") String jwt)",
+            "top.naccl.util.TelegramUtils.send2TelegramApi(String content)",
+            "top.naccl.util.comment.CommentUtils.setBlogService(BlogService blogService)",
+            "top.naccl.util.comment.CommentUtils.setNotifyChannel(String channelName)",
+            "top.naccl.util.comment.CommentUtils.judgeSendNotify(Comment comment, boolean isVisitorComment, top.naccl.entity.Comment parentComment)",
+            "top.naccl.util.comment.CommentUtils.sendMailToParentComment(top.naccl.entity.Comment parentComment, Comment comment)",
+            "top.naccl.util.comment.CommentUtils.notifyMyself(Comment comment)",
+            "top.naccl.util.comment.CommentUtils.getCommentPageEnum(Comment comment)",
+            "top.naccl.util.comment.channel.ChannelFactory.getChannel(String channelName)",
+            "top.naccl.util.comment.channel.CommentNotifyChannel.notifyMyself(Comment comment)",
+            "top.naccl.util.comment.channel.MailChannel.notifyMyself(Comment comment)",
+            "top.naccl.util.comment.channel.TelegramChannel.notifyMyself(Comment comment)"
+          ]
+        },
+        {
+          "id": 207,
+          "issue": "增加任务日志删除功能(https://github.com/Naccl/NBlog/commit/dbe029659fd0c73bf805318d884c9445389d56d4)",
+          "description": "Add task log deletion feature",
+          "methods": [
+            "top.naccl.service.impl.ScheduleJobServiceImpl.deleteJobLogByLogId( Long logId )",
+            "top.naccl.mapper.ScheduleJobLogMapper.deleteJobLogByLogId( Long logId )",
+            "top.naccl.util.quartz.ScheduleJob.executeInternal( JobExecutionContext context )",
+            "top.naccl.service.impl.ScheduleJobServiceImpl.saveJobLog( ScheduleJobLog jobLog )",
+            "top.naccl.service.ScheduleJobService.saveJobLog( ScheduleJobLog log )",
+            "top.naccl.controller.admin.ScheduleJobController.delete( Long logId )",
+            "top.naccl.service.ScheduleJobService.deleteJobLogByLogId( Long logId )"
+          ]
+        },
+        {
+          "id": 208,
+          "issue": "完成友链功能(https://github.com/Naccl/NBlog/commit/d47882e69d318b82827ada83b197742bec4d9669)",
+          "description": "Complete the friend link function.",
+          "methods": [
+            "top.naccl.mapper.FriendMapper.updateFriend( top friend )",
+            "top.naccl.service.impl.FriendServiceImpl.updateFriendPublishedById( Long friendId, Boolean published )",
+            "top.naccl.service.FriendService.updateFriend( top friend )",
+            "top.naccl.mapper.FriendMapper.getFriendVOList(  )",
+            "top.naccl.service.FriendService.saveFriend( Friend friend )",
+            "top.naccl.mapper.FriendMapper.getFriendList(  )",
+            "top.naccl.service.FriendService.updateFriendPublishedById( Long friendId, Boolean published )",
+            "top.naccl.service.FriendService.getFriendList(  )",
+            "top.naccl.controller.admin.FriendAdminController.updateFriend( top friend )",
+            "top.naccl.controller.FriendController.friends(  )",
+            "top.naccl.controller.admin.FriendAdminController.updatePublished( Long id, Boolean published )",
+            "top.naccl.service.impl.FriendServiceImpl.saveFriend( Friend friend )",
+            "top.naccl.mapper.FriendMapper.updateViewsByNickname( String nickname )",
+            "top.naccl.service.FriendService.deleteFriend( Long id )",
+            "top.naccl.service.impl.FriendServiceImpl.getFriendVOList(  )",
+            "top.naccl.service.impl.FriendServiceImpl.deleteFriend( Long id )",
+            "top.naccl.service.impl.FriendServiceImpl.updateViewsByNickname( String nickname )",
+            "top.naccl.mapper.FriendMapper.deleteFriend( Long id )",
+            "top.naccl.service.FriendService.updateViewsByNickname( String nickname )",
+            "top.naccl.service.impl.FriendServiceImpl.getFriendList(  )",
+            "top.naccl.controller.admin.FriendAdminController.friends( Integer pageNum, Integer pageSize )",
+            "top.naccl.service.impl.FriendServiceImpl.updateFriend( top friend )",
+            "top.naccl.mapper.FriendMapper.updateFriendPublishedById( Long id, Boolean published )",
+            "top.naccl.mapper.FriendMapper.saveFriend( Friend friend )",
+            "top.naccl.controller.FriendController.addViews( String nickname )",
+            "top.naccl.controller.admin.FriendAdminController.saveFriend( Friend friend )",
+            "top.naccl.service.FriendService.getFriendVOList(  )",
+            "top.naccl.controller.admin.FriendAdminController.deleteFriend( Long id )"
+          ]
+        },
+        {
+          "id": 209,
+          "issue": "后台管理-完成博客删除功能(https://github.com/Naccl/NBlog/commit/bfdac91e381f30c974871f00adfcbde666c7ccc7)",
+          "description": "Backend Management - Complete Blog Deletion Function",
+          "methods": [
+            "top.naccl.service.BlogService.deleteBlogById( Long id )",
+            "top.naccl.mapper.BlogMapper.deleteBlogById( Long id )",
+            "top.naccl.service.impl.BlogServiceImpl.deleteBlogById( Long id )"
+          ]
+        },
+        {
+          "id": 210,
+          "issue": "后台管理-完成标签增删改查(https://github.com/Naccl/NBlog/commit/80bfc5fdac719ca8cfd9f3ea602b82191cb55df6)",
+          "description": "Backend Management - Complete CRUD operations for tags",
+          "methods": [
+            "top.naccl.service.BlogService.countBlogByTagId( Long tagId )",
+            "top.naccl.mapper.TagMapper.deleteTagById( Long id )",
+            "top.naccl.mapper.TagMapper.updateTag( Tag tag )",
+            "top.naccl.service.impl.BlogServiceImpl.countBlogByTagId( Long tagId )",
+            "top.naccl.service.impl.TagServiceImpl.updateTag( Tag tag )",
+            "top.naccl.mapper.BlogMapper.countBlogByTagId( Long tagId )",
+            "top.naccl.service.TagService.deleteTagById( Long id )",
+            "top.naccl.service.TagService.updateTag( Tag tag )",
+            "top.naccl.service.impl.TagServiceImpl.deleteTagById( Long id )"
+          ]
+        },
+        {
+          "id": 211,
+          "issue": "后台管理-完成分类增删改查、增加了一些校验规则(https://github.com/Naccl/NBlog/commit/808e79935d41e6f9b705909421ab917a1c2f028f)",
+          "description": "Backend management - completed the addition, deletion, modification, and query of categories, and added some validation rules.",
+          "methods": [
+            "top.naccl.service.impl.CategoryServiceImpl.updateCategory( Category category )",
+            "top.naccl.service.impl.CategoryServiceImpl.getCategoryByName( String name )",
+            "top.naccl.service.impl.BlogServiceImpl.countBlogByCategoryId( Long categoryId )",
+            "top.naccl.util.StringUtils.isEmpty( String str )",
+            "top.naccl.service.CategoryService.getCategoryByName( String name )",
+            "top.naccl.mapper.BlogMapper.countBlogByCategoryId( Long categoryId )",
+            "top.naccl.service.CategoryService.updateCategory( Category category )",
+            "top.naccl.mapper.TagMapper.getTagByName( String name )",
+            "top.naccl.service.TagService.getTagByName( String name )",
+            "top.naccl.mapper.CategoryMapper.updateCategory( Category category )",
+            "top.naccl.service.BlogService.countBlogByCategoryId( Long categoryId )",
+            "top.naccl.service.CategoryService.deleteCategoryById( Long id )",
+            "top.naccl.mapper.CategoryMapper.deleteCategoryById( Long id )",
+            "top.naccl.service.impl.TagServiceImpl.getTagByName( String name )",
+            "top.naccl.mapper.CategoryMapper.getCategoryByName( String name )",
+            "top.naccl.service.impl.CategoryServiceImpl.deleteCategoryById( Long id )"
+          ]
+        },
+        {
+          "id": 212,
+          "issue": "后台管理-完成评论部分更新操作、递归删除(https://github.com/Naccl/NBlog/commit/788c44c36345fa81d0bedf60536788342d061427)",
+          "description": "Backend management - complete the update operation for comments section, recursive deletion",
+          "methods": [
+            "top.naccl.service.impl.CommentServiceImpl.getAllReplyComments( Long parentCommentId )",
+            "top.naccl.mapper.CommentMapper.updateCommentPublishedById( Long commentId, Boolean published )",
+            "top.naccl.service.impl.CommentServiceImpl.updateCommentPublishedById( Long commentId, Boolean published )",
+            "top.naccl.service.CommentService.updateCommentNoticeById( Long commentId, Boolean notice )",
+            "top.naccl.service.impl.CommentServiceImpl.getListByPageAndParentCommentId( Integer page, Long blogId, Long parentCommentId )",
+            "top.naccl.service.impl.CommentServiceImpl.updateCommentNoticeById( Long commentId, Boolean notice )",
+            "top.naccl.service.CommentService.updateCommentPublishedById( Long commentId, Boolean published )",
+            "top.naccl.service.impl.CommentServiceImpl.deleteCommentById( Long commentId )",
+            "top.naccl.service.impl.CommentServiceImpl.delete( Comment comment )",
+            "top.naccl.service.CommentService.deleteCommentById( Long commentId )",
+            "top.naccl.mapper.CommentMapper.getListByParentCommentId( Long parentCommentId )",
+            "top.naccl.mapper.CommentMapper.deleteCommentById( Long commentId )",
+            "top.naccl.mapper.CommentMapper.updateCommentNoticeById( Long commentId, Boolean notice )"
+          ]
+        },
+        {
+          "id": 213,
+          "issue": "增加异常日志记录(https://github.com/Naccl/NBlog/commit/768c9b5da57786d2abff98da95e8763bd722ddc7)",
+          "description": "Increase abnormal log recording",
+          "methods": [
+            "top.naccl.mapper.ExceptionLogMapper.saveExceptionLog( ExceptionLog log )",
+            "top.naccl.service.impl.ExceptionLogServiceImpl.saveExceptionLog( ExceptionLog log )",
+            "top.naccl.aspect.ExceptionLogAspect.handleLog( JoinPoint joinPoint, Exception e )",
+            "top.naccl.aspect.OperationLogAspect.handleLog( ProceedingJoinPoint joinPoint, OperationLogger operationLogger, int times )",
+            "top.naccl.aspect.ExceptionLogAspect.logPointcut(  )",
+            "top.naccl.aspect.ExceptionLogAspect.logAfterThrowing( JoinPoint joinPoint, Exception e )",
+            "top.naccl.service.ExceptionLogService.saveExceptionLog( ExceptionLog log )",
+            "top.naccl.service.ExceptionLogService.deleteExceptionLogById( Long id )",
+            "top.naccl.util.AopUtils.getRequestParams( JoinPoint joinPoint )",
+            "top.naccl.controller.admin.ExceptionLogController.delete( Long id )",
+            "top.naccl.mapper.ExceptionLogMapper.deleteExceptionLogById( Long id )",
+            "top.naccl.service.impl.ExceptionLogServiceImpl.deleteExceptionLogById( Long id )",
+            "top.naccl.util.StringUtils.getStackTrace( Throwable throwable )"
+          ]
+        },
+        {
+          "id": 214,
+          "issue": "删除博客时同时删除该博客下所有评论、修复设置文章可见性bug(https://github.com/Naccl/NBlog/commit/620ae274eb4f33b67180bd6559b46bb8bca0775e)",
+          "description": "Delete all comments under the blog when deleting the blog, and fix the bug regarding article visibility settings.",
+          "methods": [
+            "top.naccl.service.impl.CommentServiceImpl.deleteCommentsByBlogId( Long blogId )",
+            "top.naccl.mapper.CommentMapper.deleteCommentsByBlogId( Long blogId )",
+            "top.naccl.service.CommentService.deleteCommentsByBlogId( Long blogId )",
+            "top.naccl.controller.admin.BlogAdminController.delete( Long id )"
+          ]
+        },
+        {
+          "id": 215,
+          "issue": "增加文章描述 Markdown 展示，增加 Markdown 自定义拓展(黑幕、遮盖层)(https://github.com/Naccl/NBlog/commit/4d02de1e9af086557d072cf9e032ddad02f6a036)",
+          "description": "Increase article description Markdown display, add Markdown custom extensions (black curtain, overlay layer)",
+          "methods": [
+            "top.naccl.util.markdown.ext.cover.CoverExtension.extend( HtmlRenderer rendererBuilder )",
+            "top.naccl.util.markdown.ext.cover.Cover.getClosingDelimiter(  )",
+            "top.naccl.util.markdown.MarkdownUtils.main( String args )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuHtmlNodeRenderer.render( Node node )",
+            "top.naccl.util.markdown.ext.heimu.HeimuExtension.extend( TextContentRenderer rendererBuilder )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverDelimiterProcessor.getMinLength(  )",
+            "top.naccl.util.markdown.ext.cover.CoverExtension.extend( TextContentRenderer rendererBuilder )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverTextContentNodeRenderer.render( Node node )",
+            "top.naccl.util.markdown.MarkdownUtils.markdownToHtmlExtensions( String markdown )",
+            "top.naccl.util.markdown.ext.heimu.Heimu.getOpeningDelimiter(  )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuHtmlNodeRenderer.renderChildren( Node parent )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverHtmlNodeRenderer.renderChildren( Node parent )",
+            "top.naccl.util.markdown.ext.cover.Cover.getOpeningDelimiter(  )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverHtmlNodeRenderer.render( Node node )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverDelimiterProcessor.getOpeningCharacter(  )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuDelimiterProcessor.getOpeningCharacter(  )",
+            "top.naccl.util.markdown.ext.heimu.HeimuExtension.extend( HtmlRenderer rendererBuilder )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverTextContentNodeRenderer.renderChildren( Node parent )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuTextContentNodeRenderer.render( Node node )",
+            "top.naccl.util.markdown.ext.cover.internal.CoverDelimiterProcessor.getClosingCharacter(  )",
+            "top.naccl.util.markdown.ext.heimu.HeimuExtension.create(  )",
+            "top.naccl.util.markdown.ext.heimu.Heimu.getClosingDelimiter(  )",
+            "top.naccl.util.markdown.MarkdownUtils.setAttributes( Node node, String tagName, Map attributes )",
+            "top.naccl.util.markdown.ext.heimu.HeimuExtension.extend( Parser parserBuilder )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuDelimiterProcessor.getClosingCharacter(  )",
+            "top.naccl.util.markdown.ext.cover.CoverExtension.create(  )",
+            "top.naccl.util.markdown.MarkdownUtils.markdownToHtml( String markdown )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuTextContentNodeRenderer.renderChildren( Node parent )",
+            "top.naccl.util.markdown.ext.heimu.internal.HeimuDelimiterProcessor.getMinLength(  )",
+            "top.naccl.util.markdown.ext.cover.CoverExtension.extend( Parser parserBuilder )"
+          ]
+        },
+        {
+          "id": 216,
+          "issue": "fix: replyComments will also be hide with parentComment(https://github.com/Naccl/NBlog/commit/404882597f964f7b66907c90ec72b7352ab6f55c)",
+          "description": "adhesive_bandage: fix: replyComments will also be hidden with parentComment",
+          "methods": [
+            "top.naccl.service.impl.CommentServiceImpl.updateCommentPublishedById( Long commentId, Boolean published )",
+            "top.naccl.service.impl.CommentServiceImpl.hideComment( Comment comment )"
+          ]
+        },
+        {
+          "id": 217,
+          "issue": "增加操作日志记录(https://github.com/Naccl/NBlog/commit/37dc6ffc8506df471f99df7a10b93a5590fd5afc)",
+          "description": "Increase operation log recording",
+          "methods": [
+            "top.naccl.aspect.OperationLogAspect.handleLog( ProceedingJoinPoint joinPoint, OperationLogger operationLogger, int times )",
+            "top.naccl.service.OperationLogService.saveOperationLog( OperationLog log )",
+            "top.naccl.aspect.OperationLogAspect.logPointcut( OperationLogger operationLogger )",
+            "top.naccl.util.UserAgentUtils.parseOsAndBrowser( String userAgent )",
+            "top.naccl.util.AopUtils.getRequestParams( JoinPoint joinPoint )",
+            "top.naccl.service.impl.OperationLogServiceImpl.saveOperationLog( OperationLog log )",
+            "top.naccl.util.IpAddressUtils.getCityInfo( String ip )",
+            "top.naccl.aspect.OperationLogAspect.logAround( ProceedingJoinPoint joinPoint, OperationLogger operationLogger )",
+            "top.naccl.controller.admin.OperationLogController.delete( Long id )",
+            "top.naccl.service.OperationLogService.deleteOperationLogById( Long id )",
+            "top.naccl.mapper.OperationLogMapper.saveOperationLog( OperationLog log )",
+            "top.naccl.util.StringUtils.substring( String str, int start, int end )",
+            "top.naccl.service.impl.OperationLogServiceImpl.deleteOperationLogById( Long id )",
+            "top.naccl.mapper.OperationLogMapper.deleteOperationLogById( Long id )",
+            "top.naccl.util.AopUtils.isFilterObject( Object o )"
+          ]
+        },
+        {
+          "id": 218,
+          "issue": "增加Redis，配置Redis JSON序列化方式(https://github.com/Naccl/NBlog/commit/2c09ca6f72dfacbecd2e327021b15cdbcfaadca7)",
+          "description": "Increase Redis, configure Redis JSON serialization method.",
+          "methods": [
+            "top.naccl.config.RedisSerializeConfig.jsonRedisTemplate( RedisConnectionFactory redisConnectionFactory )"
+          ]
+        },
+        {
+          "id": 219,
+          "issue": "完成后台管理关于我页面(https://github.com/Naccl/NBlog/commit/2778bee078ff0b2a9023a3addaeeddb4a29abe3b)",
+          "description": "Complete the backend management 'About Me' page.",
+          "methods": [
+            "top.naccl.controller.admin.AboutAdminController.updateAbout( Map map )",
+            "top.naccl.mapper.AboutMapper.updateAbout( String nameEn, String value )",
+            "top.naccl.service.AboutService.getAboutSetting(  )",
+            "top.naccl.service.impl.AboutServiceImpl.getAboutSetting(  )",
+            "top.naccl.controller.admin.AboutAdminController.about(  )"
+          ]
+        },
+        {
+          "id": 220,
+          "issue": "后台管理-完成推荐、发布状态更新操作(https://github.com/Naccl/NBlog/commit/2610f33c10aad8d1e5de773098401a9ea22d69ca)",
+          "description": "Backend management - complete recommendation and publish status update operations.",
+          "methods": [
+            "top.naccl.mapper.BlogMapper.updateBlogRecommendById( Long blogId, Boolean recommend )"
+          ]
+        },
+        {
+          "id": 221,
+          "issue": "修改最新博客和随机博客规则(https://github.com/Naccl/NBlog/commit/09ea8b9ba8571d9b569365c9a63f2f2aa2ebc2a5)",
+          "description": "Modify the latest blog and random blog rules.",
+          "methods": [
+            "top.naccl.service.impl.BlogServiceImpl.getNewBlogListByIsPublished(  )",
+            "top.naccl.mapper.BlogMapper.getNewBlogListByIsPublished(  )",
+            "top.naccl.service.BlogService.getRandomBlogListByLimitNumAndIsPublishedAndIsRecommend(  )",
+            "top.naccl.service.impl.BlogServiceImpl.getRandomBlogListByLimitNumAndIsPublishedAndIsRecommend(  )",
+            "top.naccl.controller.IndexController.site(  )",
+            "top.naccl.service.BlogService.getNewBlogListByIsPublished(  )",
+            "top.naccl.mapper.BlogMapper.getRandomBlogListByLimitNumAndIsPublishedAndIsRecommend( Integer limitNum )"
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+
+

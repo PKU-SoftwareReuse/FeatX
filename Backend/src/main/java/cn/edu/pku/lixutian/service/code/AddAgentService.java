@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.Executors;
 
 @Service
-public class ModifyAgentService extends AgentService{
+public class AddAgentService extends AgentService {
 
     private static class AdditionalFile {
         public String filename;
@@ -113,15 +113,15 @@ public class ModifyAgentService extends AgentService{
         return javaStr;
     }
 
-    public SseEmitter runPipeline(String changeRequest, String originalFeatureDesc, String originalCode, String fileList) {
+    public SseEmitter runPipeline(String changeRequest, String originalCode, String fileList) {
         SseEmitter emitter = new SseEmitter(0L); // 不超时
 
         // 在独立线程运行，避免阻塞
         Executors.newSingleThreadExecutor().submit(() -> {
             try {
                 // ===== Agent1 =====
-                emitter.send(SseEmitter.event().data(encode("# === Agent1: Information requirement analysis ===\n")));
-                String agent1Prompt = buildAgent1Prompt(changeRequest, originalFeatureDesc, originalCode, fileList);
+                emitter.send(SseEmitter.event().data(encode("# === Stage I: Information Requirement Analysis ===\n")));
+                String agent1Prompt = buildAgent1Prompt(changeRequest, originalCode, fileList);
 
                 String agent1Result = llmClient.streamGenerateWithPrompt(agent1Prompt, emitter);
 
@@ -140,9 +140,9 @@ public class ModifyAgentService extends AgentService{
 
 
                 // ===== Agent2 =====
-                emitter.send(SseEmitter.event().data(encode("\n# === Agent2: Modification plan ===\n")));
+                emitter.send(SseEmitter.event().data(encode("\n# === Stage II: Modification Planning ===\n")));
 
-                String agent2Prompt = buildAgent2Prompt(changeRequest, originalFeatureDesc, originalCode, extraInfo);
+                String agent2Prompt = buildAgent2Prompt(changeRequest, originalCode, extraInfo);
 
                 String agent2Result = llmClient.streamGenerateWithPrompt(agent2Prompt, emitter);
 
@@ -151,13 +151,13 @@ public class ModifyAgentService extends AgentService{
                 // ===== Agent3 =====
                 Map<String, String> map = new HashMap<>();
                 for (ModifiedFile file : agent2ParsedResult.modifiedFileList) {
-                    emitter.send(SseEmitter.event().data(encode("\n# === Agent3: Modify files " + file.filename + " ===\n")));
+                    emitter.send(SseEmitter.event().data(encode("\n# === Stage III: Concrete File Modification " + file.filename + " ===\n")));
                     String fileContent = ListFileHelper.getFileContent(ProjectState.getInstance().getSrcPath(), file.filename);
                     String plan = "";
                     plan += "filename: " + file.filename + "\n";
                     plan += "modificationPlan: " + file.plan + "\n";
                     plan += "modificationNote: " + file.note + "\n";
-                    String agent3Prompt = buildAgent3Prompt(changeRequest, originalFeatureDesc, plan, fileContent);
+                    String agent3Prompt = buildAgent3Prompt(changeRequest, plan, fileContent);
 
                     String agent3Result = llmClient.streamGenerateWithPrompt(agent3Prompt, emitter);
                     map.put(file.filename, parseAgent3Result(agent3Result));
@@ -185,31 +185,27 @@ public class ModifyAgentService extends AgentService{
         return Base64.getEncoder().encodeToString(input.getBytes(StandardCharsets.UTF_8));
     }
 
-    private String buildAgent1Prompt(String changeDesc, String originalDesc, String code, String fileList) {
+    private String buildAgent1Prompt(String changeDesc, String code, String fileList) {
         String promptTemplate = """
-                你是Agent1，负责分析功能修改相关的信息需求。
+                你是Agent1，负责分析新增功能相关的信息需求。
                 
                 你将收到以下输入：
-                1. 需求变更描述（变更需求）
+                1. 新的功能需求描述
                 \"\"\"
                 %s
                 \"\"\"
-                2. 原功能描述（简洁清楚的功能说明）
+                2. 同一功能模块下其他原有功能对应的核心代码列表（关键代码片段）
                 \"\"\"
                 %s
                 \"\"\"
-                3. 原功能对应的核心代码列表（关键代码片段）
-                \"\"\"
-                %s
-                \"\"\"
-                4. 软件项目的完整文件列表（文件名、路径）
+                3. 软件项目的完整文件列表（文件名、路径）
                 \"\"\"
                 %s
                 \"\"\"
                 
                 你的任务是：
-                - 理解变更需求与当前功能代码
-                - 判断现有信息是否足够完成后续修改规划
+                - 理解新增功能需求与其他功能下的相关代码
+                - 判断现有信息是否足够完成后续新增功能代码的编写
                 - 如果不够，明确列出需要额外获取的文件路径列表，并说明原因
                 - 如果已有信息充分，明确回复“不需要额外文件”
                 
@@ -224,34 +220,30 @@ public class ModifyAgentService extends AgentService{
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, originalDesc, code, fileList);
+        return String.format(promptTemplate, changeDesc, code, fileList);
     }
 
-    private String buildAgent2Prompt(String changeDesc, String originalDesc, String code, String extraInfo) {
+    private String buildAgent2Prompt(String changeDesc, String code, String extraInfo) {
         String promptTemplate = """
-                你是Agent2，负责基于需求变更及现有代码制定详细的修改方案。
+                你是Agent2，负责基于新的功能需求及现有代码制定详细的修改方案。
                 
                 你将收到以下输入：
-                1. 需求变更描述（变更需求）
+                1. 新的功能需求描述
                 \"\"\"
                 %s
                 \"\"\"
-                2. 原功能描述（简洁清楚的功能说明）
+                2. 同一功能模块下其他原有功能对应的核心代码列表（关键代码片段）
                 \"\"\"
                 %s
                 \"\"\"
-                3. 原功能对应的核心代码列表（关键代码片段）
-                \"\"\"
-                %s
-                \"\"\"
-                4. 软件项目中一些额外的参考（代码和理由）
+                3. 软件项目中一些额外的参考（代码和理由）
                 \"\"\"
                 %s
                 \"\"\"
                 
                 你的任务是：
                 - 全面分析需求变更的影响范围
-                - 制定分步详细的修改方案
+                - 制定分步详细的修改或新增方案
                 - 指出修改过程中的关键重难点或潜在风险
                 - 明确列出需要修改的文件路径列表，确保列表只包含必须改动的文件
                 - 如果你认为不需要任何更改，请在json中返回空列表，不要给任何多余字段
@@ -271,27 +263,23 @@ public class ModifyAgentService extends AgentService{
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, originalDesc, code, extraInfo);
+        return String.format(promptTemplate, changeDesc, code, extraInfo);
     }
 
-    private String buildAgent3Prompt(String changeDesc, String originalDesc, String plan, String fileContent) {
+    private String buildAgent3Prompt(String changeDesc, String plan, String fileContent) {
         String promptTemplate = """
                 你是Agent3，负责具体文件级别的修改。
                 
                 你将收到以下输入：
-                1. 需求变更描述（变更需求）
+                1. 新的功能需求描述
                 \"\"\"
                 %s
                 \"\"\"
-                2. 原功能描述（简洁清楚的功能说明）
+                2. 待修改文件名称和修改意见
                 \"\"\"
                 %s
                 \"\"\"
-                3. 待修改文件名称和修改意见
-                \"\"\"
-                %s
-                \"\"\"
-                4. 待修改文件的完整原始内容（确保完整且格式正确）
+                3. 待修改文件的完整原始内容（确保完整且格式正确）
                 \"\"\"
                 %s
                 \"\"\"
@@ -311,6 +299,6 @@ public class ModifyAgentService extends AgentService{
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, originalDesc, plan, fileContent);
+        return String.format(promptTemplate, changeDesc, plan, fileContent);
     }
 }
