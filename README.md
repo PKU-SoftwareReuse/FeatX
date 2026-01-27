@@ -20,7 +20,8 @@
         <img alt="License" src="https://img.shields.io/badge/License-MIT-blue">
     </a>
 </p>
-------
+
+---
 
 Code and data for the following works: 
 
