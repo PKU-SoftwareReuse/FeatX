@@ -19,6 +19,7 @@
     align-items: center;   /* 垂直居中 */
     position: relative;    /* 为右侧图标定位做准备 */
     justify-content: center; /* 文字居中 */
+    font-size: 26px;
 }
 
 .main_area {

@@ -76,3 +76,4 @@ TRUNCATE TABLE modules;
 SET FOREIGN_KEY_CHECKS=1;
 
 use lotm;
+

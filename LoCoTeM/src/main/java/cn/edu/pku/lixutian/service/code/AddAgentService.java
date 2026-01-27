@@ -120,7 +120,7 @@ public class AddAgentService extends AgentService {
         Executors.newSingleThreadExecutor().submit(() -> {
             try {
                 // ===== Agent1 =====
-                emitter.send(SseEmitter.event().data(encode("# === Agent1: Information requirement analysis ===\n")));
+                emitter.send(SseEmitter.event().data(encode("# === Stage I: Information Requirement Analysis ===\n")));
                 String agent1Prompt = buildAgent1Prompt(changeRequest, originalCode, fileList);
 
                 String agent1Result = llmClient.streamGenerateWithPrompt(agent1Prompt, emitter);
@@ -140,7 +140,7 @@ public class AddAgentService extends AgentService {
 
 
                 // ===== Agent2 =====
-                emitter.send(SseEmitter.event().data(encode("\n# === Agent2: Modification plan ===\n")));
+                emitter.send(SseEmitter.event().data(encode("\n# === Stage II: Modification Planning ===\n")));
 
                 String agent2Prompt = buildAgent2Prompt(changeRequest, originalCode, extraInfo);
 
@@ -151,7 +151,7 @@ public class AddAgentService extends AgentService {
                 // ===== Agent3 =====
                 Map<String, String> map = new HashMap<>();
                 for (ModifiedFile file : agent2ParsedResult.modifiedFileList) {
-                    emitter.send(SseEmitter.event().data(encode("\n# === Agent3: Modify files " + file.filename + " ===\n")));
+                    emitter.send(SseEmitter.event().data(encode("\n# === Stage III: Concrete File Modification " + file.filename + " ===\n")));
                     String fileContent = ListFileHelper.getFileContent(ProjectState.getInstance().getSrcPath(), file.filename);
                     String plan = "";
                     plan += "filename: " + file.filename + "\n";

@@ -67,7 +67,7 @@ const WelcomePage = () => {
         <div className={styles.welcomePage}>
 
             {/* LOGO */}
-            <h1 className={styles.logo1}>A Multi-View Interface for Feature-Oriented Software Modification</h1>
+            <h1 className={styles.logo1}>A Feature-Oriented Interface for LLM Programming</h1>
             <h1 className={styles.logo2}>FeatX: Editing Software by Editing Features</h1>
 
 
@@ -148,10 +148,10 @@ const WelcomePage = () => {
             {/* 介绍文本 */}
             <div className={styles.introText}>
                 <p>FeatX provides an integrated environment that supports editing software by editing features. Its workflow can be described as follows:</p>
-                <p>1. <strong>Repository Selection.</strong> The user either uploads a new software repository or selects an existing one.</p>
-                <p>2. <strong>Feature-Level Editing.</strong> Within the Feature View, the user performs CRUD (Create, Read, Update, Delete) operations on the software at the feature level.</p>
-                <p>3. <strong>CodeMap Exploration.</strong> The user inspects the CodeMap corresponding to the selected feature, which presents the underlying implementation artifacts related to that feature.</p>
-                <p>4. <strong>Modification Confirmation.</strong> The user reviews the class-level code modifications and applies the confirmed changes back to the repository.</p>
+                <p>1. <strong>Feature Summarization.</strong> Constructs a hierarchical feature list to organize repository code into features and epics.</p>
+                <p>2. <strong>CodeMap Construction.</strong> Builds a comprehensive CodeMap that captures the full implementation context of each feature.</p>
+                <p>3. <strong>CodeAgent Generation.</strong> A three-stage CodeAgent pipeline generates consistent file-level modifications following established software engineering workflows.</p>
+                <p>4. <strong>Diff Confirmation.</strong> The user reviews the code modifications and applies the confirmed changes back to the repository.</p>
             </div>
         </div>
 
