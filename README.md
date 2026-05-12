@@ -35,7 +35,8 @@ Given *an existing software repository* to be modified,
 FeatX first summarizes the features of the repository, and then constructs a comprehensive contextual CodeMap. 
 Based on the context, FeatX leverages an LLM to generate code for new feature requirements, highlights the resulting code changes for confirmation, and finally produces *a modified repository*.
 
-<img src="/docs/asserts/FeatX.jpg">
+<img src="/docs/asserts/FeatX_approach.png">
+<img src="/docs/asserts/FeatX_Pannels.png">
 
 ## 🚀 Set Up
 
