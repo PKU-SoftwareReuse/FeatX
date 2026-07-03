@@ -34,7 +34,8 @@ FeatX 是一种面向特性的 LLM 辅助编程交互界面。
 给定一个**已有的软件代码仓库**作为修改对象，FeatX 首先对仓库中的功能（features）进行总结，并构建一个全面的上下文 **CodeMap**。  
 在此基础上，FeatX 利用大语言模型生成满足新功能需求的代码，突出显示由此产生的代码变更以供用户确认，最终输出**修改后的代码仓库**。
 
-<img src="/docs/asserts/FeatX.jpg">
+<img src="/docs/asserts/FeatX_approach.png">
+<img src="/docs/asserts/FeatX_Pannels.png">
 
 ## 🚀 系统部署
 
