@@ -33,7 +33,13 @@ case-study seed:
 The recommended path requires Docker with Docker Compose v2 and internet access
 for first-time image/dependency downloads. The Compose configuration starts the
 MySQL, backend, and frontend services. A machine with at least 8 GB RAM and 15
-GB free disk space is recommended.
+GB free disk space is recommended. In this path, configuration is supplied by
+`.env.example`/`.env` and `docker-compose.yml`; MySQL runs inside Docker.
+
+Manual deployment is not recommended for artifact evaluation, but it is possible
+with host-installed MySQL 8, Java 17, Node.js 20, Python 3.10, and the same LLM
+configuration. Manual deployment uses the backend and RepoSummary configuration
+files instead of the top-level Docker `.env`.
 
 Full LLM-backed workflows require an OpenAI-compatible chat-completions API.
 The artifact is configured for DeepSeek-compatible endpoints by default, but API

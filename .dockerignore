@@ -17,8 +17,6 @@ Backend/Untitled-1.sh
 
 *.log
 .env
-.env.migration
-migration_artifacts
 Frontend/.env
 Backend/src/main/resources/application-local.properties
 RepoSummary/.env

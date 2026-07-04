@@ -10,8 +10,6 @@ OUT_FILE="${1:-$PARENT_DIR/FeatX_ASE26_artifact_$DATE_STAMP.tar.gz}"
 tar \
   --exclude="$REPO_NAME/.git" \
   --exclude="$REPO_NAME/.env" \
-  --exclude="$REPO_NAME/.env.migration" \
-  --exclude="$REPO_NAME/migration_artifacts" \
   --exclude="$REPO_NAME/out" \
   --exclude="$REPO_NAME/.run" \
   --exclude="$REPO_NAME/gdshow" \

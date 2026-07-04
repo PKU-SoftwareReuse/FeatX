@@ -40,13 +40,25 @@ Based on the context, FeatX leverages an LLM to generate code for new feature re
 
 ## 🚀 Set Up
 
-This section describes how to deploy the FeatX system, including server-side environment preparation, backend and frontend initialization, and service exposure. The setup assumes a Linux (Ubuntu 22.04) or Windows 11 environment and a basic familiarity with command-line operations.
+This section gives two deployment paths. Docker Compose is the recommended path
+for artifact evaluation and normal local use. Manual deployment is available for
+development or customized environments, but is not recommended for artifact
+evaluation.
 
-### 0\. Docker Compose Quick Start
+### 1. Docker Compose Deployment (Recommended)
 
-The recommended Artifact Evaluation path is Docker Compose. It starts MySQL,
-the Spring Boot backend, the RepoSummary Python environment, and an Nginx-served
-React frontend.
+Requirements:
+
+*   Docker with Compose v2
+*   Internet access for the first build
+*   A CPU-only x86_64 Linux machine is recommended; no GPU is required
+*   8-16 GiB RAM and at least 20 GB free disk space are recommended
+
+Configuration for this path is in `.env.example` and `docker-compose.yml`.
+Copy `.env.example` to `.env` before starting the stack. The MySQL service runs
+inside Docker Compose, so a host-installed MySQL server is not required.
+
+Start FeatX:
 
 ```bash
 cp .env.example .env
@@ -54,8 +66,10 @@ docker compose build
 docker compose up -d
 ```
 
-The first build downloads Java, Node, Python, PyTorch CPU, and NLP dependencies,
-so it can take several minutes and requires multiple GB of disk space.
+The Compose configuration builds and starts three services: MySQL, the Spring
+Boot backend with the RepoSummary Python environment, and an Nginx-served React
+frontend. The first build downloads Java, Node, Python, PyTorch CPU, and NLP
+dependencies, so it can take several minutes.
 
 After startup, verify the deployment:
 
@@ -68,7 +82,7 @@ curl -i http://localhost:3000/api/connect/test
 
 Open the UI at [http://localhost:3000/](http://localhost:3000/).
 
-If ports `8080` or `3000` are already in use, override only the host ports:
+If ports `8080` or `3000` are already in use, override the host ports:
 
 ```bash
 BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
@@ -77,8 +91,14 @@ BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
 Then use [http://localhost:23000/](http://localhost:23000/) and
 `http://localhost:28080/connect/test`.
 
-LLM-backed feature extraction and code evolution require API credentials. Put
-them in `.env` before running the full workflow:
+The Docker package includes seeded NBlog data and its matching source snapshot:
+
+*   `datasets/mysql/featx_seed.sql` initializes the MySQL feature map.
+*   `datasets/repos/12` initializes `/workspace/repos/12` in the backend
+    container.
+
+The seeded demo and smoke checks do not require an LLM API key. Full
+LLM-backed feature extraction and code evolution require credentials in `.env`:
 
 ```env
 LLM_API_URL=https://api.deepseek.com/chat/completions
@@ -90,180 +110,64 @@ OPENAI_API_KEY=<reviewer-api-key>
 OPENAI_API_MODEL=deepseek-v4-pro
 ```
 
-Stop the stack with:
+Stop the stack:
 
 ```bash
 docker compose down
 ```
 
-Remove the MySQL and repository-cache volumes only when you want a fresh state:
+Remove the persistent MySQL and repository-cache volumes only when you want to
+reinitialize the seeded demo:
 
 ```bash
 docker compose down -v
 ```
 
-### 0.1 Migrating Existing MySQL Data
+### 2. Manual Deployment (Not Recommended for Artifact Evaluation)
 
-If you already have FeatX data in another MySQL instance, migrate only the
-artifact tables used by the tool:
+Manual deployment runs each component outside Docker Compose. Use it only when
+you need to customize the runtime environment.
+
+Requirements:
+
+*   Java JDK 17 and Maven via `Backend/mvnw`
+*   Node.js 20.x and npm 10.x
+*   Python 3.10 and dependencies from `RepoSummary/requirements.txt`
+*   MySQL 8 initialized with
+    `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`
+*   An OpenAI-compatible LLM API endpoint for full workflows
+*   Nginx or another static server if serving the production frontend build
+
+Configuration files:
+
+*   `Backend/src/main/resources/application.properties` configures repository
+    cache path, MySQL, and Java backend LLM settings. You can also start from
+    `Backend/src/main/resources/example.properties`.
+*   `RepoSummary/.env` configures the same repository cache path, MySQL
+    connection, and Python-side LLM settings.
+*   The backend and RepoSummary database/repository-cache settings must point to
+    the same MySQL database and repository directory.
+*   The top-level `.env` file is for Docker Compose. For manual deployment, set
+    the equivalent values in the component-specific files above.
+
+Build and start the backend:
 
 ```bash
-cp .env.migration.example .env.migration
-# Fill SOURCE_MYSQL_* in .env.migration.
-scripts/migrate_mysql_data.sh inspect
-scripts/migrate_mysql_data.sh import
+cd Backend
+./mvnw -DskipTests package
+java -jar target/*.jar
 ```
 
-The script migrates `project_info`, `modules`, `features`, `code_map`, and
-`graph_edge`. It first compares source and target columns, backs up the current
-Docker MySQL tables into `migration_artifacts/`, then imports the source data.
-Do not include `.env.migration` or `migration_artifacts/` in the artifact
-archive.
-
-If your machine uses a Docker wrapper or context, set `DOCKER_BIN` in
-`.env.migration` or on the command line, for example:
+Build the frontend:
 
 ```bash
-DOCKER_BIN="docker --context default" scripts/migrate_mysql_data.sh inspect
+cd Frontend
+npm install
+npm run build
 ```
 
-The artifact Docker image also includes a curated seed dump at
-`datasets/mysql/featx_seed.sql`. On a fresh MySQL volume, Docker imports this
-data automatically and provides the NBlog case-study feature map used for quick
-inspection in the UI. Existing volumes are not overwritten; run
-`docker compose down -v` before startup if you need to reinitialize from the
-seed.
-
-The matching NBlog repository snapshot is included at `datasets/repos/12` and is
-copied into the backend image at `/workspace/repos/12`. The numeric directory
-matches `project_info.id = 12` in the seeded MySQL data.
-
-### 1\. System Requirements
-
-Ensure the following dependencies are installed before deployment:
-
-For the Docker Compose path:
-
-*   **Docker** with Docker Compose v2
-*   **Internet access** for first-time dependency and image downloads
-*   The Compose configuration starts the MySQL, backend, and frontend services.
-
-For manual deployment:
-
-*   **Operating System**: Ubuntu 22.04 or Windows 11
-*   **Java**: JDK 17 (for the Spring Boot backend)
-*   **Maven**: 3.9.9 (dependency and build management)
-*   **Python**: 3.10 (for the feature summarization module)
-*   **Database**: MySQL 8
-*   **Node.js**: v20.18.2 (for the React frontend)
-*   **npm**: 10.8.2 (frontend dependency management)
-*   **Nginx**: 1.18.0 (reverse proxy and static file serving)
-
-### 2\. Backend Service Setup
-
-#### 2.1 Configuration
-
-Create an `application.properties` file for the Java backend (based on the template in the repository) and customize the following fields:
-
-```properties
-# FeatX Configuration
-ltm.repo_path=<absolute path to an empty directory used as repository cache>
-
-# MySQL Configuration
-spring.datasource.url=jdbc:mysql://<host>:<port>/<database>
-spring.datasource.username=<username>
-spring.datasource.password=<password>
-
-# LLM Configuration
-llm.api.url=https://<llm-provider-api>/chat/completions
-llm.api.key=<api-key>
-llm.api.model=<model-name>
-```
-
-In parallel, configure the Python-based feature summarization module by creating a `.env` file in its directory:
-
-```env
-# Must be consistent with application.properties
-LOTM_REPO_PATH=<same cache directory as above>
-DB_HOST=<host>
-DB_PORT=<port>
-DB_NAME=<database>
-DB_USER=<username>
-DB_PASSWORD=<password>
-
-# LLM settings (can differ from backend agent)
-OPENAI_BASE_URL=https://<llm-provider-api>
-OPENAI_API_KEY=<api-key>
-OPENAI_API_MODEL=<model-name>
-```
-
-> **Note:** All non-LLM configurations must remain consistent between the Java backend and Python module to ensure correct orchestration.
-
-#### 2.2 Build and Deployment
-
-1.  Compile the backend (skip if using a prebuilt JAR):
-    ```bash
-    mvn clean package
-    ```
-2.  Inject the customized `application.properties` into the generated JAR  
-    (`BOOT-INF/classes/application.properties`).
-3.  Initialize the database:
-    ```sql
-    CREATE DATABASE lotm;
-    USE lotm;
-    -- Execute schema definitions from /Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql
-    ```
-    Create and authorize a dedicated database user:
-    ```sql
-    CREATE USER '<username>'@'%' IDENTIFIED BY '<password>';
-    GRANT SELECT, INSERT, UPDATE, DELETE ON lotm.* TO '<username>'@'%';
-    ```
-4.  (Optional) Upload the backend JAR and Python module to the server, ensuring they reside in the same parent directory.
-5.  Set up the Python environment:
-    ```bash
-    conda create -n RepoSummary python=3.10
-    conda activate RepoSummary
-    pip install -r requirements.txt
-    ```
-6.  Start the backend service:
-    ```bash
-    nohup java -jar LoTM-0.0.1-SNAPSHOT.jar > FeatX.log 2>&1 &
-    ```
-    Monitor logs:
-    ```bash
-    tail -f FeatX.log
-    ```
-
-### 3\. Frontend Service Setup
-
-1.  Build the React frontend:
-    ```bash
-    npm run build
-    ```
-2.  (Optional) Deploy the generated `build/` directory to the server.
-3.  Configure Nginx as a reverse proxy and static file server:
-
-```nginx
-server {
-    listen 3000;
-    server_name yourdomain.com;
-
-    root /path/to/frontend/build;
-    index index.html;
-
-    location /api/ {
-        proxy_pass http://localhost:8080/;
-    }
-
-    location / {
-        try_files $uri /index.html;
-    }
-}
-```
-
-Restart Nginx after configuration. The FeatX frontend will then be accessible via port `3000`, with API requests transparently forwarded to the backend service.
-
-Once all components are running, FeatX is ready for use.
+Serve `Frontend/build/` with Nginx or another static file server, and proxy
+frontend API requests to the backend at `http://localhost:8080/`.
 
 ## 🧪 Artifact Evaluation
 

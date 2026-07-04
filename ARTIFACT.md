@@ -46,6 +46,12 @@ This is the recommended path for ASE Artifact Evaluation.
 The Compose configuration builds and starts the MySQL, backend, and frontend
 containers.
 
+Requirements for this path are Docker with Compose v2, internet access for the
+first build, and sufficient local disk space for the generated images and
+dependency caches. No GPU is required. Configuration for this path is in
+`.env.example` and `docker-compose.yml`; MySQL runs as a Docker service and does
+not need to be installed on the host.
+
 ```bash
 cp .env.example .env
 docker compose build
@@ -111,24 +117,6 @@ The backend image similarly includes the matching source snapshot at
 `/workspace/repos/12`, initialized from `datasets/repos/12` when the
 `featx-repos` volume is empty.
 
-## Optional Data Migration
-
-If existing FeatX MySQL data needs to be included in a private local test
-instance, copy `.env.migration.example` to `.env.migration`, fill in the source
-MySQL connection, then run:
-
-```bash
-scripts/migrate_mysql_data.sh inspect
-scripts/migrate_mysql_data.sh import
-```
-
-The script migrates only `project_info`, `modules`, `features`, `code_map`, and
-`graph_edge`. It does not migrate credentials or unrelated operational tables.
-Generated backups and dumps are written under `migration_artifacts/` and should
-not be submitted unless they are intentionally curated as artifact data.
-If the local environment uses a Docker wrapper or a named context, set
-`DOCKER_BIN` before running the script.
-
 ## Quick Checks
 
 These checks do not require an LLM API key and are intended to finish quickly on
@@ -186,10 +174,11 @@ network access to download Java dependencies and can take several minutes.
 
 ## Manual Local Deployment
 
-This alternative path is for running the components outside Docker Compose.
-Manual deployment requires MySQL 8, Java 17, Node.js 20, Python 3.10, and an LLM
-API compatible with OpenAI-style chat completions. See `README.md` for detailed
-configuration fields.
+This alternative path is for running the components outside Docker Compose. It
+is not recommended for artifact evaluation because the Docker Compose path is
+the tested package. Manual deployment requires MySQL 8, Java 17, Node.js 20,
+Python 3.10, and an LLM API compatible with OpenAI-style chat completions. See
+`README.md` for detailed configuration fields.
 
 At minimum:
 
@@ -200,6 +189,9 @@ At minimum:
 3. Create `RepoSummary/.env` with the same database and repository-cache path.
 4. Configure LLM API endpoint, key, and model in both places.
 5. Start the backend and frontend.
+
+The top-level `.env` file is for Docker Compose. Manual deployment should set
+the equivalent values in the backend and RepoSummary configuration files.
 
 The web UI is expected at `http://localhost:3000/`, with the backend listening on
 `http://127.0.0.1:8080`.

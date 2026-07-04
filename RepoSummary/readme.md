@@ -11,8 +11,14 @@
 
 ## 环境要求
 
-- Python >= 3.8
+- Python 3.10
 - pip >= 20.0
+
+## 在 FeatX Artifact 中的使用方式
+
+ASE 工件评估推荐通过仓库顶层的 Docker Compose 启动 FeatX。该路径会在后端容器中安装并调用 RepoSummary，不需要在本目录单独创建 `.env` 或手工安装 Python 依赖。
+
+下面的步骤仅用于手工部署或单独调试 RepoSummary，不推荐作为工件评估的默认路径。
 
 ## 安装依赖
 
@@ -25,9 +31,19 @@ pip install -r requirements.txt
 创建 `.env` 文件，包含以下配置：
 
 ```env
-OPENAI_API_KEY=你的OpenAI API密钥
-OPENAI_BASE_URL=你的OpenAI API基础URL
+LOTM_REPO_PATH=/path/to/featx/repos
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=lotm
+DB_USER=featx
+DB_PASSWORD=featx
+
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=
+OPENAI_API_MODEL=deepseek-v4-pro
 ```
+
+手工部署时，`LOTM_REPO_PATH` 和数据库配置需要与 Java 后端的 `Backend/src/main/resources/application.properties` 保持一致。不要把真实 API Key 提交到仓库中。
 
 ## 使用方法
 

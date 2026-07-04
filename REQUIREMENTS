@@ -11,7 +11,7 @@ Operating system:
 - Windows 11 is supported by the project, but the artifact quick checks are
   written for Linux shell commands.
 
-Required software for Docker Compose deployment:
+Required software for Docker Compose deployment (recommended):
 
 - Docker with Compose v2.
 - Git.
@@ -19,8 +19,11 @@ Required software for Docker Compose deployment:
   prebuilt images are supplied.
 - Docker Compose starts the MySQL, backend, and frontend services from the
   artifact configuration.
+- Configure this path by copying `.env.example` to `.env`. A host-installed
+  MySQL server is not required.
 
-Required software for manual deployment:
+Required software for manual deployment (not recommended for artifact
+evaluation):
 
 - Java JDK 17.
 - Maven via the included `Backend/mvnw` wrapper.
@@ -29,6 +32,9 @@ Required software for manual deployment:
 - MySQL 8.
 - `jq` for dataset inspection commands.
 - Git.
+- Configure this path through
+  `Backend/src/main/resources/application.properties` and `RepoSummary/.env`;
+  both must point to the same database and repository-cache directory.
 
 Python dependencies:
 
@@ -42,6 +48,8 @@ External services:
 - API credentials for the configured LLM provider.
 - LLM credentials are not required for Docker startup and smoke checks, but they
   are required for full feature extraction and code evolution workflows.
+- Keep API keys in local configuration files or reviewer-only submission notes;
+  do not commit them to the artifact repository.
 
 Optional software:
 

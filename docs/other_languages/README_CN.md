@@ -39,126 +39,110 @@ FeatX 是一种面向特性的 LLM 辅助编程交互界面。
 
 ## 🚀 系统部署
 
-本节介绍 FeatX 系统的部署流程，包括服务器端环境准备、后端与前端的初始化以及服务暴露方式。部署过程假设使用 Linux（Ubuntu 22.04）或 Windows 11 操作系统，并具备基本的命令行操作经验。
+本节提供两种部署方式。ASE 工件评估和普通本地试用推荐使用 Docker Compose；手工部署仅适合开发或定制环境，不推荐作为评审路径。
 
-### 1\. 系统环境要求
+### 1. Docker Compose 部署（推荐）
 
-在部署前，请确保已安装以下依赖环境：
+要求：
 
-*   **操作系统**：Ubuntu 22.04 或 Windows 11
-*   **Java**：JDK 17（用于 Spring Boot 后端）
-*   **Maven**：3.9.9（依赖管理与构建工具）
-*   **Python**：3.10（用于特性总结模块）
-*   **数据库**：MySQL 8
-*   **Node.js**：v20.18.2（用于 React 前端）
-*   **npm**：10.8.2（前端依赖管理）
-*   **Nginx**：1.18.0（反向代理与静态资源服务）
+*   Docker 与 Compose v2
+*   首次构建需要联网下载依赖
+*   推荐使用 x86_64 Linux CPU 环境；不需要 GPU
+*   推荐 8-16 GiB 内存和至少 20 GB 可用磁盘空间
 
-### 2\. 后端服务部署
+此路径的配置由 `.env.example` 和 `docker-compose.yml` 管理。执行以下命令启动 FeatX：
 
-#### 2.1 配置说明
-
-为 Java 后端创建 `application.properties` 配置文件（可基于仓库中提供的模板），并根据实际环境修改以下配置项：
-
-```properties
-# FeatX 配置
-ltm.repo_path=<用于仓库缓存的空目录的绝对路径>
-
-# MySQL 配置
-spring.datasource.url=jdbc:mysql://<host>:<port>/<database>
-spring.datasource.username=<username>
-spring.datasource.password=<password>
-
-# LLM 配置
-llm.api.url=https://<llm-provider-api>/chat/completions
-llm.api.key=<api-key>
-llm.api.model=<model-name>
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
 ```
 
-同时，在 Python 实现的特性总结模块目录下创建 `.env` 文件，配置如下内容：
+Docker Compose 会启动 MySQL、Spring Boot 后端（包含 RepoSummary Python 环境）以及 Nginx 前端。MySQL 在容器内运行，不需要在宿主机上安装 MySQL。
+
+启动后可执行以下检查：
+
+```bash
+docker compose ps
+curl -i http://localhost:8080/connect/test
+curl -i http://localhost:3000/
+curl -i http://localhost:3000/api/connect/test
+```
+
+然后在浏览器访问 [http://localhost:3000/](http://localhost:3000/)。
+
+如果 `8080` 或 `3000` 端口已被占用，可以覆盖宿主机端口：
+
+```bash
+BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
+```
+
+Docker 包中已经包含 NBlog 种子数据和对应源代码快照：
+
+*   `datasets/mysql/featx_seed.sql` 初始化 MySQL 特性映射数据。
+*   `datasets/repos/12` 初始化后端容器中的 `/workspace/repos/12`。
+
+种子数据查看和 smoke checks 不需要 LLM API Key。完整的 LLM 特性抽取与代码演化流程需要在 `.env` 中配置凭据：
 
 ```env
-# 必须与 application.properties 保持一致
-LOTM_REPO_PATH=<与后端相同的仓库缓存目录>
-DB_HOST=<host>
-DB_PORT=<port>
-DB_NAME=<database>
-DB_USER=<username>
-DB_PASSWORD=<password>
+LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_KEY=<reviewer-api-key>
+LLM_API_MODEL=deepseek-v4-pro
 
-# LLM 配置（可与后端 agent 使用不同模型）
-OPENAI_BASE_URL=https://<llm-provider-api>
-OPENAI_API_KEY=<api-key>
-OPENAI_API_MODEL=<model-name>
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=<reviewer-api-key>
+OPENAI_API_MODEL=deepseek-v4-pro
 ```
 
-> **注意：** 除 LLM 相关配置外，Java 后端与 Python 模块中的所有其他配置必须保持一致，以确保系统能够正确协同工作。
+停止服务：
 
-#### 2.2 构建与启动
-
-1.  编译后端代码（如使用预编译 JAR 可跳过此步）：
-    ```bash
-    mvn clean package
-    ```
-2.  将定制好的 `application.properties` 注入生成的 JAR 文件中  
-    （路径为 `BOOT-INF/classes/application.properties`）。
-3.  初始化数据库：
-    ```sql
-    CREATE DATABASE lotm;
-    USE lotm;
-    -- 执行 /Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql 中的建表语句
-    ```
-    创建并授权专用数据库用户：
-    ```sql
-    CREATE USER '<username>'@'%' IDENTIFIED BY '<password>';
-    GRANT SELECT, INSERT, UPDATE, DELETE ON lotm.* TO '<username>'@'%';
-    ```
-4.  （可选）将后端 JAR 与 Python 模块上传至服务器，确保二者位于同一父目录下。
-5.  配置 Python 运行环境：
-    ```bash
-    conda create -n RepoSummary python=3.10
-    conda activate RepoSummary
-    pip install -r requirements.txt
-    ```
-6.  启动后端服务：
-    ```bash
-    nohup java -jar LoTM-0.0.1-SNAPSHOT.jar > FeatX.log 2>&1 &
-    ```
-    查看运行日志：
-    ```bash
-    tail -f FeatX.log
-    ```
-
-### 3\. 前端服务部署
-
-1.  构建 React 前端项目：
-    ```bash
-    npm run build
-    ```
-2.  （可选）将生成的 `build/` 目录部署到服务器。
-3.  使用 Nginx 配置反向代理与静态文件服务：
-
-```nginx
-server {
-    listen 3000;
-    server_name yourdomain.com;
-
-    root /path/to/frontend/build;
-    index index.html;
-
-    location /api/ {
-        proxy_pass http://localhost:8080/;
-    }
-
-    location / {
-        try_files $uri /index.html;
-    }
-}
+```bash
+docker compose down
 ```
 
-配置完成后重启 Nginx。此时，FeatX 前端将通过 `3000` 端口访问，所有 API 请求会被透明地转发至后端服务。
+如果需要重新初始化种子数据，再删除持久化卷：
 
-当所有组件均正常运行后，FeatX 即可投入使用。
+```bash
+docker compose down -v
+```
+
+### 2. 手工部署（不推荐用于工件评估）
+
+手工部署是在 Docker Compose 之外分别运行各组件。只有在需要定制运行环境时才建议使用。
+
+要求：
+
+*   Java JDK 17，以及 `Backend/mvnw`
+*   Node.js 20.x 和 npm 10.x
+*   Python 3.10，以及 `RepoSummary/requirements.txt` 中的依赖
+*   MySQL 8，并使用 `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql` 初始化 schema
+*   用于完整流程的 OpenAI-compatible LLM API
+*   生产环境前端可使用 Nginx 或其他静态文件服务器
+
+配置文件：
+
+*   `Backend/src/main/resources/application.properties` 配置仓库缓存路径、MySQL 和 Java 后端 LLM 参数，也可以参考 `Backend/src/main/resources/example.properties`。
+*   `RepoSummary/.env` 配置相同的仓库缓存路径、MySQL 连接和 Python 侧 LLM 参数。
+*   后端与 RepoSummary 的数据库和仓库缓存目录必须指向同一套环境。
+*   顶层 `.env` 只用于 Docker Compose。手工部署时请在上述组件配置文件中设置等价参数。
+
+构建并启动后端：
+
+```bash
+cd Backend
+./mvnw -DskipTests package
+java -jar target/*.jar
+```
+
+构建前端：
+
+```bash
+cd Frontend
+npm install
+npm run build
+```
+
+将 `Frontend/build/` 交给 Nginx 或其他静态文件服务器，并把前端 API 请求代理到 `http://localhost:8080/`。
 
 ## 💽 使用说明
 
