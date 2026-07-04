@@ -7,7 +7,7 @@
 相关链接：
 
 - 论文预印本：<https://arxiv.org/abs/2606.31206>
-- Zenodo 归档工件：<https://doi.org/10.5281/zenodo.21187017>
+- Zenodo 归档工件：以发布后的 Zenodo 记录页面为准。
 - 在线演示：<https://lixutian.github.io/FeatX>
 - GitHub 工件分支：<https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact>
 - 演示视频：<https://youtu.be/OZqKZ4Ii-yM>
@@ -19,7 +19,7 @@ FeatX 是一个面向特性的 LLM 辅助仓库演化工具。给定一个已有
 本工件包含源码、种子数据、Docker Compose 部署文件、可选的预构建容器镜像
 以及面向审稿人的验证命令。ASE 要求的主文件包括：
 
-- `README.md`：英文主说明，包含 Getting Started 与逐步复现说明。
+- `Artifact_README.md`：英文主说明，包含 Getting Started 与逐步复现说明。
 - `REQUIREMENTS.txt`：体系结构、硬件、软件与外部服务要求。
 - `STATUS.txt`：申请的徽章、理由、已验证项目与限制。
 - `LICENSE.txt`：使用和分发许可。

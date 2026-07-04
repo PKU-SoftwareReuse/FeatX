@@ -14,8 +14,8 @@ Badge justification:
   documented, internally consistent, exercisable, and accompanied by smoke
   checks for the frontend, backend, MySQL seed, RepoSummary environment, and
   dataset.
-- Available: the artifact snapshot is archived on Zenodo with DOI
-  `10.5281/zenodo.21187017`, the GitHub artifact branch is available at
+- Available: the artifact snapshot is archived on Zenodo, the GitHub artifact
+  branch is available at
   `https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact`, and the
   artifact is distributed under the MIT License.
 
@@ -35,7 +35,7 @@ Current artifact contents:
 - The repository is licensed under the MIT License.
 - Artifact links:
   - Paper preprint: `https://arxiv.org/abs/2606.31206`.
-  - Archived artifact package: `https://doi.org/10.5281/zenodo.21187017`.
+  - Archived artifact package: available from the published Zenodo record.
   - Online demo: `https://lixutian.github.io/FeatX`.
   - GitHub artifact branch:
     `https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact`.
