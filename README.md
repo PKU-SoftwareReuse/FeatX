@@ -179,6 +179,21 @@ For ASE 2026 Artifact Evaluation, see:
 - [REQUIREMENTS](REQUIREMENTS): hardware, software, and service requirements
 - [STATUS](STATUS): verified checks and known limitations
 
+The artifact supports the following paper claims and review checks:
+
+*   Tool availability: reviewers can build and run the FeatX web tool with
+    Docker Compose, then open the UI at `http://localhost:3000/`.
+*   Data availability: reviewers can inspect the 38 feature-editing commits in
+    `datasets/commits/dataset.json`.
+*   Case-study inspection: reviewers can inspect the seeded NBlog feature map
+    and matching source snapshot through the Docker deployment.
+*   Component buildability: reviewers can build the frontend and backend and
+    syntax-check the Python module using the commands in `ARTIFACT.md`.
+
+The packaged quick checks do not fully rerun every LLM-backed experiment from
+the paper. Full feature extraction and code evolution require a configured
+OpenAI-compatible API key and may incur provider-side cost.
+
 ## 💽 Usage
 
 After completing the deployment, open a web browser and navigate to:

@@ -18,6 +18,23 @@ hierarchical feature structure from an existing Java repository, maps features t
 code entities, and uses an LLM-backed evolution agent to turn feature edits into
 code patches.
 
+## Supported Claims
+
+This artifact is designed to support these review checks:
+
+- FeatX can be deployed as a web tool with a Spring Boot backend, React
+  frontend, RepoSummary Python module, and MySQL-backed feature map.
+- The artifact includes the paper's commit replay dataset with 38
+  feature-editing commits across FlappyBird, PlayEdu, and NBlog.
+- The Docker deployment includes a precomputed NBlog feature map and matching
+  source snapshot for immediate inspection.
+- The packaged source components can be built or syntax-checked with the
+  commands in this guide.
+
+The quick checks do not fully rerun every LLM-backed experiment in the paper.
+Full feature extraction and code evolution require external API credentials and
+may incur provider-side cost.
+
 ## Artifact Contents
 
 - `Frontend/`: React web interface.
