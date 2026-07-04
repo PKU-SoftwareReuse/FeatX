@@ -48,7 +48,7 @@ cp .env.example .env
 如果工件一并提供预构建镜像包，先加载镜像，再启动服务：
 
 ```bash
-docker load -i /path/to/FeatX_ASE26_docker_images_20260704.tar.gz
+docker load -i /path/to/FeatX_ASE26_docker_images_20260703.tar.gz
 docker compose up -d
 ```
 

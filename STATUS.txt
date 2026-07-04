@@ -41,7 +41,7 @@ Current artifact contents:
     `https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact`.
   - Demonstration video: `https://youtu.be/OZqKZ4Ii-yM`.
 
-Locally verified on 2026-07-04:
+Locally verified on 2026-07-03:
 
 - `docker compose config` completed successfully.
 - `docker compose build backend frontend mysql` completed successfully.
@@ -64,7 +64,7 @@ Locally verified on 2026-07-04:
 - `python3 -m compileall -q src` completed in `RepoSummary/`.
 - The included `Backend/mvnw` wrapper is executable in this artifact snapshot.
 - The prebuilt Docker image archive was exported as
-  `FeatX_ASE26_docker_images_20260704.tar.gz` and contains
+  `FeatX_ASE26_docker_images_20260703.tar.gz` and contains
   `featx-backend:ase26`, `featx-frontend:ase26`, and `featx-mysql:ase26`.
 
 Known limitations:

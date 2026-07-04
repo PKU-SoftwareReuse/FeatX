@@ -101,7 +101,7 @@ directory containing `docker-compose.yml`, load the images, and then start the
 stack:
 
 ```bash
-docker load -i /path/to/FeatX_ASE26_docker_images_20260704.tar.gz
+docker load -i /path/to/FeatX_ASE26_docker_images_20260703.tar.gz
 docker compose up -d
 ```
 

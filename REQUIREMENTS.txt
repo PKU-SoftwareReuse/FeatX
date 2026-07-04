@@ -32,8 +32,8 @@ Required software for the recommended Docker Compose path:
 - `curl` for HTTP smoke checks.
 - `jq` for dataset inspection commands.
 - Internet access for the first Docker build, unless the supplied
-  `FeatX_ASE26_docker_images_20260704.tar.gz` image archive is loaded with
-  `docker load -i /path/to/FeatX_ASE26_docker_images_20260704.tar.gz`.
+  `FeatX_ASE26_docker_images_20260703.tar.gz` image archive is loaded with
+  `docker load -i /path/to/FeatX_ASE26_docker_images_20260703.tar.gz`.
 
 Docker Compose starts MySQL, the Spring Boot backend, the RepoSummary Python
 environment, and the frontend. A host-installed MySQL server, Java runtime,
