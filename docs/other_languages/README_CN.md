@@ -25,7 +25,7 @@
 
 本仓库包含以下工作的代码与数据：
 
-- [在审] FeatX: A Feature-Oriented Interface for LLM-Assisted Programming
+- <a href="https://arxiv.org/abs/2606.31206">[ASE 2026 工具与数据集轨道] FeatX: Editing Software by Editing Features for Repository-Level Code Evolution</a>
 - <a href="https://arxiv.org/abs/2510.11039">RepoSummary: Feature-Oriented Summarization and Documentation Generation for Code Repositories</a>
 
 ## 👋 项目概述

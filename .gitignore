@@ -13,5 +13,7 @@ __pycache__/
 
 # Env
 .env
+.env.migration
 
 out/
+migration_artifacts/

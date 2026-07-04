@@ -1,0 +1,49 @@
+Hardware:
+
+- CPU-only machine; no GPU is required.
+- At least 16 GB RAM is recommended for full local deployment.
+- At least 20 GB free disk space is recommended for Docker images, Java, Node,
+  Python, PyTorch CPU, and model/dependency caches.
+
+Operating system:
+
+- Ubuntu 22.04 is recommended.
+- Windows 11 is supported by the project, but the artifact quick checks are
+  written for Linux shell commands.
+
+Required software for Docker Compose deployment:
+
+- Docker with Compose v2.
+- Git.
+- Internet access for first-time base image and dependency downloads, unless
+  prebuilt images are supplied.
+- Docker Compose starts the MySQL, backend, and frontend services from the
+  artifact configuration.
+
+Required software for manual deployment:
+
+- Java JDK 17.
+- Maven via the included `Backend/mvnw` wrapper.
+- Node.js 20.x and npm 10.x.
+- Python 3.10.
+- MySQL 8.
+- `jq` for dataset inspection commands.
+- Git.
+
+Python dependencies:
+
+- Install from `RepoSummary/requirements.txt`.
+- The `sentence-transformers` dependency may download PyTorch and model assets;
+  this can be large and should be cached or preinstalled for a smooth review.
+
+External services:
+
+- An LLM API endpoint compatible with OpenAI-style chat completions.
+- API credentials for the configured LLM provider.
+- LLM credentials are not required for Docker startup and smoke checks, but they
+  are required for full feature extraction and code evolution workflows.
+
+Optional software:
+
+- Nginx can be used to serve the production frontend and proxy requests to the
+  backend, as described in `README.md`.

@@ -287,7 +287,7 @@ public class PreprocessHelper {
 
     protected static void runDelombok(String srcPath, String delombokPath) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(
-                "java", "-jar", "./LoCoTeM/tools/lombok-1.18.36.jar",
+                "java", "-jar", getLombokJarPath(),
                 "delombok", srcPath,
                 "--encoding", "UTF-8",
                 "-d", delombokPath
@@ -314,5 +314,24 @@ public class PreprocessHelper {
         int exitCode = process.waitFor();
         System.out.println("Delombok finished with exit code: " + exitCode);
 
+    }
+
+    private static String getLombokJarPath() {
+        String configuredPath = System.getenv("LOMBOK_JAR");
+        if (configuredPath != null && !configuredPath.isBlank()) {
+            return configuredPath;
+        }
+
+        List<String> candidates = List.of(
+                "tools/lombok-1.18.36.jar",
+                "Backend/tools/lombok-1.18.36.jar",
+                "./LoCoTeM/tools/lombok-1.18.36.jar"
+        );
+        for (String candidate : candidates) {
+            if (new File(candidate).exists()) {
+                return candidate;
+            }
+        }
+        return candidates.get(0);
     }
 }

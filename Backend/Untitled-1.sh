@@ -1,2 +1,0 @@
-
-docker run -d -p 7474:7474 -p 7687:7687 --name neo4j-enterprise -e "NEO4J_AUTH=neo4j/neo4j123456" -e NEO4J_PLUGINS='["graph-data-science"]' --env=NEO4J_ACCEPT_LICENSE_AGREEMENT=eval -v /Users/lixutian/Developer/ProgramData/neo4jenterprise/data:/data -v /Users/lixutian/Developer/ProgramData/neo4jenterprise/logs:/logs -v /Users/lixutian/Developer/ProgramData/neo4jenterprise/conf:/var/lib/neo4j/conf -v /Users/lixutian/Developer/ProgramData/neo4jenterprise/import:/var/lib/neo4j/import neo4j:enterprise

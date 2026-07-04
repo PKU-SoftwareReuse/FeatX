@@ -23,9 +23,9 @@
 
 ---
 
-Code and data for the following works: 
+Code and data for the following works:
 
-- [Under Review] FeatX: A Feature-Oriented Interface for LLM-Assisted Programming
+- <a href="https://arxiv.org/abs/2606.31206">[ASE 2026 Tools and Datasets] FeatX: Editing Software by Editing Features for Repository-Level Code Evolution</a>
 - <a href="https://arxiv.org/abs/2510.11039">RepoSummary: Feature-Oriented Summarization and Documentation Generation for Code Repositories</a>
 
 ## 👋 Overview
@@ -42,9 +42,113 @@ Based on the context, FeatX leverages an LLM to generate code for new feature re
 
 This section describes how to deploy the FeatX system, including server-side environment preparation, backend and frontend initialization, and service exposure. The setup assumes a Linux (Ubuntu 22.04) or Windows 11 environment and a basic familiarity with command-line operations.
 
+### 0\. Docker Compose Quick Start
+
+The recommended Artifact Evaluation path is Docker Compose. It starts MySQL,
+the Spring Boot backend, the RepoSummary Python environment, and an Nginx-served
+React frontend.
+
+```bash
+cp .env.example .env
+docker compose build
+docker compose up -d
+```
+
+The first build downloads Java, Node, Python, PyTorch CPU, and NLP dependencies,
+so it can take several minutes and requires multiple GB of disk space.
+
+After startup, verify the deployment:
+
+```bash
+docker compose ps
+curl -i http://localhost:8080/connect/test
+curl -i http://localhost:3000/
+curl -i http://localhost:3000/api/connect/test
+```
+
+Open the UI at [http://localhost:3000/](http://localhost:3000/).
+
+If ports `8080` or `3000` are already in use, override only the host ports:
+
+```bash
+BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
+```
+
+Then use [http://localhost:23000/](http://localhost:23000/) and
+`http://localhost:28080/connect/test`.
+
+LLM-backed feature extraction and code evolution require API credentials. Put
+them in `.env` before running the full workflow:
+
+```env
+LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_KEY=<reviewer-api-key>
+LLM_API_MODEL=deepseek-v4-pro
+
+OPENAI_BASE_URL=https://api.deepseek.com
+OPENAI_API_KEY=<reviewer-api-key>
+OPENAI_API_MODEL=deepseek-v4-pro
+```
+
+Stop the stack with:
+
+```bash
+docker compose down
+```
+
+Remove the MySQL and repository-cache volumes only when you want a fresh state:
+
+```bash
+docker compose down -v
+```
+
+### 0.1 Migrating Existing MySQL Data
+
+If you already have FeatX data in another MySQL instance, migrate only the
+artifact tables used by the tool:
+
+```bash
+cp .env.migration.example .env.migration
+# Fill SOURCE_MYSQL_* in .env.migration.
+scripts/migrate_mysql_data.sh inspect
+scripts/migrate_mysql_data.sh import
+```
+
+The script migrates `project_info`, `modules`, `features`, `code_map`, and
+`graph_edge`. It first compares source and target columns, backs up the current
+Docker MySQL tables into `migration_artifacts/`, then imports the source data.
+Do not include `.env.migration` or `migration_artifacts/` in the artifact
+archive.
+
+If your machine uses a Docker wrapper or context, set `DOCKER_BIN` in
+`.env.migration` or on the command line, for example:
+
+```bash
+DOCKER_BIN="docker --context default" scripts/migrate_mysql_data.sh inspect
+```
+
+The artifact Docker image also includes a curated seed dump at
+`datasets/mysql/featx_seed.sql`. On a fresh MySQL volume, Docker imports this
+data automatically and provides the NBlog case-study feature map used for quick
+inspection in the UI. Existing volumes are not overwritten; run
+`docker compose down -v` before startup if you need to reinitialize from the
+seed.
+
+The matching NBlog repository snapshot is included at `datasets/repos/12` and is
+copied into the backend image at `/workspace/repos/12`. The numeric directory
+matches `project_info.id = 12` in the seeded MySQL data.
+
 ### 1\. System Requirements
 
 Ensure the following dependencies are installed before deployment:
+
+For the Docker Compose path:
+
+*   **Docker** with Docker Compose v2
+*   **Internet access** for first-time dependency and image downloads
+*   The Compose configuration starts the MySQL, backend, and frontend services.
+
+For manual deployment:
 
 *   **Operating System**: Ubuntu 22.04 or Windows 11
 *   **Java**: JDK 17 (for the Spring Boot backend)
@@ -161,6 +265,14 @@ Restart Nginx after configuration. The FeatX frontend will then be accessible vi
 
 Once all components are running, FeatX is ready for use.
 
+## 🧪 Artifact Evaluation
+
+For ASE 2026 Artifact Evaluation, see:
+
+- [ARTIFACT.md](ARTIFACT.md): artifact contents, badge strategy, and quick checks
+- [REQUIREMENTS](REQUIREMENTS): hardware, software, and service requirements
+- [STATUS](STATUS): verified checks and known limitations
+
 ## 💽 Usage
 
 After completing the deployment, open a web browser and navigate to:
@@ -171,7 +283,7 @@ You can then access and interact with FeatX through the web-based interface.
 
 A step-by-step walkthrough of the system, including feature inspection, feature editing, and debloating workflows, is provided in our video demonstration:  
 
-👉 [https://youtu.be/YyCwPy8hf48](https://youtu.be/YyCwPy8hf48)
+👉 [https://youtu.be/OZqKZ4Ii-yM](https://youtu.be/OZqKZ4Ii-yM)
 
 If you prefer not to deploy the system locally, an online demo is also available at:  
 
