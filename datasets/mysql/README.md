@@ -1,14 +1,14 @@
 # FeatX MySQL Seed Data
 
-This directory contains a curated MySQL seed dump for the Docker Compose
-artifact. It is imported automatically when the MySQL container starts with an
-empty data volume.
+This directory contains the curated MySQL seed dump used by the Docker Compose
+artifact. The seed is imported automatically when the MySQL container starts
+with an empty data volume.
 
 ## Contents
 
 - `featx_seed.sql`: data-only dump for the FeatX artifact tables.
 
-## Source
+## Source And Scope
 
 The seed was exported from a validated FeatX Docker MySQL instance for the
 NBlog case study:
@@ -20,7 +20,8 @@ NBlog case study:
 - `code_map`: 713 rows
 - `graph_edge`: 2885 rows
 
-The dump contains only the application tables used by FeatX:
+The dump contains only the FeatX application tables required for the seeded
+case study:
 
 - `project_info`
 - `modules`
@@ -28,12 +29,23 @@ The dump contains only the application tables used by FeatX:
 - `code_map`
 - `graph_edge`
 
-It does not include API credentials, MySQL users, logs, or unrelated operational
-tables.
+It does not include API credentials, MySQL user accounts, logs, or unrelated
+operational tables.
 
-## Regenerating the Seed
+## Validation
 
-With the Docker Compose stack running:
+With the Docker Compose stack running, reviewers can validate the imported
+counts from the repository root:
+
+```bash
+docker compose exec -e MYSQL_PWD=featx mysql mysql -h127.0.0.1 -ufeatx lotm \
+  -e "SELECT COUNT(*) AS projects FROM project_info; SELECT COUNT(*) AS modules FROM modules; SELECT COUNT(*) AS features FROM features; SELECT COUNT(*) AS code_map_entries FROM code_map; SELECT COUNT(*) AS graph_edges FROM graph_edge;"
+```
+
+## Regenerating The Seed
+
+This section is for artifact maintainers. With a validated Docker Compose stack
+running, regenerate the dump with:
 
 ```bash
 docker exec featx_ae_verify-mysql-1 sh -lc 'MYSQL_PWD=featx mysqldump -h127.0.0.1 -ufeatx lotm --single-transaction --skip-triggers --set-gtid-purged=OFF --column-statistics=0 --no-tablespaces --no-create-info --complete-insert --hex-blob project_info modules features code_map graph_edge' > datasets/mysql/featx_seed.sql

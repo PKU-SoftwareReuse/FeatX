@@ -1,25 +1,40 @@
-# Getting Started with Create React App
+# FeatX Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This directory contains the React frontend for the FeatX artifact. During
+artifact evaluation, reviewers should normally use the top-level Docker Compose
+deployment instead of running the frontend directly. Docker Compose builds this
+frontend and serves the production bundle through Nginx.
 
-## Available Scripts
+## Artifact Evaluation Path
 
-In the project directory, you can run:
+From the repository root:
 
-### `npm start`
+```bash
+cp .env.example .env
+docker compose up -d
+```
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+The frontend is then available at:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```text
+http://localhost:3000/
+```
 
-### `npm run build`
+If `FRONTEND_PORT` is changed in `.env`, use the configured port instead.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Manual Development Commands
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Manual commands are provided for development and component-level checks:
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+npm install
+npm run build
+```
+
+Expected result: `npm run build` creates `Frontend/build/`. Source-map or
+linting warnings do not prevent the production build when the command exits
+successfully.
+
+The frontend reads `REACT_APP_API_BASE_URL` at build time. In the Docker
+artifact, this value is set to `/api` so that Nginx proxies frontend requests to
+the backend service.

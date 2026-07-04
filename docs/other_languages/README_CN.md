@@ -1,66 +1,72 @@
-<p align="center">
-    <img src="/docs/asserts/featx_logo.png" style="height: 10em" alt="FeatX" />
-</p>
+# FeatX ASE 2026 工件说明
 
-<p align="center">
-  <a href="/README.md">English</a> |
-  <a href="/docs/other_languages/README_CN.md">中文简体</a>
-</p>
-<p align="center">
-    <a href="https://www.java.com/">
-        <img alt="Java" src="https://img.shields.io/badge/Java-17+-ED8B00?logo=java&logoColor=white">
-    </a>
-    <a href="https://spring.io/projects/spring-boot">
-        <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.x-6DB33F?logo=springboot&logoColor=white">
-    </a>
-    <a href="https://react.dev/">
-        <img alt="React" src="https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black">
-    </a>
-    <a href="https://copyright.princeton.edu/policy">
-        <img alt="License" src="https://img.shields.io/badge/License-MIT-blue">
-    </a>
-</p>
+本仓库是以下论文的 ASE 2026 工件包：
 
----
+**FeatX: Editing Software by Editing Features for Repository-Level Code Evolution**
 
-本仓库包含以下工作的代码与数据：
+相关链接：
 
-- <a href="https://arxiv.org/abs/2606.31206">[ASE 2026 工具与数据集轨道] FeatX: Editing Software by Editing Features for Repository-Level Code Evolution</a>
-- <a href="https://arxiv.org/abs/2510.11039">RepoSummary: Feature-Oriented Summarization and Documentation Generation for Code Repositories</a>
+- 论文预印本：<https://arxiv.org/abs/2606.31206>
+- Zenodo 归档工件：<https://doi.org/10.5281/zenodo.21187017>
+- 在线演示：<https://lixutian.github.io/FeatX>
+- GitHub 工件分支：<https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact>
+- 演示视频：<https://youtu.be/OZqKZ4Ii-yM>
 
-## 👋 项目概述
+FeatX 是一个面向特性的 LLM 辅助仓库演化工具。给定一个已有 Java
+仓库，FeatX 会抽取层次化的特性结构，维护特性到代码的映射，允许开发者
+直接编辑自然语言特性描述，并通过 LLM 驱动的演化代理生成仓库级代码修改。
 
-FeatX 是一种面向特性的 LLM 辅助编程交互界面。  
-给定一个**已有的软件代码仓库**作为修改对象，FeatX 首先对仓库中的功能（features）进行总结，并构建一个全面的上下文 **CodeMap**。  
-在此基础上，FeatX 利用大语言模型生成满足新功能需求的代码，突出显示由此产生的代码变更以供用户确认，最终输出**修改后的代码仓库**。
+本工件包含源码、种子数据、Docker Compose 部署文件、可选的预构建容器镜像
+以及面向审稿人的验证命令。ASE 要求的主文件包括：
 
-<img src="/docs/asserts/FeatX_approach.png">
-<img src="/docs/asserts/FeatX_Pannels.png">
+- `README.md`：英文主说明，包含 Getting Started 与逐步复现说明。
+- `REQUIREMENTS.txt`：体系结构、硬件、软件与外部服务要求。
+- `STATUS.txt`：申请的徽章、理由、已验证项目与限制。
+- `LICENSE.txt`：使用和分发许可。
+- `AE_Abstract.pdf`：ASE AE 提交所需的两页工件摘要。
 
-## 🚀 系统部署
+## 推荐审稿路径
 
-本节提供两种部署方式。ASE 工件评估和普通本地试用推荐使用 Docker Compose；手工部署仅适合开发或定制环境，不推荐作为评审路径。
+推荐使用仓库顶层的 Docker Compose 路径。该路径会启动 MySQL、Spring Boot
+后端、RepoSummary Python 环境和 React 前端。启动、smoke test、NBlog
+种子数据检查以及非 LLM 的界面浏览不需要 API key。
 
-### 1. Docker Compose 部署（推荐）
+### 1. 创建 `.env`
 
-要求：
-
-*   Docker 与 Compose v2
-*   首次构建需要联网下载依赖
-*   推荐使用 x86_64 Linux CPU 环境；不需要 GPU
-*   推荐 8-16 GiB 内存和至少 20 GB 可用磁盘空间
-
-此路径的配置由 `.env.example` 和 `docker-compose.yml` 管理。执行以下命令启动 FeatX：
+在仓库根目录，也就是 `docker-compose.yml` 所在目录执行：
 
 ```bash
 cp .env.example .env
+```
+
+如果只进行快速检查，`LLM_API_KEY` 和 `OPENAI_API_KEY` 可以留空。只有在审稿人
+运行完整的 LLM 特性抽取或代码演化流程时，才需要在本地 `.env` 中填入提交系统
+提供的 reviewer-only API key。真实 key 不应提交到仓库或打入归档包。
+
+### 2. 启动容器化工件
+
+如果工件一并提供预构建镜像包，先加载镜像，再启动服务：
+
+```bash
+docker load -i /path/to/FeatX_ASE26_docker_images_20260704.tar.gz
+docker compose up -d
+```
+
+如果没有预构建镜像包，可从源码构建：
+
+```bash
 docker compose build
 docker compose up -d
 ```
 
-Docker Compose 会启动 MySQL、Spring Boot 后端（包含 RepoSummary Python 环境）以及 Nginx 前端。MySQL 在容器内运行，不需要在宿主机上安装 MySQL。
+默认端口为后端 `8080`、前端 `3000`。如果端口被占用，可在 `.env` 中修改：
 
-启动后可执行以下检查：
+```env
+BACKEND_PORT=28080
+FRONTEND_PORT=23000
+```
+
+### 3. Smoke Test
 
 ```bash
 docker compose ps
@@ -69,99 +75,65 @@ curl -i http://localhost:3000/
 curl -i http://localhost:3000/api/connect/test
 ```
 
-然后在浏览器访问 [http://localhost:3000/](http://localhost:3000/)。
+期望结果是三个服务均在运行，后端连接测试返回 HTTP 200，前端页面可访问，并且
+`/api/connect/test` 能通过前端代理访问后端。
 
-如果 `8080` 或 `3000` 端口已被占用，可以覆盖宿主机端口：
+## 数据与可检查内容
 
-```bash
-BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
-```
+工件支持以下审稿活动：
 
-Docker 包中已经包含 NBlog 种子数据和对应源代码快照：
+- 构建并运行 FeatX Web 工具。
+- 检查 React 前端、Spring Boot 后端、RepoSummary 模块、MySQL schema 和
+  Docker 部署文件。
+- 检查 `datasets/commits/dataset.json` 中的 38 个特性编辑 commit issue。
+- 检查已预计算的 NBlog 特性映射和匹配源码快照：
+  - `datasets/mysql/featx_seed.sql`
+  - `datasets/repos/12`
 
-*   `datasets/mysql/featx_seed.sql` 初始化 MySQL 特性映射数据。
-*   `datasets/repos/12` 初始化后端容器中的 `/workspace/repos/12`。
-
-种子数据查看和 smoke checks 不需要 LLM API Key。完整的 LLM 特性抽取与代码演化流程需要在 `.env` 中配置凭据：
-
-```env
-LLM_API_URL=https://api.deepseek.com/chat/completions
-LLM_API_KEY=<reviewer-api-key>
-LLM_API_MODEL=deepseek-v4-pro
-
-OPENAI_BASE_URL=https://api.deepseek.com
-OPENAI_API_KEY=<reviewer-api-key>
-OPENAI_API_MODEL=deepseek-v4-pro
-```
-
-停止服务：
+快速数据检查命令：
 
 ```bash
-docker compose down
+jq '[.dataset[] | .issues | length] | add' datasets/commits/dataset.json
+jq -r '.dataset[] | "\(.project_name)\t\(.issues | length)"' datasets/commits/dataset.json
 ```
 
-如果需要重新初始化种子数据，再删除持久化卷：
+期望输出：
 
-```bash
-docker compose down -v
+```text
+38
+FlappyBird  2
+PlayEdu     15
+NBlog       21
 ```
 
-### 2. 手工部署（不推荐用于工件评估）
+## NBlog 小例子
 
-手工部署是在 Docker Compose 之外分别运行各组件。只有在需要定制运行环境时才建议使用。
+启动后访问：
 
-要求：
-
-*   Java JDK 17，以及 `Backend/mvnw`
-*   Node.js 20.x 和 npm 10.x
-*   Python 3.10，以及 `RepoSummary/requirements.txt` 中的依赖
-*   MySQL 8，并使用 `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql` 初始化 schema
-*   用于完整流程的 OpenAI-compatible LLM API
-*   生产环境前端可使用 Nginx 或其他静态文件服务器
-
-配置文件：
-
-*   `Backend/src/main/resources/application.properties` 配置仓库缓存路径、MySQL 和 Java 后端 LLM 参数，也可以参考 `Backend/src/main/resources/example.properties`。
-*   `RepoSummary/.env` 配置相同的仓库缓存路径、MySQL 连接和 Python 侧 LLM 参数。
-*   后端与 RepoSummary 的数据库和仓库缓存目录必须指向同一套环境。
-*   顶层 `.env` 只用于 Docker Compose。手工部署时请在上述组件配置文件中设置等价参数。
-
-构建并启动后端：
-
-```bash
-cd Backend
-./mvnw -DskipTests package
-java -jar target/*.jar
+```text
+http://localhost:3000/
 ```
 
-构建前端：
+不需要 LLM key 的检查路径如下：
 
-```bash
-cd Frontend
-npm install
-npm run build
-```
+1. 在欢迎页打开 seeded `NBlog` 项目。
+2. 在 `Feature Panel` 中展开 `Blog content management and retrieval`。
+3. 选择描述以 `As a blog user, I want to retrieve a list of blog posts by title and category ID` 开头的特性。
+4. 检查 `CodeMap Panel` 是否展示相关类和方法节点。
+5. 点击 CodeMap 中的类节点，在 `Diff Panel` 中检查类级代码上下文。
 
-将 `Frontend/build/` 交给 Nginx 或其他静态文件服务器，并把前端 API 请求代理到 `http://localhost:8080/`。
+如果配置了 reviewer-only LLM key，也可以运行演示视频中的小型编辑场景：在
+NBlog 的博客内容 epic 下添加一个 “Good Morning” 一键发博客特性，观察
+`Agent Panel` 的三阶段推理、`CodeMap Panel` 中标红的受影响文件，以及
+`Diff Panel` 中的行级 diff。只有在确实希望把生成补丁应用到挂载的 NBlog
+快照时，才点击 `Confirm Apply the Diff`。
 
-## 💽 使用说明
+## 不完全复现的内容
 
-完成部署后，在浏览器中访问：
+快速检查不会重新运行论文中所有 LLM 驱动实验。完整的特性抽取和代码演化依赖
+外部 OpenAI-compatible LLM 服务，可能产生服务端成本，并且会受模型版本和服务
+状态影响。论文中的受控用户研究结果由论文报告，本工件包不重新执行该研究。
 
-👉 [http://localhost:3000/](http://localhost:3000/)
+## 许可证
 
-即可通过 Web 界面使用 FeatX。
-
-我们提供了一段系统演示视频，对特性查看、特性编辑以及代码精简（debloating）等完整流程进行了逐步讲解：
-
-👉 [https://youtu.be/YyCwPy8hf48](https://youtu.be/YyCwPy8hf48)
-
-如果你不希望在本地部署系统，也可以使用在线演示版本：
-
-👉 [https://lixutian.github.io/FeatX](https://lixutian.github.io/FeatX)
-
-在线 Demo 展示了 FeatX 的核心交互范式，适合快速体验与评估。
-
-## ✍️ 许可证
-
-本项目采用 **MIT License** 开源协议，详见 [LICENSE](/LICENSE) 文件。
+本工件使用 MIT License 分发。完整条款见仓库根目录的 `LICENSE.txt`。

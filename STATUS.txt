@@ -1,0 +1,84 @@
+FeatX ASE 2026 Artifact Status
+==============================
+
+Badges requested:
+
+- Reusable
+- Available
+
+Badge justification:
+
+- Reusable: the artifact includes source code, Dockerfiles, Compose
+  configuration, seed data, dataset documentation, component build commands,
+  and a clear statement of which claims require external LLM credentials. It is
+  documented, internally consistent, exercisable, and accompanied by smoke
+  checks for the frontend, backend, MySQL seed, RepoSummary environment, and
+  dataset.
+- Available: the artifact snapshot is archived on Zenodo with DOI
+  `10.5281/zenodo.21187017`, the GitHub artifact branch is available at
+  `https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact`, and the
+  artifact is distributed under the MIT License.
+
+Current artifact contents:
+
+- Source code is available for the React frontend, Spring Boot backend, and
+  Python RepoSummary module.
+- The commit dataset is included at `datasets/commits/dataset.json`.
+- The dataset contains 38 feature-editing commit issues across 3 repositories:
+  FlappyBird (2), PlayEdu (15), and NBlog (21).
+- Docker Compose deployment is included for MySQL, the backend, the RepoSummary
+  Python environment, and the frontend.
+- The Docker images built by this artifact are `featx-mysql:ase26`,
+  `featx-backend:ase26`, and `featx-frontend:ase26`.
+- The NBlog seeded case study is included as `datasets/mysql/featx_seed.sql`
+  and `datasets/repos/12`.
+- The repository is licensed under the MIT License.
+- Artifact links:
+  - Paper preprint: `https://arxiv.org/abs/2606.31206`.
+  - Archived artifact package: `https://doi.org/10.5281/zenodo.21187017`.
+  - Online demo: `https://lixutian.github.io/FeatX`.
+  - GitHub artifact branch:
+    `https://github.com/PKU-SoftwareReuse/FeatX/tree/demo-artifact`.
+  - Demonstration video: `https://youtu.be/OZqKZ4Ii-yM`.
+
+Locally verified on 2026-07-04:
+
+- `docker compose config` completed successfully.
+- `docker compose build backend frontend mysql` completed successfully.
+- Docker images were built as `featx-backend:ase26`,
+  `featx-frontend:ase26`, and `featx-mysql:ase26`.
+- A clean Compose stack was started with overridden host ports:
+  `BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose -p featx_ae_current up -d`.
+- MySQL healthcheck passed and the schema contains `code_map`, `features`,
+  `graph_edge`, `modules`, and `project_info`.
+- `curl -i http://localhost:28080/connect/test` returned HTTP 200.
+- `curl -i http://localhost:23000/` returned the FeatX frontend HTML page.
+- `curl -i http://localhost:23000/api/connect/test` returned HTTP 200 through
+  the Nginx frontend proxy.
+- The seeded MySQL tables contained 1 `project_info` row, 31 `modules` rows,
+  75 `features` rows, 713 `code_map` rows, and 2885 `graph_edge` rows.
+- `cd Backend && ./mvnw -DskipTests package` completed successfully.
+- `npm install` completed in `Frontend/`.
+- `npm run build` completed in `Frontend/`; it emitted source-map and ESLint
+  warnings but produced a production build.
+- `python3 -m compileall -q src` completed in `RepoSummary/`.
+- The included `Backend/mvnw` wrapper is executable in this artifact snapshot.
+- The prebuilt Docker image archive was exported as
+  `FeatX_ASE26_docker_images_20260704.tar.gz` and contains
+  `featx-backend:ase26`, `featx-frontend:ase26`, and `featx-mysql:ase26`.
+
+Known limitations:
+
+- Full LLM-backed feature extraction and code evolution require external API
+  credentials and may incur provider-side cost.
+- Full replay of every LLM-backed experiment is outside the quick-check path
+  because model outputs, model availability, provider latency, and API cost are
+  external to the artifact.
+- The controlled user study reported in the paper is not re-executed by the
+  artifact package.
+- The first Docker build is large and slow because the backend image includes
+  CPU PyTorch, sentence-transformers, and the Java backend. Locally observed
+  image sizes were approximately 2.81 GB for `featx-backend:ase26`, 94 MB for
+  `featx-frontend:ase26`, and 1.09 GB for `featx-mysql:ase26`.
+- The sentence-transformer model may still be downloaded at runtime unless it is
+  already cached or preloaded.

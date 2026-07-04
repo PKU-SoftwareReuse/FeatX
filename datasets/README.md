@@ -1,26 +1,34 @@
 # FeatX Artifact Data
 
-This directory contains the data shipped with the ASE 2026 artifact package.
+This directory contains the data shipped with the ASE 2026 FeatX artifact. The
+data support two reviewer activities:
+
+- inspection of the feature-editing commit dataset used in the paper's replay
+  study; and
+- inspection of the seeded NBlog case study used by the Docker Compose demo.
 
 ## Commit Replay Dataset
 
 Path: `datasets/commits/dataset.json`
 
-This JSON file contains the feature-editing commits used for the replay study.
-The top-level object has one key, `dataset`, whose value is a list of projects.
-Each project contains:
+This JSON file contains the 38 feature-editing commits used for the replay
+study. The top-level object has one field:
+
+- `dataset`: list of project-level entries.
+
+Each project entry contains:
 
 - `project_name`: project identifier.
-- `issues`: feature-editing examples for that project.
+- `issues`: feature-editing examples collected for that project.
 
-Each issue contains:
+Each issue entry contains:
 
-- `id`: issue id within the project.
-- `issue`: original issue or commit label, often with a commit URL.
-- `description`: short feature-editing description.
-- `methods`: methods related to the feature-editing change.
+- `id`: issue identifier within the project.
+- `issue`: original issue or commit label, often including a commit URL.
+- `description`: normalized natural-language feature-editing description.
+- `methods`: methods associated with the feature-editing change.
 
-Expected counts:
+Validation commands:
 
 ```bash
 jq '[.dataset[] | .issues | length] | add' datasets/commits/dataset.json
@@ -40,8 +48,8 @@ NBlog       21
 
 Path: `datasets/mysql/featx_seed.sql`
 
-This is a data-only seed dump for the Docker Compose MySQL service. It contains
-the NBlog feature map already computed by FeatX:
+This data-only seed dump initializes the Docker Compose MySQL service with the
+precomputed NBlog feature map:
 
 - `project_info`: 1 row
 - `modules`: 31 rows
@@ -50,7 +58,8 @@ the NBlog feature map already computed by FeatX:
 - `graph_edge`: 2885 rows
 
 The MySQL Docker image imports this file automatically when the MySQL data
-volume is empty.
+volume is empty. The seed contains application data only; it does not contain
+API credentials, MySQL user definitions, logs, or unrelated operational tables.
 
 ## Repository Snapshot
 
@@ -65,4 +74,4 @@ seed. It contains:
 - `preprocess2/main/java`: final normalized source used by graph analysis.
 
 The backend Docker image copies this directory into `/workspace/repos/12`, so
-reviewers can inspect the seeded project without cloning it manually.
+reviewers can inspect the seeded project without cloning NBlog manually.
