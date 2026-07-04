@@ -1477,7 +1477,10 @@ def repo_summary(project_root: str, output_dir: str):
             print(f"  Function ID: {function.func_id}, Name: {function.func_name}, Description: {function.func_desc}")
         print("\n")
 
-    model_path = os.path.join(BASE_DIR, "..", "models", "all-mpnet-base-v2")
+    default_model_path = os.path.join(BASE_DIR, "..", "models", "all-mpnet-base-v2")
+    model_path = os.getenv("SENTENCE_TRANSFORMER_MODEL")
+    if not model_path:
+        model_path = default_model_path if os.path.exists(default_model_path) else "sentence-transformers/all-mpnet-base-v2"
     model = SentenceTransformer(model_path)
     for file in files:
         file.file_txt_vector = model.encode(file.file_desc).tolist()

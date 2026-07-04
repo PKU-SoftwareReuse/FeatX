@@ -1,0 +1,70 @@
+services:
+  mysql:
+    build:
+      context: .
+      dockerfile: docker/mysql.Dockerfile
+    image: featx-mysql:ase26
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-featx_root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-lotm}
+      MYSQL_USER: ${MYSQL_USER:-featx}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-featx}
+    volumes:
+      - featx-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: featx-backend:ase26
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      LTM_REPO_PATH: /workspace/repos
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-lotm}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-featx}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-featx}
+      LLM_API_URL: ${LLM_API_URL:-https://api.deepseek.com/chat/completions}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-v4-pro}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_MODEL: ${OPENAI_API_MODEL:-deepseek-v4-pro}
+      SENTENCE_TRANSFORMER_MODEL: ${SENTENCE_TRANSFORMER_MODEL:-sentence-transformers/all-mpnet-base-v2}
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-lotm}
+      DB_USER: ${MYSQL_USER:-featx}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
+      REPOSUMMARY_PYTHON: /opt/reposummary-venv/bin/python
+      REPOSUMMARY_DIR: /app/RepoSummary
+      LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
+    volumes:
+      - featx-repos:/workspace/repos
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: /api
+    image: featx-frontend:ase26
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
+
+volumes:
+  featx-mysql-data:
+  featx-repos:

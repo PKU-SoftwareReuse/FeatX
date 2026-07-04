@@ -2,7 +2,7 @@ import axios, {options} from "axios";
 
 // const BASE_URL = "http://101.201.65.66:3000/api";
 // const BASE_URL = "/api";
-const BASE_URL = "http://127.0.0.1:8080";
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8080";
 // const BASE_URL = "http://10.7.1.126:8080";
 
 

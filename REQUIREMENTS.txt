@@ -1,0 +1,95 @@
+FeatX ASE 2026 Artifact Requirements
+====================================
+
+Packaged architecture:
+
+- Primary target: Linux x86_64 / amd64.
+- Docker images built by this artifact:
+  - `featx-mysql:ase26`
+  - `featx-backend:ase26`
+  - `featx-frontend:ase26`
+- GPU: not required.
+- Non-commodity peripherals: none.
+
+Recommended hardware:
+
+- CPU-only machine.
+- 16 GiB RAM for the full local Docker deployment.
+- 20 GiB free disk space for Docker images, Java dependencies, Node packages,
+  Python packages, PyTorch CPU packages, and model/dependency caches.
+
+Operating system:
+
+- Ubuntu 22.04 or a comparable Linux distribution is recommended for artifact
+  review.
+- Windows 11 is supported by the project, but the documented artifact-evaluation
+  path uses Linux shell syntax and Docker Compose v2.
+
+Required software for the recommended Docker Compose path:
+
+- Docker Engine with Docker Compose v2.
+- Git, if the reviewer clones or inspects the artifact repository.
+- `curl` for HTTP smoke checks.
+- `jq` for dataset inspection commands.
+- Internet access for the first Docker build, unless the supplied
+  `FeatX_ASE26_docker_images_20260703.tar.gz` image archive is loaded with
+  `docker load -i /path/to/FeatX_ASE26_docker_images_20260703.tar.gz`.
+
+Docker Compose starts MySQL, the Spring Boot backend, the RepoSummary Python
+environment, and the frontend. A host-installed MySQL server, Java runtime,
+Node.js runtime, or Python virtual environment is not required for the
+recommended review path.
+
+Configuration for the Docker path:
+
+- Copy `.env.example` to `.env` in the artifact repository root, next to
+  `docker-compose.yml`.
+- The default `.env.example` values are enough for Docker startup and smoke
+  checks.
+- LLM API credentials are required only for full feature extraction and code
+  evolution workflows.
+
+Machine-readable dependency files included in the artifact:
+
+- `docker-compose.yml`
+- `docker/mysql.Dockerfile`
+- `docker/backend.Dockerfile`
+- `docker/frontend.Dockerfile`
+- `Backend/pom.xml`
+- `Frontend/package.json`
+- `RepoSummary/requirements.txt`
+- `.env.example`
+
+Required software for manual deployment, not recommended for artifact review:
+
+- Java JDK 17.
+- Maven through the included `Backend/mvnw` wrapper.
+- Node.js 20.x and npm 10.x.
+- Python 3.10.
+- MySQL 8.
+- `jq`, `curl`, and Git.
+
+Manual deployment configuration:
+
+- Configure the backend through
+  `Backend/src/main/resources/application.properties`, starting from
+  `Backend/src/main/resources/example.properties`.
+- Configure RepoSummary through `RepoSummary/.env`.
+- Backend and RepoSummary must point to the same MySQL database and repository
+  cache path.
+
+External services:
+
+- An OpenAI-compatible chat-completions LLM endpoint is required for full
+  feature extraction and code evolution.
+- LLM credentials are not required for Docker startup, seeded-data inspection,
+  dataset inspection, or smoke checks.
+- API keys should be provided through the artifact submission system or local
+  reviewer-only files. Do not commit API keys to the artifact repository.
+
+Large dependency note:
+
+- The backend image includes Python NLP dependencies. If images are built from
+  source, `sentence-transformers` may download PyTorch CPU and model assets, so
+  first-time builds can be slow. The supplied prebuilt image archive avoids
+  these build-time downloads.
