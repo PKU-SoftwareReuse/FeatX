@@ -45,7 +45,7 @@ Recommended badge strategy:
 
 - Submit for Functional: the artifact includes documented build, deployment,
   and smoke-check paths.
-- Submit for Available only after archiving the exact artifact snapshot on a
-  long-term repository and adding the DOI to the submission.
+- Submit for Available: the artifact snapshot has been archived on Zenodo with
+  DOI `10.5281/zenodo.21187017`.
 - Submit for Reusable if the Docker Compose workflow and LLM credential
   requirements are acceptable to the Artifact Evaluation committee.

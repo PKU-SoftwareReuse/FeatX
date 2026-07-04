@@ -28,6 +28,8 @@ Code and data for the following works:
 - <a href="https://arxiv.org/abs/2606.31206">[ASE 2026 Tools and Datasets] FeatX: Editing Software by Editing Features for Repository-Level Code Evolution</a>
 - <a href="https://arxiv.org/abs/2510.11039">RepoSummary: Feature-Oriented Summarization and Documentation Generation for Code Repositories</a>
 
+Archived ASE 2026 artifact: [https://doi.org/10.5281/zenodo.21187017](https://doi.org/10.5281/zenodo.21187017)
+
 ## 👋 Overview
 
 FeatX is a feature-oriented interface for LLM-assisted programming. 

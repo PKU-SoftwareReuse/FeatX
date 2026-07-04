@@ -7,9 +7,8 @@ FeatX: Editing Software by Editing Features for Repository-Level Code Evolution
 ## Artifact Type and Requested Badges
 
 This artifact supports the ASE 2026 Tool and Dataset Track paper. We request
-the Functional and Reusable badges. The Available badge should be requested only
-after the artifact snapshot is archived on a long-term repository with a DOI,
-such as Zenodo, Figshare, or Software Heritage.
+the Functional, Reusable, and Available badges. The artifact snapshot is
+archived on Zenodo with DOI `10.5281/zenodo.21187017`.
 
 ## Artifact Contents
 

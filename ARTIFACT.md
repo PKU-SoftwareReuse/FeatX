@@ -4,6 +4,12 @@
 
 FeatX: Editing Software by Editing Features for Repository-Level Code Evolution
 
+## Archived Artifact
+
+The ASE 2026 artifact snapshot is archived on Zenodo:
+
+https://doi.org/10.5281/zenodo.21187017
+
 ## Purpose
 
 This artifact contains the FeatX tool and the commit dataset used in the paper.
@@ -34,9 +40,8 @@ code patches.
 
 - Functional: the artifact is documented and includes executable components plus
   quick checks for the dataset, frontend, Python module, and backend.
-- Available: claim this badge only after archiving this repository/artifact on a
-  long-term repository with a DOI, such as Zenodo, Figshare, or Software
-  Heritage.
+- Available: the artifact snapshot is archived on Zenodo with DOI
+  `10.5281/zenodo.21187017`.
 - Reusable: the Docker Compose deployment has been smoke-tested locally. Full
   LLM-backed workflows still require reviewer-provided API credentials.
 
