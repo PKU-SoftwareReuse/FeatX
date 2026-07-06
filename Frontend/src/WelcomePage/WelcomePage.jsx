@@ -2,11 +2,34 @@
 import React, {useEffect, useState} from "react";
 import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
-import {Button, Card, Descriptions, Popconfirm, Select, Spin, Tooltip,} from "antd";
-import {FolderOpenOutlined, GithubOutlined, SyncOutlined} from '@ant-design/icons';
+import {Button, Card, Descriptions, Popconfirm, Spin, Tooltip,} from "antd";
+import {GithubOutlined, SyncOutlined} from '@ant-design/icons';
 import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
-import classNames from "classnames";
+import GitDownModal from "./GitDownModal/GitDownModal";
+
+
+const formatMetric = (value) => value === null || value === undefined ? "-" : value.toLocaleString();
+
+const getProjectStats = (project) => {
+    if (project.projectType === "PYTHON") {
+        return [
+            ["Language", "Python"],
+            ["Line of Codes", project.loc],
+            ["Python Files", project.nof],
+            ["Functions / Methods", project.nom],
+            ["Classes", project.noc],
+        ];
+    }
+
+    return [
+        ["Language", "Java"],
+        ["Line of Codes", project.loc],
+        ["Number of Classes", project.noc],
+        ["Number of Methods", project.nom],
+        ["Number of Fields", project.nof],
+    ];
+};
 
 
 const WelcomePage = () => {
@@ -94,7 +117,7 @@ const WelcomePage = () => {
                                                     type="text"
                                                     icon={<SyncOutlined/>}
                                                     className={styles.titleButton}
-                                                    disabled={!project.summaryFlag}
+                                                    disabled={!project.summaryFlag || project.projectType === "PYTHON"}
                                                 />
                                             </Popconfirm>
                                         </div>
@@ -103,25 +126,24 @@ const WelcomePage = () => {
                                     className={styles.projectCard}
                                 >
                                     <Descriptions column={1} size="small" layout="horizontal">
-                                        <Descriptions.Item
-                                            label="Line of Codes">{project.loc}</Descriptions.Item>
-                                        <Descriptions.Item
-                                            label="Number of Classes">{project.noc}</Descriptions.Item>
-                                        <Descriptions.Item
-                                            label="Number of Methods">{project.nom}</Descriptions.Item>
-                                        <Descriptions.Item
-                                            label="Number of Fields">{project.nof}</Descriptions.Item>
+                                        {getProjectStats(project).map(([label, value]) => (
+                                            <Descriptions.Item key={label} label={label}>
+                                                {typeof value === "number" ? formatMetric(value) : value}
+                                            </Descriptions.Item>
+                                        ))}
                                         <Descriptions.Item label="GitHub">
-                                            <a href={project.githubLink} target="_blank"
-                                               rel="noopener noreferrer">
-                                                <GithubOutlined style={{marginRight: 8}}/>
-                                                {project.githubName}
-                                            </a>
+                                            {project.githubLink ? (
+                                                <a href={project.githubLink} target="_blank"
+                                                   rel="noopener noreferrer">
+                                                    <GithubOutlined style={{marginRight: 8}}/>
+                                                    {project.githubName}
+                                                </a>
+                                            ) : project.githubName}
                                         </Descriptions.Item>
                                     </Descriptions>
                                     <p style={{textAlign: "center"}}>{project.description}</p>
                                     <Tooltip
-                                        title={!project.summaryFlag ? "Repo summary in progress..." : ""}
+                                        title={project.projectType === "PYTHON" ? "Python analysis pipeline will be added later." : (!project.summaryFlag ? "Repo summary in progress..." : "")}
                                     >
                                         <div className={styles.buttonContainer}>
                                             <Button
@@ -129,7 +151,7 @@ const WelcomePage = () => {
                                                 onClick={() => {
                                                     handleConfirmButton(project.id);
                                                 }}
-                                                disabled={!project.summaryFlag}
+                                                disabled={!project.summaryFlag || project.projectType === "PYTHON"}
                                             >
                                                 Open
                                             </Button>
@@ -141,6 +163,7 @@ const WelcomePage = () => {
                     </div>
                     <div className={styles.uploadModalWrapper}>
                         <FolderUploadModal reloadGetProjectsInfo={getProjects}/>
+                        <GitDownModal reloadGetProjectsInfo={getProjects}/>
                     </div>
                 </Spin>
             </Spin>
@@ -160,5 +183,4 @@ const WelcomePage = () => {
 }
 
 export default WelcomePage;
-
 

@@ -27,6 +27,25 @@ const API = {
             repoId: repoId,
         })
     },
+    gitDownRepo: (gitName, commitId) => {
+        return axios.post(`${BASE_URL}/project/gitdown`, {
+            gitRepoName: gitName,
+            commitId: commitId,
+        }).then(response => response.data);
+    },
+    gitClear: (gitName, commitId) => {
+        return axios.post(`${BASE_URL}/project/gitclear`, {
+            gitRepoName: gitName,
+            commitId: commitId,
+        });
+    },
+    gitRepo: (gitName, commitId, folderName) => {
+        return axios.post(`${BASE_URL}/project/gitrepo`, {
+            gitRepoName: gitName,
+            commitId: commitId,
+            repoName: folderName,
+        }).then(response => response.data);
+    },
     getMinGraphData: (featureId) => {
         return axios.get(`${BASE_URL}/graph/feature/debloatGraph`, {
             params: {

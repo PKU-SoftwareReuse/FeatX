@@ -73,7 +73,6 @@
     color: white;
     padding: 8px 16px;
     border-radius: 8px;
-    margin-left: 12px;
     cursor: pointer;
     transition: background-color 0.3s;
 }
@@ -144,6 +143,7 @@
 .uploadModalWrapper {
     display: flex;
     justify-content: center;
+    gap: 12px;
     margin-top: 48px;
     margin-bottom: 24px;
 }

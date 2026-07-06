@@ -10,14 +10,20 @@ import com.github.javaparser.ast.body.TypeDeclaration;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class StatisticHelper {
     public static Map<String, Integer> countInRepo(String repoPath) {
+        return countJavaProject(repoPath);
+    }
+
+    public static Map<String, Integer> countJavaProject(String repoPath) {
         File projectDir = new File(repoPath);
 
         AtomicInteger totalLOC = new AtomicInteger(0);
@@ -33,6 +39,25 @@ public class StatisticHelper {
         map.put("noc", totalClasses.get());
         map.put("nom", totalMethods.get());
         map.put("nof", totalFields.get());
+
+        return map;
+    }
+
+    public static Map<String, Integer> countPythonProject(String repoPath) {
+        File projectDir = new File(repoPath);
+
+        AtomicInteger totalLOC = new AtomicInteger(0);
+        AtomicInteger totalClasses = new AtomicInteger(0);
+        AtomicInteger totalMethods = new AtomicInteger(0);
+        AtomicInteger totalFiles = new AtomicInteger(0);
+
+        countPythonInDir(projectDir, totalLOC, totalClasses, totalMethods, totalFiles);
+
+        Map<String, Integer> map = new HashMap<>();
+        map.put("loc", totalLOC.get());
+        map.put("noc", totalClasses.get());
+        map.put("nom", totalMethods.get());
+        map.put("nof", totalFiles.get());
 
         return map;
     }
@@ -109,6 +134,63 @@ public class StatisticHelper {
             totalFields.addAndGet((int) fieldCount);
 
 
+        } catch (IOException e) {
+            System.err.println("❌ 读取文件失败：" + file.getAbsolutePath());
+        }
+    }
+
+    private static void countPythonInDir(File dir, AtomicInteger totalLOC, AtomicInteger totalClasses, AtomicInteger totalMethods, AtomicInteger totalFiles) {
+        if (!dir.exists() || !dir.isDirectory()) {
+            System.out.println("❌ 目录不存在：" + dir.getAbsolutePath());
+            return;
+        }
+
+        File[] files = dir.listFiles();
+        if (files == null) return;
+
+        Arrays.stream(files)
+                .filter(file -> !isIgnoredDirectory(file))
+                .forEach(file -> {
+                    if (file.isDirectory()) {
+                        countPythonInDir(file, totalLOC, totalClasses, totalMethods, totalFiles);
+                    } else if (file.getName().endsWith(".py")) {
+                        totalFiles.incrementAndGet();
+                        countPythonFile(file, totalLOC, totalClasses, totalMethods);
+                    }
+                });
+    }
+
+    private static boolean isIgnoredDirectory(File file) {
+        if (!file.isDirectory()) return false;
+        String name = file.getName();
+        return name.equals(".git")
+                || name.equals("__pycache__")
+                || name.equals(".venv")
+                || name.equals("venv")
+                || name.equals("env")
+                || name.equals("node_modules")
+                || name.equals("target")
+                || name.equals("build")
+                || name.equals("dist");
+    }
+
+    private static void countPythonFile(File file, AtomicInteger totalLOC, AtomicInteger totalClasses, AtomicInteger totalMethods) {
+        Pattern classPattern = Pattern.compile("^\\s*class\\s+[A-Za-z_][A-Za-z0-9_]*.*");
+        Pattern functionPattern = Pattern.compile("^\\s*(async\\s+def|def)\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*");
+
+        try (Stream<String> lines = Files.lines(file.toPath())) {
+            lines.forEach(line -> {
+                String trimmed = line.trim();
+                if (!trimmed.isEmpty() && !trimmed.startsWith("#")) {
+                    totalLOC.incrementAndGet();
+                }
+                if (classPattern.matcher(line).matches()) {
+                    totalClasses.incrementAndGet();
+                }
+                if (functionPattern.matcher(line).matches()) {
+                    totalMethods.incrementAndGet();
+                }
+            });
         } catch (IOException e) {
             System.err.println("❌ 读取文件失败：" + file.getAbsolutePath());
         }

@@ -1,5 +1,5 @@
-import React, {useState, useEffect} from "react";
-import {Modal, Button, Input, Upload, Tree, message} from "antd";
+import React, {useEffect, useRef, useState} from "react";
+import {Modal, Button, Input, Upload, Tree, message, Tag} from "antd";
 import {InboxOutlined, FileOutlined, UploadOutlined} from "@ant-design/icons";
 import API from "../../API";
 import styles from "../WelcomePage.module.css";
@@ -7,101 +7,235 @@ import styles from "../WelcomePage.module.css";
 
 const {Dragger} = Upload;
 
+const SOURCE_TREE_LIMIT = 1000;
+
+const normalizePath = (path) => (path || "").replace(/\\/g, "/");
+
+const getRawPath = (file) => normalizePath(file.originFileObj?.webkitRelativePath || file.name);
+
+const isSourceFile = (path, projectType) => {
+    const lowerPath = normalizePath(path).toLowerCase();
+    return projectType === "JAVA" ? lowerPath.endsWith(".java") : lowerPath.endsWith(".py");
+};
+
+const stripThrough = (path, marker) => {
+    const lowerPath = path.toLowerCase();
+    const index = lowerPath.indexOf(marker);
+    return index >= 0 ? path.substring(index + marker.length) : path;
+};
+
+const stripPythonSourceRoot = (path) => {
+    const lowerPath = path.toLowerCase();
+    if (lowerPath.startsWith("src/")) {
+        return path.substring("src/".length);
+    }
+
+    const nestedSourceRootIndex = lowerPath.indexOf("/src/");
+    if (nestedSourceRootIndex >= 0) {
+        return path.substring(nestedSourceRootIndex + "/src/".length);
+    }
+
+    return path;
+};
+
+const sharedTopLevel = (paths) => {
+    if (!paths.length) return "";
+    const first = paths[0].split("/")[0];
+    if (!first) return "";
+    return paths.every(path => path.split("/")[0] === first) ? first : "";
+};
+
+const stripTopLevel = (path, topLevel) => {
+    if (!topLevel) return path;
+    return path === topLevel ? "" : path.startsWith(`${topLevel}/`) ? path.substring(topLevel.length + 1) : path;
+};
+
+const normalizeSourcePath = (path, projectType, topLevel) => {
+    let sourcePath = stripTopLevel(normalizePath(path), topLevel);
+    if (projectType === "JAVA") {
+        sourcePath = stripThrough(sourcePath, "src/main/java/");
+        if (sourcePath.toLowerCase().startsWith("java/")) {
+            sourcePath = sourcePath.substring("java/".length);
+        }
+    } else {
+        sourcePath = stripThrough(sourcePath, "src/main/python/");
+        sourcePath = stripPythonSourceRoot(sourcePath);
+    }
+
+    return sourcePath
+        .split("/")
+        .filter(part => part && part !== "." && part !== "..")
+        .join("/");
+};
+
+const detectProjectType = (paths) => {
+    let javaScore = 0;
+    let pythonScore = 0;
+
+    paths.forEach((path) => {
+        const lowerPath = normalizePath(path).toLowerCase();
+        if (lowerPath.endsWith(".java")) javaScore += 3;
+        if (lowerPath.includes("/src/main/java/") || lowerPath.startsWith("src/main/java/")) javaScore += 5;
+        if (lowerPath.endsWith("pom.xml") || lowerPath.endsWith("build.gradle") || lowerPath.endsWith("build.gradle.kts")) javaScore += 2;
+
+        if (lowerPath.endsWith(".py")) pythonScore += 3;
+        if (lowerPath.endsWith("pyproject.toml") || lowerPath.endsWith("setup.py") || lowerPath.endsWith("requirements.txt")) pythonScore += 2;
+    });
+
+    if (javaScore === 0 && pythonScore === 0) return null;
+    return javaScore >= pythonScore ? "JAVA" : "PYTHON";
+};
+
+const buildFileTree = (paths) => {
+    const root = {};
+
+    paths.forEach((path) => {
+        const parts = normalizePath(path).split("/").filter(Boolean);
+        let current = root;
+        parts.forEach((part, index) => {
+            if (!current[part]) {
+                current[part] = index === parts.length - 1 ? null : {};
+            }
+            current = current[part];
+        });
+    });
+
+    const toTreeData = (node, path = "") =>
+        Object.entries(node).map(([key, value]) => {
+            const fullPath = path ? `${path}/${key}` : key;
+            return {
+                title: key,
+                key: fullPath,
+                icon: value ? null : <FileOutlined/>,
+                children: value ? toTreeData(value, fullPath) : null,
+            };
+        });
+
+    return toTreeData(root);
+};
+
+const analyzeFiles = (fileList) => {
+    const files = fileList.filter(file => file.originFileObj);
+    const rawPaths = files.map(getRawPath);
+    const projectType = detectProjectType(rawPaths);
+
+    if (!projectType) {
+        return {
+            projectType: null,
+            sourceFiles: [],
+            treeData: [],
+            defaultFolderName: sharedTopLevel(rawPaths),
+        };
+    }
+
+    const topLevel = sharedTopLevel(rawPaths);
+    const sourceFiles = files
+        .filter(file => isSourceFile(getRawPath(file), projectType))
+        .map(file => ({
+            file,
+            path: normalizeSourcePath(getRawPath(file), projectType, topLevel),
+        }))
+        .filter(entry => entry.path);
+
+    return {
+        projectType,
+        sourceFiles,
+        treeData: buildFileTree(sourceFiles.slice(0, SOURCE_TREE_LIMIT).map(entry => entry.path)),
+        defaultFolderName: topLevel,
+    };
+};
+
 const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const [visible, setVisible] = useState(false);
-    const [folderFiles, setFolderFiles] = useState([]);
+    const [sourceFiles, setSourceFiles] = useState([]);
     const [folderName, setFolderName] = useState("");
     const [uploaded, setUploaded] = useState(false);
     const [treeData, setTreeData] = useState([]);
+    const [projectType, setProjectType] = useState(null);
+    const [status, setStatus] = useState("empty");
+    const debounceRef = useRef(null);
+    const hasUploadedRef = useRef(false);
 
+    useEffect(() => () => {
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
+    }, []);
 
     const props = {
         multiple: true,
         directory: true,
-        beforeUpload: () => false, // 阻止自动上传
+        beforeUpload: () => {
+            if (!hasUploadedRef.current) {
+                hasUploadedRef.current = true;
+                setUploaded(true);
+                setStatus("processing");
+            }
+            return false;
+        },
         onChange(info) {
-            if (uploaded) return; // 已上传就不再处理
-            setFolderFiles(info.fileList);
-            setUploaded(true);
-        }
+            if (debounceRef.current) {
+                clearTimeout(debounceRef.current);
+            }
 
+            debounceRef.current = setTimeout(() => {
+                const analysis = analyzeFiles(info.fileList);
+                setProjectType(analysis.projectType);
+                setSourceFiles(analysis.sourceFiles);
+                setTreeData(analysis.treeData);
+
+                if (analysis.defaultFolderName && !folderName) {
+                    setFolderName(analysis.defaultFolderName);
+                }
+
+                if (!analysis.projectType) {
+                    setStatus("unsupported");
+                    message.warning("Only Java and Python projects are supported.");
+                    return;
+                }
+
+                setStatus(analysis.sourceFiles.length > 0 ? "ready" : "unsupported");
+            }, 300);
+        },
     };
 
-    // 上传到后端
     const handleOk = async () => {
-        if (!folderFiles.length || !folderName) {
-            alert("请上传文件夹并输入名称");
-            return;
-        }
-        if (folderFiles[0].originFileObj.webkitRelativePath.substring(0, 4) != "java") {
-            alert("上传文件夹不合要求，请重新上传");
-            setFolderFiles([])
-            setUploaded(false)
+        if (!sourceFiles.length || !folderName || !projectType) {
+            message.warning("Please select a Java or Python project and enter a repo name.");
             return;
         }
 
         const projectData = new FormData();
-        folderFiles.forEach((file) => {
+        sourceFiles.forEach(({file, path}) => {
             projectData.append("files", file.originFileObj);
-            projectData.append("paths", file.originFileObj.webkitRelativePath); // 👈 添加相对路径
+            projectData.append("paths", path);
         });
         projectData.append("folderName", folderName);
+        projectData.append("projectType", projectType);
 
-        API.uploadProject(projectData).then(response => {
-            handleCancel()
-            alert("上传成功")
-            reloadGetProjectsInfo()
-            // setProject("diy_" + folderName)
+        API.uploadProject(projectData).then(() => {
+            handleCancel();
+            message.success("Upload succeeded.");
+            reloadGetProjectsInfo();
         }).catch(error => {
-            alert("上传失败")
-            console.log(error)
-        })
+            message.error("Upload failed.");
+            console.log(error);
+        });
     };
 
     const handleCancel = () => {
         setVisible(false);
         setUploaded(false);
-        setFolderFiles([]);
+        setSourceFiles([]);
         setTreeData([]);
-        setFolderName(null);
-    }
-
-    // 构建文件树结构
-    const buildFileTree = (files) => {
-        const root = {};
-
-        files.forEach((file) => {
-            const path = file.originFileObj.webkitRelativePath || file.name;
-            const parts = path.split("/");
-            let current = root;
-            for (let i = 0; i < parts.length; i++) {
-                const part = parts[i];
-                if (!current[part]) {
-                    current[part] = i === parts.length - 1 ? null : {};
-                }
-                current = current[part];
-            }
-        });
-
-        const toTreeData = (node, path = "") =>
-            Object.entries(node).map(([key, value]) => {
-                const fullPath = path ? `${path}/${key}` : key;
-                return {
-                    title: key,
-                    key: fullPath,
-                    icon: value ? null : <FileOutlined/>,
-                    children: value ? toTreeData(value, fullPath) : null,
-                };
-            });
-
-        return toTreeData(root);
+        setFolderName("");
+        setProjectType(null);
+        setStatus("empty");
+        hasUploadedRef.current = false;
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
     };
-
-    // 更新文件树
-    useEffect(() => {
-        const tree = buildFileTree(folderFiles);
-        setTreeData(tree);
-    }, [folderFiles]);
 
     return (
         <>
@@ -111,40 +245,43 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                 Upload New Repo
             </Button>
             <Modal
-                title="Upload the source code folder of the repository to be analyzed (XXX/src/main/java folder)"
+                title="Upload a Java or Python project"
                 open={visible}
                 onOk={handleOk}
                 onCancel={handleCancel}
-                width={600}
+                okButtonProps={{disabled: status !== "ready"}}
+                width={640}
+                maskClosable={false}
             >
-                {/* 拖拽上传区域 */}
-                {!uploaded && (
+                <div style={{display: uploaded ? "none" : "block"}}>
                     <Dragger
                         {...props}
                         showUploadList={false}
-                        fileList={folderFiles}
-                        disabled={uploaded}
+                        fileList={[]}
                     >
                         <p className="ant-upload-drag-icon">
                             <InboxOutlined/>
                         </p>
-                        <p className="ant-upload-text">
-                            {uploaded ? "已上传文件夹" : "Drag the folder here or click to select to upload"}
-                        </p>
+                        <p className="ant-upload-text">Drag a project folder here or click to select it</p>
                     </Dragger>
-                )}
-                {/* 文件树结构展示 */}
-                <div style={{marginTop: 20, marginBottom: 20}}>
-                    {treeData.length > 0 && (
-                        <div>
-                            <p style={{fontWeight: "bold"}}>📁 File structure: </p>
-                            <Tree treeData={treeData} defaultExpandAll showIcon/>
+                </div>
+
+                <div style={{marginTop: 16, marginBottom: 16}}>
+                    {projectType && (
+                        <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
+                            <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
+                            <span>{sourceFiles.length.toLocaleString()} source files selected</span>
+                            {sourceFiles.length > SOURCE_TREE_LIMIT && (
+                                <span>Showing first {SOURCE_TREE_LIMIT.toLocaleString()} files</span>
+                            )}
                         </div>
+                    )}
+                    {status === "processing" && <p>Reading folder...</p>}
+                    {treeData.length > 0 && (
+                        <Tree treeData={treeData} defaultExpandAll showIcon height={320}/>
                     )}
                 </div>
 
-
-                {/* 下方按钮和输入框 */}
                 <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
                     <Input
                         placeholder="Please enter repo's name"
@@ -152,7 +289,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                         onChange={(e) => setFolderName(e.target.value)}
                     />
                 </div>
-
             </Modal>
         </>
     );

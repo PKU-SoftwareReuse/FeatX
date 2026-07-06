@@ -16,6 +16,8 @@ public class ProjectInfoResult {
 
     private String description;
 
+    private String projectType;
+
     private String githubLink;
 
     private String githubName;
@@ -35,6 +37,7 @@ public class ProjectInfoResult {
         this.id = projectInfo.getId();
         this.projectName = projectInfo.getRepoName();
         this.description = projectInfo.getDescription();
+        this.projectType = extractProjectType(this.description);
         this.githubLink = projectInfo.getGitLink();
         this.githubName = extractGitName(this.githubLink);
         this.loc = projectInfo.getLoc();
@@ -56,5 +59,12 @@ public class ProjectInfoResult {
             return matcher.group(1);
         }
         return "Error in Extract Git Name";
+    }
+
+    private static String extractProjectType(String description) {
+        if (description == null) return "JAVA";
+        String normalized = description.toLowerCase();
+        if (normalized.contains("[python]") || normalized.contains("python repo")) return "PYTHON";
+        return "JAVA";
     }
 }
