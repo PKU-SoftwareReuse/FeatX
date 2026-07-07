@@ -1,4 +1,5 @@
 from openai import OpenAI
+import concurrent.futures
 import time
 import json
 import random
@@ -24,8 +25,30 @@ from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
 load_dotenv()
+
+
+def get_positive_int_env(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        print(f"Invalid {name}={value!r}; using {default}")
+        return default
+    if parsed <= 0:
+        print(f"Invalid {name}={value!r}; using {default}")
+        return default
+    return parsed
+
+
+LLM_RETRY_ATTEMPTS = int(os.getenv("REPOSUMMARY_LLM_RETRIES", "10"))
+LLM_RETRY_BASE_DELAY = float(os.getenv("REPOSUMMARY_LLM_RETRY_BASE_DELAY", "1.0"))
+LLM_RETRY_MAX_DELAY = float(os.getenv("REPOSUMMARY_LLM_RETRY_MAX_DELAY", "60.0"))
+LLM_MAX_WORKERS = get_positive_int_env("REPOSUMMARY_LLM_MAX_WORKERS", 50)
+
+
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     base_url=os.getenv("OPENAI_BASE_URL")
@@ -1236,17 +1259,52 @@ Please return the response in the following JSON format:
 """
 
 
-def call_with_retry(fn, retries=5, base_delay=0.5, max_delay=8.0):
+def is_retryable_llm_error(error: Exception) -> bool:
+    status_code = getattr(error, "status_code", None)
+    if status_code in (408, 409, 425, 429) or (isinstance(status_code, int) and status_code >= 500):
+        return True
+
+    error_name = error.__class__.__name__.lower()
+    if any(token in error_name for token in ["timeout", "connection", "rate", "api", "server"]):
+        return True
+
+    msg = str(error).lower()
+    retryable_markers = [
+        "429",
+        "rate limit",
+        "ratelimit",
+        "timeout",
+        "timed out",
+        "connection",
+        "upstream",
+        "temporarily",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "internal server error",
+        "server error",
+        "empty response",
+        "invalid json",
+        "missing description",
+    ]
+    return any(marker in msg for marker in retryable_markers)
+
+
+def call_with_retry(fn, retries=LLM_RETRY_ATTEMPTS, base_delay=LLM_RETRY_BASE_DELAY, max_delay=LLM_RETRY_MAX_DELAY):
+    last_error = None
     for i in range(retries):
         try:
             return fn()
         except Exception as e:
-            msg = str(e)
-            if "429" not in msg and "RateLimit" not in msg and "upstream" not in msg:
+            last_error = e
+            if not is_retryable_llm_error(e):
                 raise
+            if i == retries - 1:
+                break
             delay = min(max_delay, base_delay * (2 ** i)) * (1 + random.random() * 0.25)
+            print(f"LLM call failed; retrying {i + 1}/{retries} after {delay:.1f}s: {e}")
             time.sleep(delay)
-    return fn()
+    raise last_error
 
 
 def normalize_to_str(value: Any) -> str:
@@ -1334,46 +1392,122 @@ def parse_usecase_payload(json_str: str) -> Dict[str, Any]:
     return data
 
 
+def parse_description_response(content: str) -> str:
+    if content is None or not str(content).strip():
+        raise ValueError("empty response from LLM")
+
+    raw = clean_json_text(str(content))
+    data = json.loads(raw)
+    if "description" not in data and isinstance(data, dict) and data:
+        data = {"description": next(iter(data.values()))}
+
+    if "description" in data and not isinstance(data["description"], str):
+        data["description"] = normalize_to_str(data["description"])
+
+    description = str(data.get("description", "")).strip()
+    if not description or description.lower() in {"null", "none", "n/a"}:
+        raise ValueError("missing description in LLM response")
+    return description
+
+
+def request_description(prompt: str, modelname: str) -> str:
+    response = client.chat.completions.create(
+        messages=[{"role": "user", "content": prompt}],
+        model=modelname,
+        response_format={"type": "json_object"},
+        temperature=0.3,
+        top_p=0.95,
+        frequency_penalty=0.5,
+        presence_penalty=0.2
+    )
+    return parse_description_response(response.choices[0].message.content)
+
+
+def generate_description_with_retry(prompt: str, modelname: str, fallback: str, label: str) -> str:
+    try:
+        return call_with_retry(lambda: request_description(prompt, modelname))
+    except Exception as e:
+        print(f"LLM description generation failed for {label}; using fallback. Error: {e}")
+        return fallback
+
+
+def fallback_feature_description(feature: Feature) -> str:
+    function_names = [str(function.func_name).strip() for function in feature.feature_func_list if str(function.func_name).strip()]
+    full_names = [str(function.func_fullName).strip() for function in feature.feature_func_list if str(function.func_fullName).strip()]
+    source_names = function_names or full_names
+
+    if source_names:
+        preview = ", ".join(source_names[:3])
+        suffix = "" if len(source_names) <= 3 else f", and {len(source_names) - 3} more"
+        return f"Fallback feature summary for {preview}{suffix}."
+    return f"Fallback feature summary for Feature {feature.feature_id}."
+
+
+def fallback_module_description(method_cluster: method_Cluster, related_features: List[Feature]) -> str:
+    words = []
+    for feature in related_features:
+        words.extend(re.findall(r"[A-Za-z][A-Za-z0-9]+", str(feature.feature_desc)))
+
+    stop_words = {
+        "fallback", "feature", "summary", "user", "want", "wants", "able", "that", "this",
+        "with", "from", "into", "for", "and", "the", "system", "manage", "management"
+    }
+    candidates = [word for word in words if len(word) > 3 and word.lower() not in stop_words]
+    if candidates:
+        return " ".join(candidates[:3]) + " management"
+    return f"Module {method_cluster.cluster_id} feature group"
+
+
 class usecase(BaseModel):
     description: str
 
 
+def build_feature_prompt(feature: Feature) -> str:
+    code = ""
+    for function in feature.feature_func_list:
+        code += "function name:" + str(function.func_fullName) + "\ndescription:" + str(
+            function.func_desc) + "\nflow:" + str(function.func_flow) + "\nNon-functional requirements:" + str(
+            function.func_notf) + "\n"
+    return userstory_prompt.format(code_content=code)
+
+
+def describe_feature(feature: Feature, modelname: str):
+    prompt = build_feature_prompt(feature)
+    feature.feature_desc = generate_description_with_retry(
+        prompt=prompt,
+        modelname=modelname,
+        fallback=fallback_feature_description(feature),
+        label=f"feature {feature.feature_id}"
+    )
+    print(
+        f"Feature ID: {feature.feature_id}, Description: {feature.feature_desc}, Flow: {feature.feature_flow}, Non-functional requirements: {feature.feature_notf}")
+    return feature
+
+
 def generate_feature_description(feature_list, modelname: str):
     for feature in feature_list:
-        while feature.feature_desc == "":
-            # 生成提示词
-            code = ""
-            # feature_func_list: List[Function]
-            for function in feature.feature_func_list:
-                code += "function name:" + str(function.func_fullName) + "\ndescription:" + str(
-                    function.func_desc) + "\nflow:" + str(function.func_flow) + "\nNon-functional requirements:" + str(
-                    function.func_notf) + "\n"
-            prompt = userstory_prompt.format(
-                code_content=code
-            )
+        describe_feature(feature, modelname)
+
+
+def generate_feature_description_parallel(feature_list, modelname: str, max_workers: int = LLM_MAX_WORKERS):
+    if not feature_list:
+        return
+
+    worker_count = max(1, min(max_workers, len(feature_list)))
+    print(f"Generating feature descriptions in parallel with {worker_count} workers")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_to_feature = {
+            executor.submit(describe_feature, feature, modelname): feature
+            for feature in feature_list
+        }
+        for future in concurrent.futures.as_completed(future_to_feature):
+            feature = future_to_feature[future]
             try:
-                response = call_with_retry(lambda: client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt}],
-                    model=modelname,
-                    response_format={"type": "json_object"},
-                    temperature=0.3,
-                    top_p=0.95,
-                    frequency_penalty=0.5,
-                    presence_penalty=0.2
-                ))
-                json_str = response.choices[0].message.content
-                # 移除可能干扰JSON解析的代码块标记
-                json_str = json_str.replace("```json", "").replace("```", "")
-                result = usecase.model_validate(json.loads(json_str))  # 改用 model_validate
-                feature.feature_desc = result.description
-            except json.JSONDecodeError as e:
-                print(f"JSON解析失败: {e}\nRaw: {json_str}")
-            except ValidationError as e:
-                print(f"Pydantic验证失败: {e}\nRaw: {json_str}\nParsed: {result}")
+                future.result()
             except Exception as e:
-                print(f"其他错误: {e}")
-            print(
-                f"Feature ID: {feature.feature_id}, Description: {feature.feature_desc}, Flow: {feature.feature_flow}, Non-functional requirements: {feature.feature_notf}")
+                print(f"Feature {feature.feature_id} description task failed; using fallback. Error: {e}")
+                feature.feature_desc = fallback_feature_description(feature)
 
 
 merge_userstory_prompt = """
@@ -1418,33 +1552,14 @@ def merge_features_by_method_cluster(features, method_clusters, modelname: str):
             feature_list=feature_list,
             module_list=module_list
         )
-        try:
-            # 返回的结果是一个json数据，包含 description、flow 和 notf 字段
-            response = call_with_retry(lambda: client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=modelname,
-                response_format={"type": "json_object"},  # 强制要求返回JSON格式
-                temperature=0.3,  # 降低随机性
-                top_p=0.95,  # 保持一定的创造性
-                frequency_penalty=0.5,  # 抑制重复内容
-                presence_penalty=0.2  # 鼓励关键术语出现
-            ))
-            json_str = response.choices[0].message.content
-            # 移除可能干扰JSON解析的代码块标记
-            json_str = json_str.replace("```json", "").replace("```", "")
-            result_dict = json.loads(json_str)
-            if "description" not in result_dict and isinstance(result_dict, dict):
-                # 兼容 LLM 返回的 {模块名: 描述} 格式
-                result_dict = {"description": next(iter(result_dict.values()))}
-            result = module.model_validate(result_dict)
-            merged_features_des.append(result.description)
-            method_cluster.cluster_desc = result.description  # 更新method_cluster的描述
-        except json.JSONDecodeError as e:
-            print(f"JSON解析失败: {e}")
-        except ValidationError as e:
-            print(f"Pydantic验证失败: {e}")
-        except Exception as e:
-            print(f"其他错误: {e}")
+        module_desc = generate_description_with_retry(
+            prompt=prompt,
+            modelname=modelname,
+            fallback=fallback_module_description(method_cluster, related_features),
+            label=f"module {method_cluster.cluster_id}"
+        )
+        merged_features_des.append(module_desc)
+        method_cluster.cluster_desc = module_desc
         # 打印模块描述
         print(f"Module ID: {method_cluster.cluster_id}, Description: {method_cluster.cluster_desc}")
 
@@ -1617,7 +1732,7 @@ def repo_summary(project_root: str, output_dir: str):
 
     modelname = os.getenv("OPENAI_API_MODEL")
     # generate feature description using gpt
-    generate_feature_description(feature_list, modelname=modelname)
+    generate_feature_description_parallel(feature_list, modelname=modelname, max_workers=LLM_MAX_WORKERS)
 
     merge_features_by_method_cluster(feature_list, method_clusters, modelname=modelname)
 

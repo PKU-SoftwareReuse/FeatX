@@ -88,12 +88,27 @@ def main(project_id):
     conn.close()
 
 
+def normalize_description(value, fallback):
+    if value is None:
+        return fallback
+    if pd.isna(value):
+        return fallback
+    description = str(value).strip()
+    if not description or description.lower() in {"nan", "null", "none"}:
+        return fallback
+    return description
+
+
 def get_or_create_module(cursor, repo_id, cluster_id, module_desc):
+    module_desc = normalize_description(module_desc, f"Module {cluster_id} feature group")
     cursor.execute("""
-        SELECT id FROM modules WHERE repo=%s AND cluster_id=%s AND module_desc=%s
-    """, (repo_id, cluster_id, module_desc))
+        SELECT id FROM modules WHERE repo=%s AND cluster_id=%s
+    """, (repo_id, cluster_id))
     result = cursor.fetchone()
     if result:
+        cursor.execute("""
+            UPDATE modules SET module_desc=%s WHERE id=%s AND (module_desc IS NULL OR module_desc='')
+        """, (module_desc, result['id']))
         return result['id']
     cursor.execute("""
         INSERT INTO modules (repo, cluster_id, module_desc)
@@ -103,11 +118,15 @@ def get_or_create_module(cursor, repo_id, cluster_id, module_desc):
 
 
 def get_or_create_feature(cursor, module_id, feature_id_val, feature_desc):
+    feature_desc = normalize_description(feature_desc, f"Feature {feature_id_val}")
     cursor.execute("""
         SELECT id FROM features WHERE module=%s AND feature_id=%s
     """, (module_id, feature_id_val))
     result = cursor.fetchone()
     if result:
+        cursor.execute("""
+            UPDATE features SET feature_desc=%s WHERE id=%s AND (feature_desc IS NULL OR feature_desc='')
+        """, (feature_desc, result['id']))
         return result['id']
     cursor.execute("""
         INSERT INTO features (module, feature_id, feature_desc)
