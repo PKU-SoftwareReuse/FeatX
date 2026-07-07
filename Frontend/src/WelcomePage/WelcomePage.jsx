@@ -2,8 +2,8 @@
 import React, {useEffect, useState} from "react";
 import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
-import {Button, Card, Descriptions, Popconfirm, Spin, Tooltip,} from "antd";
-import {GithubOutlined, SyncOutlined} from '@ant-design/icons';
+import {Button, Card, Descriptions, message, Popconfirm, Spin, Tooltip,} from "antd";
+import {DeleteOutlined, GithubOutlined, SyncOutlined} from '@ant-design/icons';
 import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
@@ -86,6 +86,18 @@ const WelcomePage = () => {
         })
     }
 
+    const handleDropButton = (repoId) => {
+        setLoadingConnect(true);
+        API.postDropRepo(repoId).then(() => {
+            message.success("Project deleted.");
+            getProjects();
+        }).catch(error => {
+            setLoadingConnect(false);
+            message.error(error?.response?.data?.message || "Failed to delete project.");
+            console.log(error)
+        })
+    }
+
     return (
         <div className={styles.welcomePage}>
 
@@ -103,7 +115,23 @@ const WelcomePage = () => {
                                     key={index}
                                     title={
                                         <div className={styles.cardTitle}>
-                                            <span>{project.projectName}</span>
+                                            <Popconfirm
+                                                title="Confirm Delete Project"
+                                                description="Do you want to delete this project? This cannot be restored."
+                                                onConfirm={() => {
+                                                    handleDropButton(project.id);
+                                                }}
+                                                okText="Yes"
+                                                cancelText="No"
+                                            >
+                                                <Button
+                                                    type="text"
+                                                    danger
+                                                    icon={<DeleteOutlined/>}
+                                                    className={styles.titleButtonLeft}
+                                                />
+                                            </Popconfirm>
+                                            <span className={styles.cardTitleText}>{project.projectName}</span>
                                             <Popconfirm
                                                 title="Confirm ReSummary"
                                                 description="Do you want to get a brand new summary? It will take some minutes..."
@@ -116,7 +144,7 @@ const WelcomePage = () => {
                                                 <Button
                                                     type="text"
                                                     icon={<SyncOutlined/>}
-                                                    className={styles.titleButton}
+                                                    className={styles.titleButtonRight}
                                                     disabled={!project.summaryFlag || project.projectType === "PYTHON"}
                                                 />
                                             </Popconfirm>
@@ -183,4 +211,3 @@ const WelcomePage = () => {
 }
 
 export default WelcomePage;
-

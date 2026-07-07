@@ -117,11 +117,15 @@
 
 .cardTitleText {
     display: inline-block; /* 保证居中对齐时文字不会被撑开 */
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.titleButton {
+.titleButtonLeft,
+.titleButtonRight {
     position: absolute;
-    right: 0;  /* 靠最右 */
     top: 50%;
     transform: translateY(-50%); /* 垂直居中 */
     border: none;
@@ -130,6 +134,14 @@
     font-size: 14px;
     cursor: pointer;
     transition: background-color 0.2s;
+}
+
+.titleButtonLeft {
+    left: 0;
+}
+
+.titleButtonRight {
+    right: 0;
 }
 
 

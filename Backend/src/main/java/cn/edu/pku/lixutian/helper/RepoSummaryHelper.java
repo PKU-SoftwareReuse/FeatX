@@ -2,6 +2,7 @@ package cn.edu.pku.lixutian.helper;
 
 import java.io.*;
 import java.nio.charset.Charset;
+import java.util.Map;
 
 public class RepoSummaryHelper {
 
@@ -19,6 +20,7 @@ public class RepoSummaryHelper {
         );
 
         processBuilder.directory(new File(repoSummaryDir));
+        applyProxy(processBuilder);
 
         processBuilder.redirectErrorStream(true);
 
@@ -46,5 +48,25 @@ public class RepoSummaryHelper {
     private static String getEnvOrDefault(String key, String defaultValue) {
         String value = System.getenv(key);
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static void applyProxy(ProcessBuilder processBuilder) {
+        String proxyPort = System.getenv("GIT_PROXY_PORT");
+        if (proxyPort == null || proxyPort.isBlank()) {
+            return;
+        }
+
+        String proxyHost = System.getenv("GIT_PROXY_HOST");
+        if (proxyHost == null || proxyHost.isBlank()) {
+            proxyHost = "10.0.2.2";
+        }
+
+        String proxyUrl = "http://" + proxyHost.trim() + ":" + proxyPort.trim();
+        Map<String, String> environment = processBuilder.environment();
+        environment.put("http_proxy", proxyUrl);
+        environment.put("https_proxy", proxyUrl);
+        environment.put("HTTP_PROXY", proxyUrl);
+        environment.put("HTTPS_PROXY", proxyUrl);
+        environment.put("ALL_PROXY", proxyUrl);
     }
 }

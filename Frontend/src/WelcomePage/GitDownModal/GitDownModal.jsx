@@ -33,6 +33,14 @@ const buildFileTree = (paths) => {
     return toTreeData(root);
 };
 
+const getErrorMessage = (error, fallback) => {
+    const data = error?.response?.data;
+    if (typeof data === "string" && data.trim()) {
+        return data;
+    }
+    return data?.detail || data?.message || data?.error || fallback;
+};
+
 const GitDownModal = ({reloadGetProjectsInfo}) => {
     const [visible, setVisible] = useState(false);
     const [loadingPreview, setLoadingPreview] = useState(false);
@@ -73,7 +81,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             setFolderName(data.repoName || "");
             setTreeData(buildFileTree(data.paths || []));
         }).catch(error => {
-            message.error("Failed to clone repository.");
+            message.error(getErrorMessage(error, "Failed to clone repository."));
             console.log(error);
         }).finally(() => {
             setLoadingPreview(false);
@@ -92,7 +100,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             reloadGetProjectsInfo();
             reset();
         }).catch(error => {
-            message.error("Failed to import repository.");
+            message.error(getErrorMessage(error, "Failed to import repository."));
             console.log(error);
         }).finally(() => {
             setLoadingImport(false);

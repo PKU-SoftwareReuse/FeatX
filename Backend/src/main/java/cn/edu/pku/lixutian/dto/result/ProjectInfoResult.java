@@ -56,7 +56,7 @@ public class ProjectInfoResult {
         );
         Matcher matcher = pattern.matcher(url.trim());
         if (matcher.find()) {
-            return matcher.group(1);
+            return matcher.group(1).replaceAll("\\.git$", "");
         }
         return "Error in Extract Git Name";
     }

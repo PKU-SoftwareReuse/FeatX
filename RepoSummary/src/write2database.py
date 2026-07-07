@@ -3,13 +3,29 @@ from dotenv import load_dotenv
 import sys
 import pandas as pd
 import mysql.connector
-import csv
 
 from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 load_dotenv()
+
+
+def ensure_nonempty_csv(file_path, required_columns=None):
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        raise RuntimeError(f"Required RepoSummary output is empty or missing: {file_path}")
+
+    df = pd.read_csv(file_path)
+    if df.empty:
+        raise RuntimeError(f"Required RepoSummary output has no rows: {file_path}")
+
+    if required_columns:
+        missing = [column for column in required_columns if column not in df.columns]
+        if missing:
+            raise RuntimeError(f"RepoSummary output {file_path} is missing columns: {missing}")
+
+    return df
+
 
 def clear_project_data(cursor, project_id):
     """
@@ -124,10 +140,9 @@ def insert_row(row, cursor, repo_id):
 def save_features(project_id, cursor):
     file_path = os.path.join(BASE_DIR, "../output", project_id, "features.csv")
 
-    with open(file_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            insert_row(row, cursor, project_id)
+    df = ensure_nonempty_csv(file_path, ["id", "cluster_id", "module_desc", "desc", "method_name"])
+    for row in df.to_dict("records"):
+        insert_row(row, cursor, project_id)
 
 
 def get_or_create_graph_edge(cursor, src, dest, repo_id):

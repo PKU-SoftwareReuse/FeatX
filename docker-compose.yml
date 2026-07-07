@@ -28,6 +28,7 @@ services:
         condition: service_healthy
     environment:
       LTM_REPO_PATH: /workspace/repos
+      LOTM_REPO_PATH: /workspace/repos
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-lotm}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-featx}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-featx}
@@ -38,6 +39,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_MODEL: ${OPENAI_API_MODEL:-deepseek-v4-pro}
       SENTENCE_TRANSFORMER_MODEL: ${SENTENCE_TRANSFORMER_MODEL:-sentence-transformers/all-mpnet-base-v2}
+      GIT_PROXY_HOST: ${GIT_PROXY_HOST:-10.0.2.2}
+      GIT_PROXY_PORT: ${GIT_PROXY_PORT:-}
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${MYSQL_DATABASE:-lotm}

@@ -27,6 +27,11 @@ const API = {
             repoId: repoId,
         })
     },
+    postDropRepo: (repoId) => {
+        return axios.post(`${BASE_URL}/project/drop`, {
+            repoId: repoId,
+        })
+    },
     gitDownRepo: (gitName, commitId) => {
         return axios.post(`${BASE_URL}/project/gitdown`, {
             gitRepoName: gitName,

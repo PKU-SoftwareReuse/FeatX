@@ -102,7 +102,7 @@ def create_directory_summary(root_path):
             if file.endswith(('.java')):
                 afile_path = os.path.join(root, file)
                 relative_path = os.path.relpath(afile_path, root_path)  # 转换为相对路径
-                file_path = relative_path.replace("\\", ".").replace(".java", "")
+                file_path = java_class_path_from_file(relative_path)
                 file_name = file_path.split(".")[-1]
                 with open(afile_path, 'r', encoding='utf-8') as f:
                     file_content = f.read()
@@ -123,13 +123,82 @@ def create_directory_summary(root_path):
     return Files_summary
 
 
+def normalize_java_class_name(value: Any) -> str:
+    if value is None:
+        return ""
+    class_name = str(value).strip()
+    if class_name.endswith(".java"):
+        class_name = class_name[:-5]
+    class_name = class_name.replace("\\", ".").replace("/", ".")
+    class_name = re.sub(r"\.+", ".", class_name).strip(".")
+    return class_name
+
+
+def java_class_path_from_file(path: str) -> str:
+    class_path = os.path.splitext(str(path))[0]
+    return normalize_java_class_name(class_path)
+
+
+def java_class_name_from_signature(signature: str) -> str:
+    method_path = str(signature).split("(", 1)[0]
+    parts = method_path.split(".")
+    if len(parts) <= 1:
+        return method_path
+    return ".".join(parts[:-1])
+
+
+def simple_java_class_name(class_name: str) -> str:
+    class_name = normalize_java_class_name(class_name)
+    return class_name.split(".")[-1] if class_name else ""
+
+
 def add_functions_to_files(files: List[File], functions: List[Function]):
+    files_by_path = {normalize_java_class_name(file.file_path): file for file in files}
+    files_by_simple_name = defaultdict(list)
+    for file in files:
+        files_by_simple_name[file.file_name].append(file)
+
+    attached = 0
+    unmatched = []
     for function in functions:
-        class_name = function.func_file
-        for file in files:
-            if file.file_name == class_name:
-                file.func_list.append(function)
+        candidate_classes = [
+            normalize_java_class_name(function.func_file),
+            java_class_name_from_signature(function.func_fullName),
+        ]
+
+        matched_file = None
+        for class_name in candidate_classes:
+            if class_name in files_by_path:
+                matched_file = files_by_path[class_name]
                 break
+
+        if matched_file is None:
+            for class_name in candidate_classes:
+                simple_name = simple_java_class_name(class_name)
+                simple_matches = files_by_simple_name.get(simple_name, [])
+                if len(simple_matches) == 1:
+                    matched_file = simple_matches[0]
+                    break
+
+        if matched_file is None:
+            unmatched.append(function.func_fullName)
+            continue
+
+        matched_file.func_list.append(function)
+        attached += 1
+
+    print(f"Attached {attached}/{len(functions)} methods to files")
+    if unmatched:
+        print(f"Unmatched method examples: {unmatched[:5]}")
+    return attached
+
+
+def class_name_from_method_row(row) -> str:
+    class_name = row.get("class_name", "")
+    class_name = normalize_java_class_name(class_name)
+    if class_name:
+        return class_name
+    return java_class_name_from_signature(row["method_signature"])
 
 
 def compute_similarity_matrix(files: List[File]):
@@ -1438,7 +1507,7 @@ def repo_summary(project_root: str, output_dir: str):
     for index, row in method_df.iterrows():
         function_fullName = row["method_signature"]
         function_name = function_fullName.split("(")[0].split(".")[-1]
-        func_file = function_fullName.split("(")[0].split(".")[-2]
+        func_file = class_name_from_method_row(row)
         function = Function(
             func_id=row["ID"],
             func_name=function_name,
@@ -1468,7 +1537,11 @@ def repo_summary(project_root: str, output_dir: str):
     # Load files
     files = create_directory_summary(project_root)
 
-    add_functions_to_files(files, functions)
+    attached_functions = add_functions_to_files(files, functions)
+    if functions and attached_functions == 0:
+        raise RuntimeError(
+            "No parsed Java methods were attached to files; check class/path normalization before generating features."
+        )
 
     # Print some file and function details for verification
     for file in files[:5]:

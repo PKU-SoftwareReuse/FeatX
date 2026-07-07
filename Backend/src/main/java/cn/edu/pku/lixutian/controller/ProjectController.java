@@ -3,6 +3,8 @@ package cn.edu.pku.lixutian.controller;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.dao.ProjectInfo;
+import cn.edu.pku.lixutian.dao.repository.GraphEdgeRepository;
+import cn.edu.pku.lixutian.dao.repository.ModuleRepository;
 import cn.edu.pku.lixutian.dao.repository.ProjectInfoRepository;
 import cn.edu.pku.lixutian.dto.request.GitRepoRequest;
 import cn.edu.pku.lixutian.dto.request.SelectProjectRequest;
@@ -30,6 +32,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 @RestController
@@ -40,6 +43,12 @@ public class ProjectController {
 
     @Autowired
     ProjectInfoRepository projectInfoRepository;
+
+    @Autowired
+    ModuleRepository moduleRepository;
+
+    @Autowired
+    GraphEdgeRepository graphEdgeRepository;
 
     @Autowired
     CodeMapService codeMapService;
@@ -68,6 +77,22 @@ public class ProjectController {
 
     private String repoId2Path(Integer repoId) {
         return LtmConfig.getRepoPath() + "/" + repoId;
+    }
+
+    @PostMapping("/drop")
+    public void dropProject(@RequestBody SelectProjectRequest request) throws IOException {
+        if (request == null || request.getRepoId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project id is required.");
+        }
+        Integer repoId = request.getRepoId();
+        if (!projectInfoRepository.existsById(repoId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found.");
+        }
+
+        graphEdgeRepository.deleteAll(graphEdgeRepository.findByRepo_Id(repoId));
+        moduleRepository.deleteAll(moduleRepository.findByRepo_Id(repoId));
+        projectInfoRepository.deleteById(repoId);
+        deleteDirectoryIfExists(repoPath(repoId));
     }
 
     @PostMapping("/upload")
@@ -99,7 +124,7 @@ public class ProjectController {
         Files.createDirectories(stagingPath.getParent());
 
         String gitUrl = normalizeGitUrl(request.getGitRepoName());
-        runCommand(stagingPath.getParent(), List.of("git", "clone", gitUrl, stagingPath.toString()));
+        runGitClone(stagingPath.getParent(), stagingPath, gitUrl);
         if (hasText(request.getCommitId())) {
             runCommand(stagingPath, List.of("git", "checkout", request.getCommitId().trim()));
         }
@@ -394,17 +419,93 @@ public class ProjectController {
         return repoName;
     }
 
+    private void runGitClone(Path workingDirectory, Path stagingPath, String gitUrl) throws IOException, InterruptedException {
+        List<String> command = List.of(
+                "git",
+                "-c", "http.version=HTTP/1.1",
+                "clone",
+                gitUrl,
+                stagingPath.toString());
+        ResponseStatusException lastException = null;
+
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            deleteDirectoryIfExists(stagingPath);
+            try {
+                runCommand(workingDirectory, command);
+                return;
+            } catch (ResponseStatusException exception) {
+                lastException = exception;
+                if (attempt == 3 || !isTransientGitFailure(exception.getReason())) {
+                    break;
+                }
+                Thread.sleep(1000L * attempt);
+            }
+        }
+
+        throw new ResponseStatusException(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Git clone failed after retries.\n" + (lastException == null ? "" : lastException.getReason()));
+    }
+
+    private boolean isTransientGitFailure(String reason) {
+        if (!hasText(reason)) {
+            return true;
+        }
+        String normalized = reason.toLowerCase(Locale.ROOT);
+        return normalized.contains("gnutls_handshake")
+                || normalized.contains("tls connection")
+                || normalized.contains("failed to connect")
+                || normalized.contains("connection timed out")
+                || normalized.contains("connection was reset")
+                || normalized.contains("early eof")
+                || normalized.contains("rpc failed")
+                || normalized.contains("operation timed out")
+                || normalized.contains("could not resolve host");
+    }
+
     private void runCommand(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workingDirectory.toFile());
+        applyGitProxy(processBuilder);
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
+        boolean exited = process.waitFor(180, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(10, TimeUnit.SECONDS);
+        }
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        int exitCode = process.waitFor();
+        if (!exited) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Command timed out: " + String.join(" ", command) + "\n" + output);
+        }
+        int exitCode = process.exitValue();
         if (exitCode != 0) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Command failed: " + String.join(" ", command) + "\n" + output);
         }
+    }
+
+    private void applyGitProxy(ProcessBuilder processBuilder) {
+        String proxyPort = System.getenv("GIT_PROXY_PORT");
+        if (!hasText(proxyPort)) {
+            return;
+        }
+
+        String proxyHost = System.getenv("GIT_PROXY_HOST");
+        if (!hasText(proxyHost)) {
+            proxyHost = "10.0.2.2";
+        }
+
+        String proxyUrl = "http://" + proxyHost.trim() + ":" + proxyPort.trim();
+        Map<String, String> environment = processBuilder.environment();
+        environment.put("http_proxy", proxyUrl);
+        environment.put("https_proxy", proxyUrl);
+        environment.put("HTTP_PROXY", proxyUrl);
+        environment.put("HTTPS_PROXY", proxyUrl);
+        environment.put("ALL_PROXY", proxyUrl);
+        environment.put("GIT_HTTP_PROXY", proxyUrl);
+        environment.put("GIT_HTTPS_PROXY", proxyUrl);
     }
 
     private void deleteDirectoryIfExists(Path path) throws IOException {
