@@ -81,7 +81,7 @@ const getFeatureDescription = (feature, language) =>
     getLocalizedField(feature, "featureDescription", language);
 
 const DebloatingPage = () => {
-    const {language} = useLanguage();
+    const {language, apiLanguage} = useLanguage();
     const copy = DEBLOATING_COPY[language];
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
@@ -456,9 +456,9 @@ const DebloatingPage = () => {
 
         if (selectedType == 'edit') {
             // console.log(editedText);
-            API.modifyFeature(editedText)
+            API.modifyFeature(editedText, apiLanguage)
                 .then((data) => {
-                    handleChat(API.getLlmResponse())
+                    handleChat(API.getLlmResponse(apiLanguage))
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -467,12 +467,13 @@ const DebloatingPage = () => {
             // 构建请求参数，包含moduleId
             const requestData = {
                 featureDescription: editedText,
-                moduleId: item.moduleId || selectedFeatureItem.moduleId
+                moduleId: item.moduleId || selectedFeatureItem.moduleId,
+                language: apiLanguage,
             };
 
             API.addFeature(requestData)
                 .then((data) => {
-                    handleChat(API.getLlmResponse())
+                    handleChat(API.getLlmResponse(apiLanguage))
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)

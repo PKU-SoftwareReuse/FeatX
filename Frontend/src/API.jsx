@@ -117,9 +117,10 @@ const API = {
         return axios.post(`${BASE_URL}/feature/confirm/delete`)
     },
 
-    modifyFeature: (featureDescription) => {
+    modifyFeature: (featureDescription, language) => {
         return axios.post(`${BASE_URL}/feature/modify`, {
-            featureDescription: featureDescription
+            featureDescription: featureDescription,
+            language: language,
         })
     },
     confirmModify: () => {
@@ -134,8 +135,8 @@ const API = {
         return axios.post(`${BASE_URL}/feature/confirm/add`)
             .then(response => response.data);
     },
-    getLlmResponse: () => {
-        return new EventSource(`${BASE_URL}/llm/get`,)
+    getLlmResponse: (language) => {
+        return new EventSource(`${BASE_URL}/llm/get?language=${encodeURIComponent(language)}`)
     },
 
 

@@ -56,6 +56,7 @@ export const LanguageProvider = ({children}) => {
     const value = useMemo(() => ({
         language,
         isChinese: language === "zh",
+        apiLanguage: language === "zh" ? "CN" : "EN",
         setLanguage,
     }), [language]);
 

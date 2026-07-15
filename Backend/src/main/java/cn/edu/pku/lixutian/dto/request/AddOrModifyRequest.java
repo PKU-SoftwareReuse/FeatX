@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.dto.request;
 
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -8,4 +9,5 @@ import lombok.Setter;
 public class AddOrModifyRequest {
     private String featureDescription;
     private Integer moduleId;   // 新增
+    private AgentLanguage language = AgentLanguage.EN;
 }

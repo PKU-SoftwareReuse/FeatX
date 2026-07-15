@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.service;
 
 import cn.edu.pku.lixutian.service.code.AgentService;
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.ProjectState;
@@ -247,16 +248,30 @@ public class CodeMapService {
         return true;
     }
 
-    public Integer modifyFeatureFromMemoryAndDatabase(Integer featureId, String newFeatureDescription) throws ParseException, IOException, InterruptedException {
-        return modifyOrAddFeatureFromMemoryAndDatabase(featureId, newFeatureDescription, "modify");
+    public Integer modifyFeatureFromMemoryAndDatabase(
+            Integer featureId,
+            String newFeatureDescription,
+            AgentLanguage language
+    ) throws ParseException, IOException, InterruptedException {
+        return modifyOrAddFeatureFromMemoryAndDatabase(featureId, newFeatureDescription, "modify", language);
     }
 
-    public Integer addFeatureFromMemoryAndDatabase(Integer moduleId, String newFeatureDescription) throws ParseException, IOException, InterruptedException {
-        return modifyOrAddFeatureFromMemoryAndDatabase(moduleId, newFeatureDescription, "add");
+    public Integer addFeatureFromMemoryAndDatabase(
+            Integer moduleId,
+            String newFeatureDescription,
+            AgentLanguage language
+    ) throws ParseException, IOException, InterruptedException {
+        return modifyOrAddFeatureFromMemoryAndDatabase(moduleId, newFeatureDescription, "add", language);
     }
 
-    private Integer modifyOrAddFeatureFromMemoryAndDatabase(Integer featureOrModuleId, String newFeatureDescription, String type) throws ParseException, IOException, InterruptedException {
+    private Integer modifyOrAddFeatureFromMemoryAndDatabase(
+            Integer featureOrModuleId,
+            String newFeatureDescription,
+            String type,
+            AgentLanguage language
+    ) throws ParseException, IOException, InterruptedException {
         Integer featureId;
+        AgentLanguage descriptionLanguage = AgentLanguage.orDefault(language);
         if (type.equals("modify")) {
             // 1. 改内存表
             FeatureResult candidateFeature = null;
@@ -272,11 +287,16 @@ public class CodeMapService {
                 }
             }
             assert candidateFeature != null;
-            candidateFeature.setFeatureDescription(newFeatureDescription);
 
             // 2. 改数据库
             Feature candidateFeatureEntity = featureRepository.findById(candidateFeature.getFeatureId()).get();
-            candidateFeatureEntity.setFeatureDesc(newFeatureDescription);
+            if (descriptionLanguage == AgentLanguage.CN) {
+                candidateFeature.setFeatureDescriptionCn(newFeatureDescription);
+                candidateFeatureEntity.setFeatureDescCN(newFeatureDescription);
+            } else {
+                candidateFeature.setFeatureDescription(newFeatureDescription);
+                candidateFeatureEntity.setFeatureDesc(newFeatureDescription);
+            }
             featureRepository.save(candidateFeatureEntity);
             featureId = featureOrModuleId;
         } else if (type.equals("add")) {
@@ -285,7 +305,11 @@ public class CodeMapService {
             for (ModuleResult moduleResult : moduleResults) {
                 if (moduleResult.getModuleId() == featureOrModuleId) {
                     candidateFeature = new FeatureResult();
-                    candidateFeature.setFeatureDescription(newFeatureDescription);
+                    if (descriptionLanguage == AgentLanguage.CN) {
+                        candidateFeature.setFeatureDescriptionCn(newFeatureDescription);
+                    } else {
+                        candidateFeature.setFeatureDescription(newFeatureDescription);
+                    }
                     moduleResult.getFeatureList().add(candidateFeature);
                     break;
                 }
@@ -295,7 +319,11 @@ public class CodeMapService {
             Feature candidateFeatureEntity = new Feature();
             Module module = entityManager.getReference(Module.class, featureOrModuleId);
             candidateFeatureEntity.setModule(module);
-            candidateFeatureEntity.setFeatureDesc(newFeatureDescription);
+            if (descriptionLanguage == AgentLanguage.CN) {
+                candidateFeatureEntity.setFeatureDescCN(newFeatureDescription);
+            } else {
+                candidateFeatureEntity.setFeatureDesc(newFeatureDescription);
+            }
             candidateFeatureEntity = featureRepository.save(candidateFeatureEntity);
             featureId = candidateFeatureEntity.getId();
         } else {

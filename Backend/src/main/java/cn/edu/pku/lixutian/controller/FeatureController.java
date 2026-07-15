@@ -5,6 +5,7 @@ import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.request.AddOrModifyRequest;
 import cn.edu.pku.lixutian.dto.result.ModuleResult;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import com.github.javaparser.ParseException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -50,14 +51,16 @@ public class FeatureController {
     public void modifyConfirm() throws ParseException, IOException, InterruptedException {
         Integer featureId = ClusterState.getInstance().getCandidateFeature().getFeatureId();
         String featureDescription = ClusterState.getInstance().getNewFeatureDescription();
-        codemapService.modifyFeatureFromMemoryAndDatabase(featureId, featureDescription);
+        AgentLanguage language = ClusterState.getInstance().getAgentLanguage();
+        codemapService.modifyFeatureFromMemoryAndDatabase(featureId, featureDescription, language);
     }
 
     @PostMapping("/confirm/add")
     public Integer addConfirm() throws ParseException, IOException, InterruptedException {
         Integer moduleId = ClusterState.getInstance().getCandidateModuleId();
         String featureDescription = ClusterState.getInstance().getNewFeatureDescription();
-        return codemapService.addFeatureFromMemoryAndDatabase(moduleId, featureDescription);
+        AgentLanguage language = ClusterState.getInstance().getAgentLanguage();
+        return codemapService.addFeatureFromMemoryAndDatabase(moduleId, featureDescription, language);
     }
 
 }

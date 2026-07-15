@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.service.code.AddAgentService;
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import cn.edu.pku.lixutian.service.code.ModifyAgentService;
 import cn.edu.pku.lixutian.config.ClusterState;
@@ -43,9 +44,15 @@ public class LlmController {
 
     public void modifyFeature(AddOrModifyRequest request) {
         mode = "modify";
+        requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+        ClusterState.getInstance().setAgentLanguage(requestLanguage);
         newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
-        oldRequest = ClusterState.getInstance().getCandidateFeature().getFeatureDescription();
+        oldRequest = localizedDescription(
+                ClusterState.getInstance().getCandidateFeature().getFeatureDescription(),
+                ClusterState.getInstance().getCandidateFeature().getFeatureDescriptionCn(),
+                requestLanguage
+        );
 
         relatedCodes = "";
         SKG maxGraph = SKG.getInstance().getMaxGraph();
@@ -68,6 +75,8 @@ public class LlmController {
 
     public void addFeature(AddOrModifyRequest request) {
         mode = "add";
+        requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+        ClusterState.getInstance().setAgentLanguage(requestLanguage);
         newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
 
@@ -81,7 +90,12 @@ public class LlmController {
                 break;
             }
 
-            relatedCodes += "Feature:\n" + "\"" + feature.getFeatureDesc() + "\": \n\n";
+            String featureDescription = localizedDescription(
+                    feature.getFeatureDesc(),
+                    feature.getFeatureDescCN(),
+                    requestLanguage
+            );
+            relatedCodes += requestLanguage.featureLabel() + "\n" + "\"" + featureDescription + "\": \n\n";
             codeMapService.selectFeature(feature.getId());
             SKG maxGraph = SKG.getInstance().getMaxGraph();
             VertexMap vertexMap = VertexMap.getInstance();
@@ -110,14 +124,19 @@ public class LlmController {
     private String oldRequest;
     private String relatedCodes;
     private String allFiles;
+    private AgentLanguage requestLanguage = AgentLanguage.EN;
 
 
     @GetMapping("/get")
-    public SseEmitter streamResponse(HttpServletResponse response) {
+    public SseEmitter streamResponse(
+            HttpServletResponse response,
+            @RequestParam(required = false) AgentLanguage language
+    ) {
+        AgentLanguage responseLanguage = language == null ? requestLanguage : language;
         if (mode.equals("modify")) {
-            return modifyAgentService.runPipeline(newRequest, oldRequest, relatedCodes, allFiles);
+            return modifyAgentService.runPipeline(newRequest, oldRequest, relatedCodes, allFiles, responseLanguage);
         } else if (mode.equals("add")) {
-            return addAgentService.runPipeline(newRequest, relatedCodes, allFiles);
+            return addAgentService.runPipeline(newRequest, relatedCodes, allFiles, responseLanguage);
         } else {
             throw new UnsupportedOperationException("非法访问");
         }
@@ -136,5 +155,18 @@ public class LlmController {
         return llmClient.streamGenerateWithPrompt("你是谁", emitter);
     }
 
-}
+    private String localizedDescription(String englishDescription, String chineseDescription, AgentLanguage language) {
+        if (language == AgentLanguage.CN && hasText(chineseDescription)) {
+            return chineseDescription;
+        }
+        if (hasText(englishDescription)) {
+            return englishDescription;
+        }
+        return hasText(chineseDescription) ? chineseDescription : "";
+    }
 
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+}

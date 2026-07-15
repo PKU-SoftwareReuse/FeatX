@@ -113,15 +113,21 @@ public class AddAgentService extends AgentService {
         return javaStr;
     }
 
-    public SseEmitter runPipeline(String changeRequest, String originalCode, String fileList) {
+    public SseEmitter runPipeline(
+            String changeRequest,
+            String originalCode,
+            String fileList,
+            AgentLanguage language
+    ) {
         SseEmitter emitter = new SseEmitter(0L); // 不超时
+        AgentLanguage responseLanguage = AgentLanguage.orDefault(language);
 
         // 在独立线程运行，避免阻塞
         Executors.newSingleThreadExecutor().submit(() -> {
             try {
                 // ===== Agent1 =====
-                emitter.send(SseEmitter.event().data(encode("# === Stage I: Information Requirement Analysis ===\n")));
-                String agent1Prompt = buildAgent1Prompt(changeRequest, originalCode, fileList);
+                emitter.send(SseEmitter.event().data(encode(responseLanguage.stageOneDescription())));
+                String agent1Prompt = buildAgent1Prompt(changeRequest, originalCode, fileList, responseLanguage);
 
                 String agent1Result = llmClient.streamGenerateWithPrompt(agent1Prompt, emitter);
 
@@ -135,14 +141,14 @@ public class AddAgentService extends AgentService {
                         extraInfo += "fileContent: " + fileContent + "\n=======================\n";
                     }
                 } else {
-                    extraInfo = "None";
+                    extraInfo = responseLanguage.noExtraInformation();
                 }
 
 
                 // ===== Agent2 =====
-                emitter.send(SseEmitter.event().data(encode("\n# === Stage II: Modification Planning ===\n")));
+                emitter.send(SseEmitter.event().data(encode(responseLanguage.stageTwoDescription())));
 
-                String agent2Prompt = buildAgent2Prompt(changeRequest, originalCode, extraInfo);
+                String agent2Prompt = buildAgent2Prompt(changeRequest, originalCode, extraInfo, responseLanguage);
 
                 String agent2Result = llmClient.streamGenerateWithPrompt(agent2Prompt, emitter);
 
@@ -151,26 +157,27 @@ public class AddAgentService extends AgentService {
                 // ===== Agent3 =====
                 Map<String, String> map = new HashMap<>();
                 for (ModifiedFile file : agent2ParsedResult.modifiedFileList) {
-                    emitter.send(SseEmitter.event().data(encode("\n# === Stage III: Concrete File Modification " + file.filename + " ===\n")));
+                    emitter.send(SseEmitter.event().data(encode(responseLanguage.stageThreeDescription(file.filename))));
                     String fileContent = ListFileHelper.getFileContent(ProjectState.getInstance().getSrcPath(), file.filename);
                     String plan = "";
                     plan += "filename: " + file.filename + "\n";
                     plan += "modificationPlan: " + file.plan + "\n";
                     plan += "modificationNote: " + file.note + "\n";
-                    String agent3Prompt = buildAgent3Prompt(changeRequest, plan, fileContent);
+                    String agent3Prompt = buildAgent3Prompt(changeRequest, plan, fileContent, responseLanguage);
 
                     String agent3Result = llmClient.streamGenerateWithPrompt(agent3Prompt, emitter);
                     map.put(file.filename, parseAgent3Result(agent3Result));
                 }
-                emitter.send(SseEmitter.event().data(encode("\n# === Pipeline complete! ===\n")));
+                emitter.send(SseEmitter.event().data(encode(responseLanguage.pipelineCompleteDescription())));
 
                 modificationMap = map;
 
                 emitter.complete();
 
             } catch (Exception e) {
+                logger.error("Add-feature agent pipeline failed", e);
                 try {
-                    emitter.send(SseEmitter.event().data(encode("错误: " + e.getMessage())));
+                    emitter.send(SseEmitter.event().data(encode(responseLanguage.pipelineErrorDescription())));
                 } catch (IOException ignored) {
 
                 }
@@ -185,7 +192,12 @@ public class AddAgentService extends AgentService {
         return Base64.getEncoder().encodeToString(input.getBytes(StandardCharsets.UTF_8));
     }
 
-    private String buildAgent1Prompt(String changeDesc, String code, String fileList) {
+    private String buildAgent1Prompt(
+            String changeDesc,
+            String code,
+            String fileList,
+            AgentLanguage language
+    ) {
         String promptTemplate = """
                 你是Agent1，负责分析新增功能相关的信息需求。
                 
@@ -209,21 +221,33 @@ public class AddAgentService extends AgentService {
                 - 如果不够，明确列出需要额外获取的文件路径列表，并说明原因
                 - 如果已有信息充分，明确回复“不需要额外文件”
                 
-                请全程使用英语回答，写出你的思考过程，并在回答末尾严格输出以下格式：
+                请全程使用%s回答，写出你的思考过程，并在回答末尾严格输出以下格式：
                 ```json
                 {
                     "needAdditionalFile": true/false,
                     "additionalFileList": [
-                        {"filename": "top.naccl.service.impl.DashboardServiceImpl", "recommendReason":"This file..."},
+                        {"filename": "top.naccl.service.impl.DashboardServiceImpl", "recommendReason":"%s"},
                         ...
                     ]
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, code, fileList);
+        return String.format(
+                promptTemplate,
+                changeDesc,
+                code,
+                fileList,
+                language.promptLanguageName(),
+                language.recommendReasonExample()
+        );
     }
 
-    private String buildAgent2Prompt(String changeDesc, String code, String extraInfo) {
+    private String buildAgent2Prompt(
+            String changeDesc,
+            String code,
+            String extraInfo,
+            AgentLanguage language
+    ) {
         String promptTemplate = """
                 你是Agent2，负责基于新的功能需求及现有代码制定详细的修改方案。
                 
@@ -248,14 +272,14 @@ public class AddAgentService extends AgentService {
                 - 明确列出需要修改的文件路径列表，确保列表只包含必须改动的文件
                 - 如果你认为不需要任何更改，请在json中返回空列表，不要给任何多余字段
                 
-                请全程使用英语回答，写出你关于修改方案和关键重难点的思考过程，并在回答末尾严格输出以下格式：
+                请全程使用%s回答，写出你关于修改方案和关键重难点的思考过程，并在回答末尾严格输出以下格式：
                 ```json
                 {
                     "modifiedFileList": [
                         {
                             "filename": "top.naccl.service.impl.DashboardServiceImpl", 
-                            "plan": "Detailed modification plan. First, ... Second, ... I need ...", 
-                            "note": "Some important or difficult point need to pay attention to. "
+                            "plan": "%s",
+                            "note": "%s"
                         },
                         {...},
                         ...
@@ -263,10 +287,23 @@ public class AddAgentService extends AgentService {
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, code, extraInfo);
+        return String.format(
+                promptTemplate,
+                changeDesc,
+                code,
+                extraInfo,
+                language.promptLanguageName(),
+                language.modificationPlanExample(),
+                language.modificationNoteExample()
+        );
     }
 
-    private String buildAgent3Prompt(String changeDesc, String plan, String fileContent) {
+    private String buildAgent3Prompt(
+            String changeDesc,
+            String plan,
+            String fileContent,
+            AgentLanguage language
+    ) {
         String promptTemplate = """
                 你是Agent3，负责具体文件级别的修改。
                 
@@ -290,6 +327,7 @@ public class AddAgentService extends AgentService {
                 - 不要省略任何代码部分，完整返回修改后文件的全部内容
                 - 确保代码逻辑正确，避免引入新错误
                 - 跳过文件的 package 和 import 部分
+                - 如果需要新增或修改自然语言注释，请使用%s
                 
                 仅输出修改后完整的文件内容，不要添加其他无关说明，也不要省略不需要修改的部分，严格遵守以下格式。
                 ```java
@@ -299,6 +337,12 @@ public class AddAgentService extends AgentService {
                 }
                 ```
                 """;
-        return String.format(promptTemplate, changeDesc, plan, fileContent);
+        return String.format(
+                promptTemplate,
+                changeDesc,
+                plan,
+                fileContent,
+                language.promptLanguageName()
+        );
     }
 }

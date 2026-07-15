@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.config;
 
 import cn.edu.pku.lixutian.dto.result.FeatureResult;
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -34,4 +35,8 @@ public class ClusterState {
     @Getter
     @Setter
     private Integer candidateModuleId;
+
+    @Getter
+    @Setter
+    private AgentLanguage agentLanguage = AgentLanguage.EN;
 }
