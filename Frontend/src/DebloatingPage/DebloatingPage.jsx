@@ -1,14 +1,15 @@
 // DebloatingPage.jsx
 
 import styles from './DebloatingPage.module.css';
-import React, {useEffect, useRef, useState} from "react";
-import {Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select} from "antd";
+import React, {useEffect, useMemo, useRef, useState} from "react";
+import {AutoComplete, Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select} from "antd";
 import {
     CloseOutlined,
     DeleteTwoTone,
     EditTwoTone,
     PlusSquareTwoTone,
     ExclamationCircleOutlined,
+    SearchOutlined,
     SwapOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
@@ -33,6 +34,8 @@ const DEBLOATING_COPY = {
         completed: "操作已完成",
         applyingChanges: "正在应用代码变更……",
         featurePanel: "功能特征面板",
+        searchFeatures: "搜索功能特征",
+        noFeatureMatches: "未找到匹配的功能特征",
         fetchingFeatureSummary: "正在获取代码仓库的功能特征摘要。",
         pendingChanges: "请确认应用或放弃修改。",
         submit: "提交",
@@ -62,6 +65,8 @@ const DEBLOATING_COPY = {
         completed: "This is a [Fake] success message",
         applyingChanges: "Applying the Code Diff...",
         featurePanel: "Feature Panel",
+        searchFeatures: "Search features",
+        noFeatureMatches: "No matching features",
         fetchingFeatureSummary: "Fetching repo's feature summary.",
         pendingChanges: "You have made some modifications. Please confirm or drop it.",
         submit: "Submit",
@@ -89,8 +94,15 @@ const getModuleDescription = (module, language) =>
 const getFeatureDescription = (feature, language) =>
     getLocalizedField(feature, "featureDescription", language);
 
+const getFeatureDisplayIndex = (featureList, item) => item.isNew || item.isNewGenerated
+    ? 0
+    : featureList
+        .filter((feature) => !feature.isNew && !feature.isNewGenerated)
+        .findIndex((feature) => feature === item) + 1;
+
 const FeatureListItem = ({
     item,
+    moduleId,
     itemNumber,
     description,
     selectedType,
@@ -146,6 +158,8 @@ const FeatureListItem = ({
     return (
         <List.Item
             onClick={() => onClickItem(item)}
+            data-feature-id={String(item.featureId)}
+            data-module-id={String(moduleId)}
             className={classNames({
                 [styles.item]: true,
                 [styles.selectedItem]: isSelected,
@@ -414,7 +428,7 @@ const DebloatingPage = () => {
         }
     }
 
-    const handleSelect = (item) => {
+    const handleSelect = (item, onSelected) => {
         if (selectedType == "add" || selectedType == "edit") {
             modal.confirm({
                 title: copy.switchTitle,
@@ -425,10 +439,12 @@ const DebloatingPage = () => {
                 onOk: async () => {
                     await getFeatureData()
                     goSelect(item)
+                    onSelected?.()
                 }
             });
         } else {
             goSelect(item)
+            onSelected?.()
         }
     }
 
@@ -507,6 +523,106 @@ const DebloatingPage = () => {
 
     const [editedText, setEditedText] = useState('')
     const [activeKey, setActiveKey] = useState(null);
+    const [featureSearchText, setFeatureSearchText] = useState('');
+    const [featureScrollTarget, setFeatureScrollTarget] = useState(null);
+    const featureScrollContainerRef = useRef(null);
+
+    const featureSearchOptions = useMemo(() => {
+        const query = featureSearchText.trim().toLocaleLowerCase();
+        if (!query) return [];
+
+        const matches = [];
+        featureData.forEach((module, moduleIndex) => {
+            const displayedModuleDescription = getModuleDescription(module, language);
+            const searchableModuleDescriptions = [
+                getModuleDescription(module, "zh"),
+                getModuleDescription(module, "en"),
+            ];
+
+            module.featureList.forEach((item) => {
+                const displayIndex = getFeatureDisplayIndex(module.featureList, item);
+                const itemNumber = `${moduleIndex + 1}.${displayIndex}`;
+                const displayedDescription = getFeatureDescription(item, language);
+                const searchableText = [
+                    itemNumber,
+                    item.featureId,
+                    getFeatureDescription(item, "zh"),
+                    getFeatureDescription(item, "en"),
+                    ...searchableModuleDescriptions,
+                ].join(" ").toLocaleLowerCase();
+
+                if (!searchableText.includes(query)) return;
+
+                const selectionText = `${itemNumber} ${displayedDescription}`.trim();
+                matches.push({
+                    key: `${String(module.moduleId)}-${String(item.featureId)}`,
+                    value: selectionText,
+                    moduleId: String(module.moduleId),
+                    featureId: String(item.featureId),
+                    label: (
+                        <div className={styles.featureSearchOption}>
+                            <div className={styles.featureSearchOptionTitle}>{selectionText}</div>
+                            <div className={styles.featureSearchOptionModule}>
+                                {`${moduleIndex + 1}. ${displayedModuleDescription}`}
+                            </div>
+                        </div>
+                    ),
+                });
+            });
+        });
+
+        return matches.slice(0, 50);
+    }, [featureData, featureSearchText, language]);
+
+    useEffect(() => {
+        if (!featureScrollTarget || String(activeKey) !== featureScrollTarget.moduleId) {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            const targetElement = Array.from(
+                featureScrollContainerRef.current?.querySelectorAll("[data-feature-id][data-module-id]") || []
+            ).find((element) => (
+                element.dataset.featureId === featureScrollTarget.featureId
+                && element.dataset.moduleId === featureScrollTarget.moduleId
+            ));
+
+            if (!targetElement) return;
+
+            const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+            targetElement.scrollIntoView({
+                behavior: reduceMotion ? "auto" : "smooth",
+                block: "center",
+                inline: "nearest",
+            });
+            setFeatureScrollTarget(null);
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [activeKey, featureData, featureScrollTarget]);
+
+    const handleFeatureSearchSelect = (value) => {
+        const selectedOption = featureSearchOptions.find((option) => option.value === value);
+        if (!selectedOption) return;
+
+        const targetModule = featureData.find(
+            (module) => String(module.moduleId) === selectedOption.moduleId
+        );
+        const targetFeature = targetModule?.featureList.find(
+            (feature) => String(feature.featureId) === selectedOption.featureId
+        );
+        if (!targetModule || !targetFeature) return;
+
+        setFeatureSearchText(value);
+        handleSelect(targetFeature, () => {
+            setDiffDrawerOpen(false);
+            setActiveKey(targetModule.moduleId);
+            setFeatureScrollTarget({
+                moduleId: selectedOption.moduleId,
+                featureId: selectedOption.featureId,
+            });
+        });
+    };
 
     const changeActiveKey = (newActiveKey) => {
         if (selectedType == "edit" || selectedType == "add") {
@@ -761,7 +877,12 @@ const DebloatingPage = () => {
     return (
         <>
             {contextHolder}
-            <Spin spinning={loadingConfirm} tip={copy.applyingChanges} size={"large"}>
+            <Spin
+                wrapperClassName={styles.pageSpin}
+                spinning={loadingConfirm}
+                tip={copy.applyingChanges}
+                size={"large"}
+            >
                 <div className={styles.debloatingPage}>
                     <main
                         className={classNames(styles.workspace, {
@@ -780,7 +901,7 @@ const DebloatingPage = () => {
                         className={styles.main_area}
                     >
                         <Card
-                            className={classNames(styles.featurePanelCard, {
+                            className={classNames(styles.panelCard, styles.featurePanelCard, {
                                 [styles.featurePanelCardCompressed]: diffDrawerOpen,
                             })}
                             title={
@@ -810,8 +931,31 @@ const DebloatingPage = () => {
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
-                            <Spin spinning={loadingFeatureList} tip={copy.fetchingFeatureSummary} size="large">
-                                <div className={styles.scrollContainer}>
+                            <div className={styles.featurePanelBody}>
+                                <AutoComplete
+                                    className={styles.featureSearch}
+                                    value={featureSearchText}
+                                    options={featureSearchOptions}
+                                    onChange={setFeatureSearchText}
+                                    onSelect={handleFeatureSearchSelect}
+                                    filterOption={false}
+                                    notFoundContent={featureSearchText.trim() ? copy.noFeatureMatches : null}
+                                    disabled={loadingFeatureList || featureData.length === 0}
+                                >
+                                    <Input
+                                        allowClear
+                                        prefix={<SearchOutlined/>}
+                                        placeholder={copy.searchFeatures}
+                                        aria-label={copy.searchFeatures}
+                                    />
+                                </AutoComplete>
+                                <Spin
+                                    wrapperClassName={classNames(styles.panelSpin, styles.featureListSpin)}
+                                    spinning={loadingFeatureList}
+                                    tip={copy.fetchingFeatureSummary}
+                                    size="large"
+                                >
+                                <div ref={featureScrollContainerRef} className={styles.scrollContainer}>
                                     <Collapse
                                         accordion
                                         bordered={false}
@@ -848,14 +992,11 @@ const DebloatingPage = () => {
                                                         // if (item.isNewGenerated) {
                                                         //     console.log('Rendering modified feature:', item);
                                                         // }
-                                                        const displayIndex = item.isNew || item.isNewGenerated
-                                                            ? 0
-                                                            : module.featureList
-                                                            .filter((f) => !f.isNew && !f.isNewGenerated)
-                                                            .findIndex((f) => f === item) + 1;
+                                                        const displayIndex = getFeatureDisplayIndex(module.featureList, item);
                                                         return (
                                                             <FeatureListItem
                                                                 item={item}
+                                                                moduleId={module.moduleId}
                                                                 itemNumber={`${moduleIndex + 1}.${displayIndex}`}
                                                                 description={getFeatureDescription(item, language)}
                                                                 selectedType={selectedType}
@@ -877,15 +1018,17 @@ const DebloatingPage = () => {
                                         ))}
                                     </Collapse>
                                 </div>
-                            </Spin>
+                                </Spin>
+                            </div>
                         </Card>
                     </Splitter.Panel>
 
 
                     {/*中间功能去臃肿详情*/}
                     <Splitter.Panel min="55%" className={styles.main_area}>
-                        <div style={{height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column'}}>
+                        <div className={styles.panelShell}>
                             <Card
+                                className={styles.panelCard}
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
@@ -907,16 +1050,25 @@ const DebloatingPage = () => {
                                 bordered={false}
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
-                                <div style={{display: chatMode ? 'block' : 'none', height: '100%'}}>
+                                <div className={classNames(styles.panelView, {
+                                    [styles.panelViewHidden]: !chatMode,
+                                })}>
                                     <div ref={containerRef} className={styles.scrollContainer}>
                                         <MarkdownRendererComponent content={chatContent}/>
                                     </div>
                                 </div>
                                 <div
                                     onClick={(event) => event.stopPropagation()}
-                                    style={{display: chatMode ? 'none' : 'block', height: '100%'}}
+                                    className={classNames(styles.panelView, {
+                                        [styles.panelViewHidden]: chatMode,
+                                    })}
                                 >
-                                    <Spin spinning={loadingFeatureGraph} tip={copy.fetchingGraph} size={"large"}>
+                                    <Spin
+                                        wrapperClassName={styles.panelSpin}
+                                        spinning={loadingFeatureGraph}
+                                        tip={copy.fetchingGraph}
+                                        size={"large"}
+                                    >
                                         <FeatureGraph
                                             ref={featureGraphRef}
                                             graphData={graphData}

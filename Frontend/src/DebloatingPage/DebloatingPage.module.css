@@ -82,18 +82,39 @@
 .main_area {
     background: #f0f2f5;
     padding: 16px;
+    box-sizing: border-box;
+    display: flex;
+    height: 100%;
+    min-height: 0;
 }
 
 .debloatingPage {
     --diff-drawer-width: 560px;
 
-    min-height: 100vh;
-    overflow-x: hidden;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     background: #f0f2f5;
+}
+
+.pageSpin {
+    display: block;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+}
+
+.pageSpin > :global(.ant-spin-container) {
+    height: 100%;
+    min-height: 0;
 }
 
 .workspace {
     width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     transition: width 240ms ease;
 }
 
@@ -102,7 +123,127 @@
 }
 
 .background_area {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
     background: #f0f2f5;
+}
+
+.background_area > .main_area {
+    padding: 16px;
+    overflow: hidden;
+}
+
+.panelShell {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.panelCard {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.panelCard :global(.ant-card-head) {
+    flex: 0 0 auto;
+}
+
+.panelCard :global(.ant-card-body) {
+    display: flex;
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1 1 0;
+    flex-direction: column;
+}
+
+.featurePanelBody {
+    display: flex;
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.featureSearch {
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+.featureSearchOption {
+    display: grid;
+    min-width: 0;
+    padding: 3px 0;
+    gap: 2px;
+}
+
+.featureSearchOptionTitle {
+    overflow-wrap: anywhere;
+    color: #202938;
+    font-size: 14px;
+    line-height: 1.4;
+    white-space: normal;
+}
+
+.featureSearchOptionModule {
+    overflow: hidden;
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.panelSpin {
+    display: block;
+    height: 100%;
+    min-height: 0;
+}
+
+.featureListSpin {
+    height: 0;
+    overflow: hidden;
+    flex: 1 1 0;
+}
+
+.featureListSpin > :global(.ant-spin-container) {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.featureListSpin .scrollContainer {
+    height: 0;
+    min-height: 0;
+    overscroll-behavior: contain;
+    flex: 1 1 0;
+}
+
+.panelSpin > :global(.ant-spin-container) {
+    height: 100%;
+    min-height: 0;
+}
+
+.panelView {
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1 1 0;
+}
+
+.panelViewHidden {
+    display: none;
 }
 
 .diffDrawer {
@@ -209,9 +350,9 @@
 }
 
 .scrollContainer {
-    height: 100vh;
-    min-height: 300px;
-    max-height: 857px;
+    height: 100%;
+    min-height: 0;
+    max-height: none;
     overflow-y: auto;
 }
 
