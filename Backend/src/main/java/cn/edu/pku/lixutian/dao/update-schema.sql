@@ -1,3 +1,6 @@
+-- Base schema. The backend applies versioned migrations from
+-- src/main/resources/db/migration when it starts.
+
 CREATE TABLE code_map
 (
     id          INT AUTO_INCREMENT NOT NULL,
@@ -76,4 +79,3 @@ TRUNCATE TABLE modules;
 SET FOREIGN_KEY_CHECKS=1;
 
 use lotm;
-

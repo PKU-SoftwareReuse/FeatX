@@ -22,13 +22,166 @@
     font-size: 26px;
 }
 
+.modelControl {
+    display: flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.modelSelect {
+    width: clamp(130px, 14vw, 190px);
+    min-width: 0;
+    text-align: left;
+    transition: width 220ms ease;
+}
+
+.featurePanelCard :global(.ant-card-head-wrapper) {
+    min-width: 0;
+    gap: 8px;
+}
+
+.featurePanelCard :global(.ant-card-head-title) {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.featurePanelCard :global(.ant-card-extra) {
+    min-width: 0;
+    max-width: 100%;
+    flex: 0 1 auto;
+}
+
+.featurePanelCard .card_title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.featurePanelCardCompressed .card_title {
+    font-size: 20px;
+}
+
+.featurePanelCardCompressed .modelControl {
+    gap: 0;
+}
+
+.featurePanelCardCompressed .modelLabel {
+    display: none;
+}
+
+.featurePanelCardCompressed .modelSelect {
+    width: 96px;
+}
+
 .main_area {
     background: #f0f2f5;
     padding: 16px;
 }
 
+.debloatingPage {
+    --diff-drawer-width: 560px;
+
+    min-height: 100vh;
+    overflow-x: hidden;
+    background: #f0f2f5;
+}
+
+.workspace {
+    width: 100%;
+    transition: width 240ms ease;
+}
+
+.workspaceWithDrawer {
+    width: calc(100% - var(--diff-drawer-width));
+}
+
 .background_area {
     background: #f0f2f5;
+}
+
+.diffDrawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1000;
+    display: flex;
+    width: min(var(--diff-drawer-width), 100vw);
+    height: 100vh;
+    height: 100dvh;
+    visibility: hidden;
+    pointer-events: none;
+    background: #fff;
+    border-left: 1px solid #e3e7ef;
+    box-shadow: -20px 0 40px rgba(32, 41, 56, 0.14);
+    transform: translateX(100%);
+    transition: transform 220ms ease, visibility 0s linear 220ms;
+    flex-direction: column;
+}
+
+.diffDrawerOpen {
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition: transform 220ms ease;
+}
+
+.diffDrawerHeader {
+    display: flex;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid #e3e7ef;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.diffDrawerTitle {
+    min-width: 0;
+}
+
+.diffDrawerTitle h2 {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.diffDrawerTitle p {
+    margin: 6px 0 0;
+    overflow-wrap: anywhere;
+    color: #667085;
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.diffDrawerClose {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    border: 1px solid #e3e7ef;
+    border-radius: 6px;
+    flex: 0 0 34px;
+}
+
+.diffDrawerBody {
+    min-height: 0;
+    padding: 18px 20px 22px;
+    overflow: auto;
+    flex: 1;
+}
+
+.diffDrawerBody :global(.diff-container) {
+    height: auto;
+    min-height: 300px;
+    max-height: none;
+    overflow: visible;
 }
 
 /* 加到你的 CSS 里 */
@@ -88,6 +241,52 @@
     align-items: flex-end; /* 可根据需求调整对齐方式 */
 }
 
+.featureContent {
+    min-width: 0;
+    flex: 1;
+}
+
+.featureDescription {
+    line-height: 1.5715;
+    overflow-wrap: anywhere;
+}
+
+.featureActions {
+    display: flex;
+    width: 68px;
+    min-width: 68px;
+    margin-left: 8px;
+    align-items: flex-end;
+    flex-direction: column;
+}
+
+.featureActionsSingleLine {
+    align-items: center;
+    justify-content: flex-end;
+    flex-direction: row;
+}
+
 .moduleCollapse {
     background: #fff;
+}
+
+@media (max-width: 1280px) {
+    .workspaceWithDrawer {
+        width: 100%;
+    }
+}
+
+@media (max-width: 720px) {
+    .diffDrawer {
+        width: 100vw;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .workspace,
+    .diffDrawer,
+    .diffDrawerOpen,
+    .modelSelect {
+        transition: none;
+    }
 }

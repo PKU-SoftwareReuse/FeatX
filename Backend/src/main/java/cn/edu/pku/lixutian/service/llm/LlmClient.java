@@ -5,103 +5,167 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import okhttp3.*;
+import okhttp3.Call;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 @Service
 public class LlmClient {
-    private static final String apiUrl = LlmApiConfig.getInstance().getUrl();
-    private static final String apiKey = LlmApiConfig.getInstance().getKey();
-    private static final String model = LlmApiConfig.getInstance().getModel();
+    public static final String PREFERRED_DEFAULT_MODEL = "deepseek-v4-flash";
 
-    private static final double temp = 0.0;
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
+    private static final double TEMPERATURE = 0.0;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
-    private static final OkHttpClient client = new OkHttpClient.Builder()
+    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS)   // ⚠️ 关键：0 表示永不超时！
+            .readTimeout(0, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
             .build();
-    private static final ExecutorService executor = Executors.newCachedThreadPool();
+    private static final OkHttpClient MODEL_HTTP_CLIENT = HTTP_CLIENT.newBuilder()
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build();
+    private static final ExecutorService EXECUTOR = Executors.newCachedThreadPool();
+
+    private final String baseUrl;
+    private final String apiKey;
+
+    @Autowired
+    public LlmClient(LlmApiConfig config) {
+        this(config.getUrl(), config.getKey());
+    }
+
+    LlmClient(String baseUrl, String apiKey) {
+        this.baseUrl = normalizeBaseUrl(baseUrl);
+        this.apiKey = apiKey == null ? "" : apiKey.trim();
+    }
+
+    public record ModelCatalog(List<String> models, String defaultModel) {
+    }
 
     @FunctionalInterface
     public interface ResponseCallback {
         void onResponse(String contentChunk);
     }
 
-    public String generateWithSinglePrompt(String prompt) {
-        ArrayNode messages = objectMapper.createArrayNode();
-        ObjectNode userMessage = objectMapper.createObjectNode();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
+    public ModelCatalog getModelCatalog() throws IOException {
+        Request request = authorizedRequest(endpoint("models"))
+                .get()
+                .build();
 
-        return generateWithMsg(messages);
-    }
+        try (Response response = MODEL_HTTP_CLIENT.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                throw new IOException("Model list request failed with status " + response.code());
+            }
+            if (response.body() == null) {
+                throw new IOException("Model list response body is empty");
+            }
 
-    private String generateWithMsg(ArrayNode messages) {
-        try {
-            // 构造 JSON 请求体
-            ObjectNode root = objectMapper.createObjectNode();
-            root.put("model", model);
-            root.put("temperature", temp);
-            root.put("stream", false);
-            root.set("messages", messages);
-
-            String requestBody = objectMapper.writeValueAsString(root);
-
-            // 构造 HTTP 请求
-            Request request = new Request.Builder()
-                    .url(apiUrl)
-                    .addHeader("Authorization", "Bearer " + apiKey)
-                    .post(RequestBody.create(requestBody, JSON))
-                    .build();
-
-            // 同步执行
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    throw new RuntimeException("OpenAI请求失败，状态码: " + response.code());
-                }
-
-                String responseBody = response.body().string();
-                JsonNode rootNode = objectMapper.readTree(responseBody);
-
-                JsonNode choices = rootNode.path("choices");
-                if (choices.isArray() && choices.size() > 0) {
-                    JsonNode message = choices.get(0).path("message");
-                    return message.path("content").asText();
-                } else {
-                    throw new RuntimeException("响应结果中无choices内容: " + responseBody);
+            JsonNode data = OBJECT_MAPPER.readTree(response.body().string()).path("data");
+            Set<String> uniqueModels = new LinkedHashSet<>();
+            if (data.isArray()) {
+                for (JsonNode item : data) {
+                    String id = item.path("id").asText("").trim();
+                    if (!id.isEmpty()) {
+                        uniqueModels.add(id);
+                    }
                 }
             }
 
+            if (uniqueModels.isEmpty()) {
+                throw new IOException("Model list response does not contain any model IDs");
+            }
+
+            List<String> models = List.copyOf(new ArrayList<>(uniqueModels));
+            String defaultModel = models.contains(PREFERRED_DEFAULT_MODEL)
+                    ? PREFERRED_DEFAULT_MODEL
+                    : models.get(0);
+            return new ModelCatalog(models, defaultModel);
+        }
+    }
+
+    public String resolveModel(String requestedModel) throws IOException {
+        ModelCatalog catalog = getModelCatalog();
+        if (requestedModel == null || requestedModel.isBlank()) {
+            return catalog.defaultModel();
+        }
+
+        String normalizedModel = requestedModel.trim();
+        if (!catalog.models().contains(normalizedModel)) {
+            throw new IllegalArgumentException("Unavailable model: " + normalizedModel);
+        }
+        return normalizedModel;
+    }
+
+    public String generateWithSinglePrompt(String prompt) {
+        try {
+            return generateWithSinglePrompt(prompt, resolveModel(null));
+        } catch (IOException e) {
+            return "调用失败：" + e.getMessage();
+        }
+    }
+
+    public String generateWithSinglePrompt(String prompt, String model) {
+        ArrayNode messages = createUserMessages(prompt);
+        return generateWithMsg(messages, model);
+    }
+
+    private String generateWithMsg(ArrayNode messages, String model) {
+        try {
+            ObjectNode root = createRequestBody(messages, model, false);
+            Request request = authorizedRequest(endpoint("chat/completions"))
+                    .post(RequestBody.create(OBJECT_MAPPER.writeValueAsString(root), JSON))
+                    .build();
+
+            try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    throw new IOException("OpenAI request failed with status " + response.code());
+                }
+                if (response.body() == null) {
+                    throw new IOException("OpenAI response body is empty");
+                }
+
+                String responseBody = response.body().string();
+                JsonNode choices = OBJECT_MAPPER.readTree(responseBody).path("choices");
+                if (choices.isArray() && !choices.isEmpty()) {
+                    return choices.get(0).path("message").path("content").asText();
+                }
+                throw new IOException("OpenAI response does not contain choices");
+            }
         } catch (Exception e) {
-            e.printStackTrace();
             return "调用失败：" + e.getMessage();
         }
     }
 
     public String streamGenerateWithPrompt(String prompt, SseEmitter emitter) throws IOException {
+        return streamGenerateWithPrompt(prompt, emitter, resolveModel(null));
+    }
+
+    public String streamGenerateWithPrompt(String prompt, SseEmitter emitter, String model) throws IOException {
         CountDownLatch latch = new CountDownLatch(1);
         StringBuffer buffer = new StringBuffer();
-
-        ArrayNode messages = objectMapper.createArrayNode();
-        ObjectNode userMessage = objectMapper.createObjectNode();
-        userMessage.put("role", "user");
-        userMessage.put("content", prompt);
-        messages.add(userMessage);
+        AtomicReference<Exception> failure = new AtomicReference<>();
 
         ResponseCallback onChunk = chunk -> {
             try {
@@ -113,103 +177,145 @@ public class LlmClient {
             }
         };
 
-        Consumer<String> onComplete = result -> {
+        Consumer<String> onComplete = result -> latch.countDown();
+        Consumer<Exception> onError = error -> {
+            failure.set(error);
             latch.countDown();
         };
 
-        streamGenerateWithMsg(messages, onChunk, onComplete);
+        streamGenerateWithMsg(createUserMessages(prompt), model, onChunk, onComplete, onError);
 
         try {
-            latch.await(); // 等待推流结束
+            latch.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for the LLM response", e);
         }
 
+        if (failure.get() != null) {
+            throw new IOException("LLM streaming request failed", failure.get());
+        }
         return buffer.toString();
     }
 
-    private SseEmitter streamGenerateWithMsg(ArrayNode messages, ResponseCallback onChunk, Consumer<String> onComplete) {
-        SseEmitter emitter = new SseEmitter(0L); // 0表示无限超时
-        StringBuffer stringBuffer = new StringBuffer();
-
-        executor.submit(() -> {
+    private void streamGenerateWithMsg(
+            ArrayNode messages,
+            String model,
+            ResponseCallback onChunk,
+            Consumer<String> onComplete,
+            Consumer<Exception> onError
+    ) {
+        EXECUTOR.submit(() -> {
             try {
-                ObjectNode root = objectMapper.createObjectNode();
-                root.put("model", model);
-                root.put("temperature", temp);
-                root.put("stream", true);
-                root.set("messages", messages);
-
-                // 转为 JSON 字符串
-                String requestBody = objectMapper.writeValueAsString(root);
-
-                Request request = new Request.Builder()
-                        .url(apiUrl)
-                        .addHeader("Authorization", "Bearer " + apiKey)
-                        .post(RequestBody.create(requestBody, JSON))
+                ObjectNode root = createRequestBody(messages, model, true);
+                Request request = authorizedRequest(endpoint("chat/completions"))
+                        .post(RequestBody.create(OBJECT_MAPPER.writeValueAsString(root), JSON))
                         .build();
 
-                Call call = client.newCall(request);
-                Response response = call.execute();
+                Call call = HTTP_CLIENT.newCall(request);
+                try (Response response = call.execute()) {
+                    if (!response.isSuccessful()) {
+                        throw new IOException("OpenAI streaming request failed with status " + response.code());
+                    }
+                    if (response.body() == null) {
+                        throw new IOException("OpenAI streaming response body is empty");
+                    }
 
-                if (!response.isSuccessful()) {
-                    emitter.completeWithError(new RuntimeException("API请求失败: " + response.code()));
-                    return;
-                }
+                    StringBuffer result = new StringBuffer();
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (!line.startsWith("data: ")) {
+                                continue;
+                            }
 
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(response.body().byteStream()))) {
-
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ")) {
                             String jsonPart = line.substring(6);
                             if ("[DONE]".equals(jsonPart)) {
                                 break;
                             }
 
-                            // 提取 delta.content
                             String contentChunk = extractContentFromChunk(jsonPart);
                             if (contentChunk != null && !contentChunk.isEmpty()) {
                                 onChunk.onResponse(contentChunk);
-                                stringBuffer.append(contentChunk);
-
-                                String encoded = Base64.getEncoder().encodeToString(contentChunk.getBytes(StandardCharsets.UTF_8));
-                                emitter.send(SseEmitter.event().data(encoded));
-
+                                result.append(contentChunk);
                             }
                         }
                     }
-
-                    onComplete.accept(stringBuffer.toString());
-                    emitter.complete();
+                    onComplete.accept(result.toString());
                 }
             } catch (Exception e) {
-                emitter.completeWithError(e);
+                onError.accept(e);
             }
         });
+    }
 
-        return emitter;
+    private ArrayNode createUserMessages(String prompt) {
+        ArrayNode messages = OBJECT_MAPPER.createArrayNode();
+        ObjectNode userMessage = OBJECT_MAPPER.createObjectNode();
+        userMessage.put("role", "user");
+        userMessage.put("content", prompt);
+        messages.add(userMessage);
+        return messages;
+    }
+
+    private ObjectNode createRequestBody(ArrayNode messages, String model, boolean stream) {
+        if (model == null || model.isBlank()) {
+            throw new IllegalArgumentException("Model must not be blank");
+        }
+
+        ObjectNode root = OBJECT_MAPPER.createObjectNode();
+        root.put("model", model);
+        root.put("temperature", TEMPERATURE);
+        root.put("stream", stream);
+        root.set("messages", messages);
+        return root;
+    }
+
+    private Request.Builder authorizedRequest(String url) {
+        Request.Builder request = new Request.Builder().url(url);
+        if (!apiKey.isEmpty()) {
+            request.addHeader("Authorization", "Bearer " + apiKey);
+        }
+        return request;
+    }
+
+    private String endpoint(String path) {
+        return baseUrl + "/" + path;
+    }
+
+    static String normalizeBaseUrl(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("LLM API base URL must not be blank");
+        }
+
+        String normalized = url.trim();
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        String lowerCaseUrl = normalized.toLowerCase();
+        if (lowerCaseUrl.endsWith("/chat/completion")
+                || lowerCaseUrl.endsWith("/chat/completions")) {
+            throw new IllegalArgumentException(
+                    "LLM API URL must be a base URL without /chat/completions"
+            );
+        }
+        return normalized;
     }
 
     private static String extractContentFromChunk(String jsonChunk) {
         try {
-            JsonNode root = objectMapper.readTree(jsonChunk);
-            JsonNode choices = root.path("choices");
+            JsonNode choices = OBJECT_MAPPER.readTree(jsonChunk).path("choices");
             if (!choices.isArray() || choices.isEmpty()) {
                 return null;
             }
 
-            JsonNode delta = choices.get(0).path("delta");
-            JsonNode content = delta.path("content");
-
+            JsonNode content = choices.get(0).path("delta").path("content");
             if (content.isMissingNode() || content.isNull()) {
                 return null;
             }
-
             return content.asText();
         } catch (Exception e) {
-            System.err.println("解析chunk失败: " + e.getMessage());
             return null;
         }
     }

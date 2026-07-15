@@ -7,14 +7,14 @@ import {useLanguage} from "../../i18n/LanguageContext";
 
 const GIT_COPY = {
     zh: {
-        enterGithub: "请输入 GitHub 代码仓库名称。",
+        enterGit: "请输入 Git 仓库地址。",
         cloneFailed: "克隆代码仓库失败。",
         previewFirst: "请先预览代码仓库并输入仓库名称。",
         imported: "代码仓库已导入。",
         importFailed: "导入代码仓库失败。",
-        openButton: "从 GitHub 克隆",
-        title: "从 GitHub 克隆 Java 或 Python 项目",
-        githubRepository: "GitHub 仓库，例如 Naccl/NBlog",
+        openButton: "从 Git 仓库克隆",
+        title: "从 Git 仓库克隆 Java 或 Python 项目",
+        gitRepository: "Git 地址，例如 Naccl/NBlog、GitLab、GitLink 或 SSH 地址",
         commitId: "提交 ID（选填）",
         preview: "预览",
         treeReady: "源文件目录已就绪",
@@ -23,14 +23,14 @@ const GIT_COPY = {
         repositoryName: "请输入代码仓库名称",
     },
     en: {
-        enterGithub: "Please enter a GitHub repo name.",
+        enterGit: "Please enter a Git repository URL.",
         cloneFailed: "Failed to clone repository.",
         previewFirst: "Please preview the repository and enter a repo name first.",
         imported: "Repository imported.",
         importFailed: "Failed to import repository.",
-        openButton: "Clone from GitHub",
-        title: "Clone a Java or Python project from GitHub",
-        githubRepository: "GitHub repo, e.g., Naccl/NBlog",
+        openButton: "Clone from Git",
+        title: "Clone a Java or Python project from Git",
+        gitRepository: "Git URL: GitHub shorthand, GitLab, GitLink, or SSH",
         commitId: "Commit id, optional",
         preview: "Preview",
         treeReady: "Source tree ready",
@@ -110,7 +110,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
 
     const handlePreview = () => {
         if (!gitName) {
-            message.warning(copy.enterGithub);
+            message.warning(copy.enterGit);
             return;
         }
 
@@ -165,7 +165,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             >
                 <div style={{display: "flex", flexDirection: "column", gap: 10}}>
                     <Input
-                        placeholder={copy.githubRepository}
+                        placeholder={copy.gitRepository}
                         value={gitName}
                         onChange={(e) => setGitName(e.target.value)}
                     />

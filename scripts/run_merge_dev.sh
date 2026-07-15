@@ -433,7 +433,7 @@ NGINX
 
 start_host_stack() {
   local mysql_root_password mysql_database mysql_user mysql_password
-  local llm_api_url llm_api_key llm_api_model
+  local llm_api_url llm_api_key
   local openai_base_url openai_api_key openai_api_model sentence_transformer_model
   local git_proxy_host git_proxy_port
 
@@ -442,9 +442,8 @@ start_host_stack() {
   mysql_database="$(read_env_value MYSQL_DATABASE lotm)"
   mysql_user="$(read_env_value MYSQL_USER featx)"
   mysql_password="$(read_env_value MYSQL_PASSWORD featx)"
-  llm_api_url="$(read_env_value LLM_API_URL https://api.deepseek.com/chat/completions)"
+  llm_api_url="$(read_env_value LLM_API_URL https://api.deepseek.com)"
   llm_api_key="$(read_env_value LLM_API_KEY "")"
-  llm_api_model="$(read_env_value LLM_API_MODEL deepseek-v4-pro)"
   openai_base_url="$(read_env_value OPENAI_BASE_URL https://api.deepseek.com)"
   openai_api_key="$(read_env_value OPENAI_API_KEY "")"
   openai_api_model="$(read_env_value OPENAI_API_MODEL deepseek-v4-pro)"
@@ -478,7 +477,6 @@ start_host_stack() {
     -e SPRING_DATASOURCE_PASSWORD="$mysql_password" \
     -e LLM_API_URL="$llm_api_url" \
     -e LLM_API_KEY="$llm_api_key" \
-    -e LLM_API_MODEL="$llm_api_model" \
     -e OPENAI_BASE_URL="$openai_base_url" \
     -e OPENAI_API_KEY="$openai_api_key" \
     -e OPENAI_API_MODEL="$openai_api_model" \
@@ -507,7 +505,24 @@ restart_host_stack() {
 }
 
 show_host_logs() {
-  docker logs -f "$HOST_MYSQL_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"
+  local container
+  local running_logs=0
+
+  trap 'kill $(jobs -pr) 2>/dev/null || true' EXIT INT TERM
+  for container in "$HOST_MYSQL_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"; do
+    if docker inspect "$container" >/dev/null 2>&1; then
+      docker logs --tail 100 -f "$container" 2>&1 \
+        | sed -u "s/^/[$container] /" &
+      running_logs=1
+    fi
+  done
+
+  if [[ "$running_logs" == "0" ]]; then
+    echo "No featx-merge-dev containers were found." >&2
+    return 1
+  fi
+
+  wait
 }
 
 show_host_ps() {

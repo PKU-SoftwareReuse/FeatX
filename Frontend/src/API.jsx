@@ -32,6 +32,10 @@ const API = {
             repoId: repoId,
         })
     },
+    updateProject: (projectId, projectData) => {
+        return axios.put(`${BASE_URL}/project/${projectId}`, projectData)
+            .then(response => response.data);
+    },
     gitDownRepo: (gitName, commitId) => {
         return axios.post(`${BASE_URL}/project/gitdown`, {
             gitRepoName: gitName,
@@ -135,8 +139,13 @@ const API = {
         return axios.post(`${BASE_URL}/feature/confirm/add`)
             .then(response => response.data);
     },
-    getLlmResponse: (language) => {
-        return new EventSource(`${BASE_URL}/llm/get?language=${encodeURIComponent(language)}`)
+    getLlmModels: () => {
+        return axios.get(`${BASE_URL}/llm/models`)
+            .then(response => response.data);
+    },
+    getLlmResponse: (language, model) => {
+        const query = new URLSearchParams({language, model});
+        return new EventSource(`${BASE_URL}/llm/get?${query.toString()}`)
     },
 
 

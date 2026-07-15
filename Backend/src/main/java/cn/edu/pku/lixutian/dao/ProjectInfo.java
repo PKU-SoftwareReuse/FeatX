@@ -20,7 +20,13 @@ public class ProjectInfo {
     @Column(name = "description")
     private String description;
 
-    @Column(name = "git_link")
+    @Column(name = "description_cn")
+    private String descriptionCn;
+
+    @Column(name = "project_type")
+    private String projectType;
+
+    @Column(name = "git_link", length = 2048)
     private String gitLink;
 
     @Column(name = "loc")

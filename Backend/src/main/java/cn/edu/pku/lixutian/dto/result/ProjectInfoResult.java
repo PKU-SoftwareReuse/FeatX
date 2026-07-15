@@ -1,11 +1,9 @@
 package cn.edu.pku.lixutian.dto.result;
 
 import cn.edu.pku.lixutian.dao.ProjectInfo;
+import cn.edu.pku.lixutian.helper.GitRemoteHelper;
 import lombok.Getter;
 import lombok.Setter;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Getter
 @Setter
@@ -16,8 +14,17 @@ public class ProjectInfoResult {
 
     private String description;
 
+    private String descriptionCn;
+
     private String projectType;
 
+    private String gitLink;
+
+    private String gitName;
+
+    private String gitProvider;
+
+    // Kept for clients built against the previous response shape.
     private String githubLink;
 
     private String githubName;
@@ -37,9 +44,15 @@ public class ProjectInfoResult {
         this.id = projectInfo.getId();
         this.projectName = projectInfo.getRepoName();
         this.description = projectInfo.getDescription();
-        this.projectType = extractProjectType(this.description);
+        this.descriptionCn = projectInfo.getDescriptionCn();
+        this.projectType = hasText(projectInfo.getProjectType())
+                ? projectInfo.getProjectType()
+                : extractProjectType(this.description);
+        this.gitLink = projectInfo.getGitLink();
+        this.gitName = GitRemoteHelper.displayName(this.gitLink);
+        this.gitProvider = GitRemoteHelper.provider(this.gitLink);
         this.githubLink = projectInfo.getGitLink();
-        this.githubName = extractGitName(this.githubLink);
+        this.githubName = this.gitName;
         this.loc = projectInfo.getLoc();
         this.noc = projectInfo.getNoc();
         this.nom = projectInfo.getNom();
@@ -47,24 +60,14 @@ public class ProjectInfoResult {
         this.summaryFlag = projectInfo.getSummaryFlag();
     }
 
-    private static String extractGitName(String url) {
-        if (url == null || url.isEmpty()) return "Blank Git Link";
-
-        // 支持 SSH 和 HTTPS 格式，提取 用户名/仓库名
-        Pattern pattern = Pattern.compile(
-                "(?:https://|git@)[\\w\\.-]+[/:]([^/]+/[^/]+)(?:\\.git)?"
-        );
-        Matcher matcher = pattern.matcher(url.trim());
-        if (matcher.find()) {
-            return matcher.group(1).replaceAll("\\.git$", "");
-        }
-        return "Error in Extract Git Name";
-    }
-
     private static String extractProjectType(String description) {
         if (description == null) return "JAVA";
         String normalized = description.toLowerCase();
         if (normalized.contains("[python]") || normalized.contains("python repo")) return "PYTHON";
         return "JAVA";
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

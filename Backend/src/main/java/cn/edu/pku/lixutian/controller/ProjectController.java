@@ -8,8 +8,10 @@ import cn.edu.pku.lixutian.dao.repository.ModuleRepository;
 import cn.edu.pku.lixutian.dao.repository.ProjectInfoRepository;
 import cn.edu.pku.lixutian.dto.request.GitRepoRequest;
 import cn.edu.pku.lixutian.dto.request.SelectProjectRequest;
+import cn.edu.pku.lixutian.dto.request.UpdateProjectRequest;
 import cn.edu.pku.lixutian.dto.result.GitRepoPreviewResult;
 import cn.edu.pku.lixutian.dto.result.ProjectInfoResult;
+import cn.edu.pku.lixutian.helper.GitRemoteHelper;
 import cn.edu.pku.lixutian.helper.RepoSummaryHelper;
 import cn.edu.pku.lixutian.service.ProcessService;
 import cn.edu.pku.lixutian.service.CodeMapService;
@@ -61,6 +63,29 @@ public class ProjectController {
                 .toList();
     }
 
+    @PutMapping("/{projectId}")
+    public ProjectInfoResult updateProject(
+            @PathVariable Integer projectId,
+            @RequestBody UpdateProjectRequest request
+    ) {
+        if (request == null || !hasText(request.getProjectName())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project name is required.");
+        }
+
+        String projectName = request.getProjectName().trim();
+        if (projectName.length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project name is too long.");
+        }
+
+        ProjectInfo projectInfo = projectInfoRepository.findById(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found."));
+        projectInfo.setRepoName(projectName);
+        projectInfo.setDescription(cleanOptionalText(request.getDescription()));
+        projectInfo.setDescriptionCn(cleanOptionalText(request.getDescriptionCn()));
+        projectInfo.setGitLink(normalizeOptionalGitUrl(request.getGitLink()));
+        return new ProjectInfoResult(projectInfoRepository.save(projectInfo));
+    }
+
     @PostMapping("/select")
     public void selectProject(@RequestBody SelectProjectRequest request) throws ParseException, IOException, InterruptedException {
         ProjectState state = ProjectState.getInstance();
@@ -108,7 +133,13 @@ public class ProjectController {
         ProjectType type = parseProjectType(projectType, paths);
         assertHasSourceFiles(paths, type);
 
-        ProjectInfo projectInfo = createProjectInfo(folderName, type, null, "Uploaded repo");
+        ProjectInfo projectInfo = createProjectInfo(
+                folderName,
+                type,
+                null,
+                "Uploaded repository.",
+                "上传的代码仓库。"
+        );
         Path repoPath = repoPath(projectInfo.getId());
 
         saveUploadedSourceFiles(files, paths, repoPath, type);
@@ -143,11 +174,15 @@ public class ProjectController {
         }
 
         ProjectType type = detectProjectType(listRelativePaths(stagingPath));
+        String normalizedGitUrl = normalizeGitUrl(request.getGitRepoName());
+        String gitProvider = GitRemoteHelper.provider(normalizedGitUrl);
         ProjectInfo projectInfo = createProjectInfo(
                 hasText(request.getRepoName()) ? request.getRepoName().trim() : defaultRepoName(request),
                 type,
-                normalizeGitUrl(request.getGitRepoName()),
-                "Cloned from GitHub");
+                normalizedGitUrl,
+                "Cloned from " + gitProvider + ".",
+                "从 " + gitProvider + " 克隆的代码仓库。"
+        );
 
         Path repoPath = repoPath(projectInfo.getId());
         copySourceFiles(stagingPath, repoPath, type);
@@ -178,10 +213,18 @@ public class ProjectController {
         RepoSummaryHelper.runRepoSummary(projectInfo.getId());
     }
 
-    private ProjectInfo createProjectInfo(String repoName, ProjectType type, String gitLink, String sourceDescription) {
+    private ProjectInfo createProjectInfo(
+            String repoName,
+            ProjectType type,
+            String gitLink,
+            String sourceDescription,
+            String sourceDescriptionCn
+    ) {
         ProjectInfo projectInfo = new ProjectInfo();
         projectInfo.setRepoName(hasText(repoName) ? repoName.trim() : "Untitled Repo");
-        projectInfo.setDescription("[" + type.displayName + "] " + sourceDescription);
+        projectInfo.setDescription(sourceDescription);
+        projectInfo.setDescriptionCn(sourceDescriptionCn);
+        projectInfo.setProjectType(type.name());
         projectInfo.setGitLink(gitLink);
         projectInfo.setLoc(0);
         projectInfo.setNoc(0);
@@ -387,7 +430,7 @@ public class ProjectController {
 
     private void validateGitRequest(GitRepoRequest request) {
         if (request == null || !hasText(request.getGitRepoName())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "GitHub repository name is required.");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Git repository URL is required.");
         }
     }
 
@@ -398,20 +441,35 @@ public class ProjectController {
     }
 
     private String normalizeGitUrl(String gitRepoName) {
-        String value = gitRepoName.trim();
-        if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("git@") || value.startsWith("ssh://")) {
-            return value;
+        try {
+            return GitRemoteHelper.normalize(gitRepoName);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }
-        return "https://github.com/" + value.replaceAll("\\.git$", "") + ".git";
+    }
+
+    private String normalizeOptionalGitUrl(String gitLink) {
+        if (!hasText(gitLink)) {
+            return null;
+        }
+        String normalized = normalizeGitUrl(gitLink);
+        if (normalized.length() > 2048) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Git repository URL is too long.");
+        }
+        return normalized;
+    }
+
+    private String cleanOptionalText(String value) {
+        return hasText(value) ? value.trim() : null;
     }
 
     private String defaultRepoName(GitRepoRequest request) {
-        String value = request.getGitRepoName().trim().replace("\\", "/");
-        if (value.endsWith(".git")) {
-            value = value.substring(0, value.length() - 4);
-        }
+        String value = GitRemoteHelper.displayName(normalizeGitUrl(request.getGitRepoName()));
         int slashIndex = value.lastIndexOf("/");
         String repoName = slashIndex >= 0 ? value.substring(slashIndex + 1) : value;
+        if (!hasText(repoName)) {
+            repoName = "repository";
+        }
         if (hasText(request.getCommitId())) {
             String commit = request.getCommitId().trim();
             repoName += "_" + commit.substring(0, Math.min(commit.length(), 8));

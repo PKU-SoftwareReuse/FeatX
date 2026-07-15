@@ -103,9 +103,8 @@ The seeded demo and smoke checks do not require an LLM API key. Full
 LLM-backed feature extraction and code evolution require credentials in `.env`:
 
 ```env
-LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_URL=https://api.deepseek.com
 LLM_API_KEY=<reviewer-api-key>
-LLM_API_MODEL=deepseek-v4-pro
 
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=<reviewer-api-key>
@@ -136,7 +135,8 @@ Requirements:
 *   Node.js 20.x and npm 10.x
 *   Python 3.10 and dependencies from `RepoSummary/requirements.txt`
 *   MySQL 8 initialized with
-    `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`
+    `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`; the
+    backend then applies `Backend/src/main/resources/db/migration` automatically
 *   An OpenAI-compatible LLM API endpoint for full workflows
 *   Nginx or another static server if serving the production frontend build
 

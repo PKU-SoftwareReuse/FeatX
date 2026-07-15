@@ -2,8 +2,9 @@
 
 import styles from './DebloatingPage.module.css';
 import React, {useEffect, useRef, useState} from "react";
-import {Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm} from "antd";
+import {Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select} from "antd";
 import {
+    CloseOutlined,
     DeleteTwoTone,
     EditTwoTone,
     PlusSquareTwoTone,
@@ -36,9 +37,13 @@ const DEBLOATING_COPY = {
         pendingChanges: "请确认应用或放弃修改。",
         submit: "提交",
         agentPanel: "智能体生成",
+        model: "模型",
+        loadingModels: "正在获取模型……",
+        modelUnavailable: "未获取到可用模型",
         graphPanel: "相关代码图谱",
         fetchingGraph: "正在获取相关代码图谱。",
         changesPanel: "代码变更",
+        closeChangesPanel: "关闭代码变更",
         fetchingCode: "正在获取代码详情。",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
         confirmAllChanges: "确认所有代码变更",
@@ -61,9 +66,13 @@ const DEBLOATING_COPY = {
         pendingChanges: "You have made some modifications. Please confirm or drop it.",
         submit: "Submit",
         agentPanel: "Agent Panel",
+        model: "Model",
+        loadingModels: "Loading models...",
+        modelUnavailable: "No models available",
         graphPanel: "CodeMap Panel",
         fetchingGraph: "fetching codeMap.",
         changesPanel: "Diff Panel",
+        closeChangesPanel: "Close Diff Panel",
         fetchingCode: "Fetching code details.",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
         confirmAllChanges: "Confirm All Code Diff",
@@ -80,6 +89,126 @@ const getModuleDescription = (module, language) =>
 const getFeatureDescription = (feature, language) =>
     getLocalizedField(feature, "featureDescription", language);
 
+const FeatureListItem = ({
+    item,
+    itemNumber,
+    description,
+    selectedType,
+    selectedFeatureItem,
+    submitEnabled,
+    selectedModel,
+    editedText,
+    setEditedText,
+    copy,
+    onClickItem,
+    submitEdit,
+    handleDelete,
+    handleEdit,
+}) => {
+    const descriptionRef = useRef(null);
+    const [singleLine, setSingleLine] = useState(false);
+    const isSelected = selectedFeatureItem != null
+        && item.featureId === selectedFeatureItem.featureId;
+    const isEditing = (selectedType === "edit" || selectedType === "add") && isSelected;
+
+    useEffect(() => {
+        if (isEditing || !descriptionRef.current) {
+            setSingleLine(false);
+            return undefined;
+        }
+
+        const descriptionElement = descriptionRef.current;
+        const measureLineCount = () => {
+            const computedStyle = window.getComputedStyle(descriptionElement);
+            const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight);
+            const fontSize = Number.parseFloat(computedStyle.fontSize) || 14;
+            const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.2;
+            setSingleLine(descriptionElement.getBoundingClientRect().height <= lineHeight * 1.4);
+        };
+
+        const frameId = window.requestAnimationFrame(measureLineCount);
+        if (typeof ResizeObserver === "undefined") {
+            window.addEventListener("resize", measureLineCount);
+            return () => {
+                window.cancelAnimationFrame(frameId);
+                window.removeEventListener("resize", measureLineCount);
+            };
+        }
+
+        const observer = new ResizeObserver(measureLineCount);
+        observer.observe(descriptionElement);
+        return () => {
+            window.cancelAnimationFrame(frameId);
+            observer.disconnect();
+        };
+    }, [description, isEditing, itemNumber]);
+
+    return (
+        <List.Item
+            onClick={() => onClickItem(item)}
+            className={classNames({
+                [styles.item]: true,
+                [styles.selectedItem]: isSelected,
+            })}
+        >
+            <div className={styles.featureContent}>
+                {isEditing ? (
+                    <Tooltip title={!submitEnabled ? copy.pendingChanges : ""}>
+                        <div>
+                            <span>{itemNumber} </span>
+                            <TextArea
+                                value={editedText}
+                                onChange={(event) => setEditedText(event.target.value)}
+                                onClick={(event) => event.stopPropagation()}
+                                size="middle"
+                                autoSize={{minRows: 2, maxRows: 5}}
+                                disabled={!submitEnabled || !selectedModel}
+                            />
+                            <Button
+                                type="primary"
+                                onClick={() => submitEdit(item)}
+                                disabled={!submitEnabled || !selectedModel}
+                            >
+                                {copy.submit}
+                            </Button>
+                        </div>
+                    </Tooltip>
+                ) : (
+                    <div ref={descriptionRef} className={styles.featureDescription}>
+                        {itemNumber} {description}
+                    </div>
+                )}
+            </div>
+            <div className={classNames(styles.featureActions, {
+                [styles.featureActionsSingleLine]: singleLine,
+            })}>
+                <Button
+                    type="text"
+                    icon={<DeleteTwoTone twoToneColor="#F74E52"/>}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleDelete(item);
+                    }}
+                    className={classNames(styles.icon, {
+                        [styles.selectedIcon]: isSelected && selectedType === "delete",
+                    })}
+                />
+                <Button
+                    type="text"
+                    icon={<EditTwoTone twoToneColor="#EFA92B"/>}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        handleEdit(item);
+                    }}
+                    className={classNames(styles.icon, {
+                        [styles.selectedIcon]: isSelected && (selectedType === "edit" || selectedType === "add"),
+                    })}
+                />
+            </div>
+        </List.Item>
+    );
+};
+
 const DebloatingPage = () => {
     const {language, apiLanguage} = useLanguage();
     const copy = DEBLOATING_COPY[language];
@@ -87,6 +216,38 @@ const DebloatingPage = () => {
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
     const [loadingCode, setLoadingCode] = useState(false);
+    const [models, setModels] = useState([]);
+    const [selectedModel, setSelectedModel] = useState(null);
+    const [loadingModels, setLoadingModels] = useState(true);
+
+    useEffect(() => {
+        let active = true;
+
+        API.getLlmModels()
+            .then((catalog) => {
+                if (!active) return;
+                const availableModels = Array.isArray(catalog.models) ? catalog.models : [];
+                setModels(availableModels);
+                setSelectedModel(
+                    availableModels.includes(catalog.defaultModel)
+                        ? catalog.defaultModel
+                        : availableModels[0] || null
+                );
+            })
+            .catch((error) => {
+                if (!active) return;
+                console.error("Error fetching LLM models:", error);
+                setModels([]);
+                setSelectedModel(null);
+            })
+            .finally(() => {
+                if (active) setLoadingModels(false);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, []);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -160,8 +321,25 @@ const DebloatingPage = () => {
     }, [graphData]);
 
     const [codeDiff, setCodeDiff] = useState('');
+    const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+    const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
+
+    useEffect(() => {
+        if (!diffDrawerOpen) return undefined;
+
+        const handleEscape = (event) => {
+            if (event.key === 'Escape') {
+                setDiffDrawerOpen(false);
+            }
+        };
+
+        window.addEventListener('keydown', handleEscape);
+        return () => window.removeEventListener('keydown', handleEscape);
+    }, [diffDrawerOpen]);
 
     const getCodeDiff = (classNodeId) => {
+        setSelectedCodeNodeId(String(classNodeId));
+        setDiffDrawerOpen(true);
         setLoadingCode(true)
 
         // 检查当前选中的feature是否是新生成的feature
@@ -184,6 +362,7 @@ const DebloatingPage = () => {
                 setLoadingCode(false);
             }).catch(error => {
                 console.error('Error fetching code diff:', error)
+                setLoadingCode(false);
                 // getCodeDiff(classNodeId)
             })
         } else if (selectedType == "edit" || selectedType === "add") {
@@ -194,6 +373,7 @@ const DebloatingPage = () => {
                     setLoadingCode(false);
                 }).catch(error => {
                     console.error('Error fetching code diff:', error)
+                    setLoadingCode(false);
                     // getCodeDiff(classNodeId)
                 })
             } else {
@@ -203,6 +383,7 @@ const DebloatingPage = () => {
                     setLoadingCode(false);
                 }).catch(error => {
                     console.error('Error fetching code diff:', error)
+                    setLoadingCode(false);
                     // getCodeDiff(classNodeId)
                 })
             }
@@ -214,9 +395,12 @@ const DebloatingPage = () => {
                 setLoadingCode(false);
             }).catch(error => {
                 console.error('Error fetching code diff:', error)
+                setLoadingCode(false);
                 // getCodeDiff(classNodeId)
             })
         } else {
+            setLoadingCode(false);
+            setDiffDrawerOpen(false);
             alert(copy.noAction)
         }
 
@@ -451,6 +635,8 @@ const DebloatingPage = () => {
     const [submitEnabled, setSubmitEnabled] = useState(false)
 
     const submitEdit = (item) => {
+        if (!selectedModel) return;
+
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
 
@@ -458,7 +644,7 @@ const DebloatingPage = () => {
             // console.log(editedText);
             API.modifyFeature(editedText, apiLanguage)
                 .then((data) => {
-                    handleChat(API.getLlmResponse(apiLanguage))
+                    handleChat(API.getLlmResponse(apiLanguage, selectedModel))
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -473,7 +659,7 @@ const DebloatingPage = () => {
 
             API.addFeature(requestData)
                 .then((data) => {
-                    handleChat(API.getLlmResponse(apiLanguage))
+                    handleChat(API.getLlmResponse(apiLanguage, selectedModel))
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -576,14 +762,50 @@ const DebloatingPage = () => {
         <>
             {contextHolder}
             <Spin spinning={loadingConfirm} tip={copy.applyingChanges} size={"large"}>
-                <Splitter className={styles.background_area}>
+                <div className={styles.debloatingPage}>
+                    <main
+                        className={classNames(styles.workspace, {
+                            [styles.workspaceWithDrawer]: diffDrawerOpen,
+                        })}
+                        onClick={() => {
+                            if (diffDrawerOpen) setDiffDrawerOpen(false);
+                        }}
+                    >
+                        <Splitter className={styles.background_area}>
                     {/*左侧可滚动功能列表 */}
-                    <Splitter.Panel defaultSize="21%" resizable={false} className={styles.main_area}>
+                    <Splitter.Panel
+                        defaultSize="45%"
+                        min="20%"
+                        max="60%"
+                        className={styles.main_area}
+                    >
                         <Card
+                            className={classNames(styles.featurePanelCard, {
+                                [styles.featurePanelCardCompressed]: diffDrawerOpen,
+                            })}
                             title={
-                                <div className={styles.card_title}>
+                                <div className={styles.card_title} title={copy.featurePanel}>
                                     {copy.featurePanel}
                                 </div>
+                            }
+                            extra={
+                                <label className={styles.modelControl}>
+                                    <span className={styles.modelLabel}>{copy.model}</span>
+                                    <Select
+                                        aria-label={copy.model}
+                                        className={styles.modelSelect}
+                                        value={selectedModel}
+                                        options={models.map((model) => ({value: model, label: model}))}
+                                        onChange={setSelectedModel}
+                                        loading={loadingModels}
+                                        disabled={loadingModels || models.length === 0 || loadingFeatureList}
+                                        placeholder={loadingModels ? copy.loadingModels : copy.modelUnavailable}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        popupMatchSelectWidth={false}
+                                        size="small"
+                                    />
+                                </label>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
@@ -632,70 +854,23 @@ const DebloatingPage = () => {
                                                             .filter((f) => !f.isNew && !f.isNewGenerated)
                                                             .findIndex((f) => f === item) + 1;
                                                         return (
-                                                            <List.Item
-                                                                onClick={() => onClickItem(item)}
-                                                                className={classNames({
-                                                                    [styles.item]: true,
-                                                                    [styles.selectedItem]: selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId,
-                                                                })}
-                                                            >
-                                                                <div>
-                                                                    {`${moduleIndex + 1}.${displayIndex} `}
-                                                                    {(selectedType === 'edit' || selectedType === 'add') && selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId ? (
-                                                                        <Tooltip
-                                                                            title={!submitEnabled ? copy.pendingChanges : ""}
-                                                                        >
-                                                                            <div>
-                                                                                <TextArea
-                                                                                    value={editedText}
-                                                                                    onChange={(e) => setEditedText(e.target.value)}
-                                                                                    onClick={(e) => e.stopPropagation()}
-                                                                                    size={'middle'}
-                                                                                    autoSize={{minRows: 2, maxRows: 5}}
-                                                                                    disabled={!submitEnabled}
-                                                                                />
-
-                                                                                <Button
-                                                                                    type="primary"
-                                                                                    onClick={() => {
-                                                                                        submitEdit(item)
-                                                                                    }}
-                                                                                    disabled={!submitEnabled}
-                                                                                >
-                                                                                    {copy.submit}
-                                                                                </Button>
-                                                                            </div>
-                                                                        </Tooltip>
-                                                                    ) : (
-                                                                        getFeatureDescription(item, language)
-                                                                    )}
-                                                                </div>
-                                                                <div className={styles.iconContainer}>
-                                                                    <Button
-                                                                        type="text"
-                                                                        icon={<DeleteTwoTone twoToneColor="#F74E52"/>}
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleDelete(item)
-                                                                        }}
-                                                                        className={classNames(styles.icon, {
-                                                                            [styles.selectedIcon]: selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId && selectedType === 'delete',
-                                                                        })}
-                                                                    />
-                                                                    <Button
-                                                                        type="text"
-                                                                        icon={<EditTwoTone twoToneColor="#EFA92B"/>}
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            handleEdit(item)
-                                                                        }}
-                                                                        className={classNames(styles.icon, {
-                                                                            [styles.selectedIcon]: selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId && (selectedType === 'edit' || selectedType === 'add'),
-                                                                        })}
-                                                                    />
-                                                                </div>
-                                                            </List.Item>
-                                                        )
+                                                            <FeatureListItem
+                                                                item={item}
+                                                                itemNumber={`${moduleIndex + 1}.${displayIndex}`}
+                                                                description={getFeatureDescription(item, language)}
+                                                                selectedType={selectedType}
+                                                                selectedFeatureItem={selectedFeatureItem}
+                                                                submitEnabled={submitEnabled}
+                                                                selectedModel={selectedModel}
+                                                                editedText={editedText}
+                                                                setEditedText={setEditedText}
+                                                                copy={copy}
+                                                                onClickItem={onClickItem}
+                                                                submitEdit={submitEdit}
+                                                                handleDelete={handleDelete}
+                                                                handleEdit={handleEdit}
+                                                            />
+                                                        );
                                                     }}
                                                 />
                                             </Panel>
@@ -708,7 +883,7 @@ const DebloatingPage = () => {
 
 
                     {/*中间功能去臃肿详情*/}
-                    <Splitter.Panel defaultSize="40%" min="30%" max="50%" className={styles.main_area}>
+                    <Splitter.Panel min="55%" className={styles.main_area}>
                         <div style={{height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column'}}>
                             <Card
                                 title={
@@ -737,7 +912,10 @@ const DebloatingPage = () => {
                                         <MarkdownRendererComponent content={chatContent}/>
                                     </div>
                                 </div>
-                                <div style={{display: chatMode ? 'none' : 'block', height: '100%'}}>
+                                <div
+                                    onClick={(event) => event.stopPropagation()}
+                                    style={{display: chatMode ? 'none' : 'block', height: '100%'}}
+                                >
                                     <Spin spinning={loadingFeatureGraph} tip={copy.fetchingGraph} size={"large"}>
                                         <FeatureGraph
                                             ref={featureGraphRef}
@@ -750,18 +928,30 @@ const DebloatingPage = () => {
                         </div>
                     </Splitter.Panel>
 
-                    {/*右侧待删减代码可视化展示*/}
-                    <Splitter.Panel className={styles.main_area}>
-                        <Card
-                            title={
-                                <div className={styles.card_title}>
-                                    {copy.changesPanel}
-                                </div>
-                            }
-                            bordered={false}
-                            bodyStyle={{paddingTop: 12, paddingBottom: 4}}
-                        >
+                        </Splitter>
+                    </main>
 
+                    <aside
+                        className={classNames(styles.diffDrawer, {
+                            [styles.diffDrawerOpen]: diffDrawerOpen,
+                        })}
+                        aria-hidden={!diffDrawerOpen}
+                        aria-label={copy.changesPanel}
+                    >
+                        <header className={styles.diffDrawerHeader}>
+                            <div className={styles.diffDrawerTitle}>
+                                <h2>{copy.changesPanel}</h2>
+                                {selectedCodeNodeId && <p>{selectedCodeNodeId}</p>}
+                            </div>
+                            <Button
+                                type="text"
+                                icon={<CloseOutlined/>}
+                                aria-label={copy.closeChangesPanel}
+                                className={styles.diffDrawerClose}
+                                onClick={() => setDiffDrawerOpen(false)}
+                            />
+                        </header>
+                        <div className={styles.diffDrawerBody}>
                             <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
                                 <CodeDiffComponent
                                     diffText={codeDiff}
@@ -788,9 +978,9 @@ const DebloatingPage = () => {
                                     </Popconfirm>
                                 </Tooltip>
                             </Spin>
-                        </Card>
-                    </Splitter.Panel>
-                </Splitter>
+                        </div>
+                    </aside>
+                </div>
             </Spin>
         </>
 

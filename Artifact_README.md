@@ -70,9 +70,8 @@ seeded-data inspection, and the non-LLM NBlog example, reviewers can leave the
 LLM fields empty:
 
 ```env
-LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_URL=https://api.deepseek.com
 LLM_API_KEY=
-LLM_API_MODEL=deepseek-v4-pro
 
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=
@@ -306,9 +305,8 @@ The following reviewer activities do not require an LLM key:
 Full LLM-backed feature extraction and code evolution require local credentials:
 
 ```env
-LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_URL=https://api.deepseek.com
 LLM_API_KEY=<reviewer-api-key>
-LLM_API_MODEL=deepseek-v4-pro
 
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=<reviewer-api-key>
@@ -426,12 +424,14 @@ OpenAI-compatible LLM API for full workflows.
 At minimum:
 
 1. Create a MySQL database and initialize it with
-   `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`.
+   `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`. Versioned
+   migrations under `Backend/src/main/resources/db/migration` run automatically
+   when the backend starts.
 2. Create `Backend/src/main/resources/application.properties` from
    `Backend/src/main/resources/example.properties`.
 3. Create `RepoSummary/.env` with the same database and repository-cache path.
-4. Configure the LLM API endpoint, key, and model in both backend and
-   RepoSummary configuration files.
+4. Configure the LLM API endpoint and key for the backend, and configure the
+   endpoint, key, and model for RepoSummary.
 5. Start the backend at `http://127.0.0.1:8080` and serve the frontend at
    `http://localhost:3000/`.
 

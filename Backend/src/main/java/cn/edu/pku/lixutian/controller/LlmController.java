@@ -20,7 +20,9 @@ import cn.edu.pku.lixutian.service.llm.LlmClient;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -130,16 +132,42 @@ public class LlmController {
     @GetMapping("/get")
     public SseEmitter streamResponse(
             HttpServletResponse response,
-            @RequestParam(required = false) AgentLanguage language
-    ) {
+            @RequestParam(required = false) AgentLanguage language,
+            @RequestParam(required = false) String model
+    ) throws IOException {
         AgentLanguage responseLanguage = language == null ? requestLanguage : language;
+        String selectedModel;
+        try {
+            selectedModel = llmClient.resolveModel(model);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+        }
+
         if (mode.equals("modify")) {
-            return modifyAgentService.runPipeline(newRequest, oldRequest, relatedCodes, allFiles, responseLanguage);
+            return modifyAgentService.runPipeline(
+                    newRequest,
+                    oldRequest,
+                    relatedCodes,
+                    allFiles,
+                    responseLanguage,
+                    selectedModel
+            );
         } else if (mode.equals("add")) {
-            return addAgentService.runPipeline(newRequest, relatedCodes, allFiles, responseLanguage);
+            return addAgentService.runPipeline(
+                    newRequest,
+                    relatedCodes,
+                    allFiles,
+                    responseLanguage,
+                    selectedModel
+            );
         } else {
             throw new UnsupportedOperationException("非法访问");
         }
+    }
+
+    @GetMapping("/models")
+    public LlmClient.ModelCatalog getModels() throws IOException {
+        return llmClient.getModelCatalog();
     }
 
     @GetMapping("/testLLM")

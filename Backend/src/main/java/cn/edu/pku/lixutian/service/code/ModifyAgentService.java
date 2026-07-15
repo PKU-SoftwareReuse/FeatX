@@ -118,7 +118,8 @@ public class ModifyAgentService extends AgentService{
             String originalFeatureDesc,
             String originalCode,
             String fileList,
-            AgentLanguage language
+            AgentLanguage language,
+            String model
     ) {
         SseEmitter emitter = new SseEmitter(0L); // 不超时
         AgentLanguage responseLanguage = AgentLanguage.orDefault(language);
@@ -136,7 +137,7 @@ public class ModifyAgentService extends AgentService{
                         responseLanguage
                 );
 
-                String agent1Result = llmClient.streamGenerateWithPrompt(agent1Prompt, emitter);
+                String agent1Result = llmClient.streamGenerateWithPrompt(agent1Prompt, emitter, model);
 
                 String extraInfo = "";
                 Agent1ParsedResult agent1ParsedResult = parseAgent1Result(agent1Result);
@@ -163,7 +164,7 @@ public class ModifyAgentService extends AgentService{
                         responseLanguage
                 );
 
-                String agent2Result = llmClient.streamGenerateWithPrompt(agent2Prompt, emitter);
+                String agent2Result = llmClient.streamGenerateWithPrompt(agent2Prompt, emitter, model);
 
                 Agent2ParsedResult agent2ParsedResult = parseAgent2Result(agent2Result);
 
@@ -184,7 +185,7 @@ public class ModifyAgentService extends AgentService{
                             responseLanguage
                     );
 
-                    String agent3Result = llmClient.streamGenerateWithPrompt(agent3Prompt, emitter);
+                    String agent3Result = llmClient.streamGenerateWithPrompt(agent3Prompt, emitter, model);
                     map.put(file.filename, parseAgent3Result(agent3Result));
                 }
                 emitter.send(SseEmitter.event().data(encode(responseLanguage.pipelineCompleteDescription())));

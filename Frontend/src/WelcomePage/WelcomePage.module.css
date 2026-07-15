@@ -144,9 +144,9 @@
     white-space: nowrap;
 }
 
-.titleButtonLeft,
-.titleButtonRight {
+.titleButtonLeft {
     position: absolute;
+    left: 0;
     top: 50%;
     transform: translateY(-50%); /* 垂直居中 */
     border: none;
@@ -157,12 +157,49 @@
     transition: background-color 0.2s;
 }
 
-.titleButtonLeft {
-    left: 0;
+.gitLink {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    align-items: center;
+    gap: 6px;
+    overflow-wrap: anywhere;
 }
 
-.titleButtonRight {
-    right: 0;
+.gitLink span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.projectDescription {
+    min-height: 44px;
+    margin: 14px 0 0;
+    color: #5f6875;
+    line-height: 1.55;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.settingsActions {
+    display: flex;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.settingsActionsLabel {
+    color: #4b5563;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.settingsActionButtons {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
 }
 
 
@@ -193,5 +230,18 @@
 
     .logo2 {
         font-size: 1.875rem;
+    }
+
+    .settingsActions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .settingsActionButtons {
+        justify-content: stretch;
+    }
+
+    .settingsActionButtons > * {
+        flex: 1;
     }
 }

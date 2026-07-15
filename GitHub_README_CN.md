@@ -85,9 +85,8 @@ Docker 包中已经包含 NBlog 种子数据和对应源代码快照：
 种子数据查看和 smoke checks 不需要 LLM API Key。完整的 LLM 特性抽取与代码演化流程需要在 `.env` 中配置凭据：
 
 ```env
-LLM_API_URL=https://api.deepseek.com/chat/completions
+LLM_API_URL=https://api.deepseek.com
 LLM_API_KEY=<reviewer-api-key>
-LLM_API_MODEL=deepseek-v4-pro
 
 OPENAI_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=<reviewer-api-key>
