@@ -33,14 +33,6 @@ const buildFileTree = (paths) => {
     return toTreeData(root);
 };
 
-const getErrorMessage = (error, fallback) => {
-    const data = error?.response?.data;
-    if (typeof data === "string" && data.trim()) {
-        return data;
-    }
-    return data?.detail || data?.message || data?.error || fallback;
-};
-
 const GitDownModal = ({reloadGetProjectsInfo}) => {
     const [visible, setVisible] = useState(false);
     const [loadingPreview, setLoadingPreview] = useState(false);
@@ -71,7 +63,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
 
     const handlePreview = () => {
         if (!gitName) {
-            message.warning("Please enter a GitHub repo name.");
+            message.warning("请输入 GitHub 代码仓库名称。");
             return;
         }
 
@@ -81,7 +73,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             setFolderName(data.repoName || "");
             setTreeData(buildFileTree(data.paths || []));
         }).catch(error => {
-            message.error(getErrorMessage(error, "Failed to clone repository."));
+            message.error("克隆代码仓库失败。");
             console.log(error);
         }).finally(() => {
             setLoadingPreview(false);
@@ -90,17 +82,17 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
 
     const handleImport = () => {
         if (!gitName || !folderName || !projectType) {
-            message.warning("Please preview the repository and enter a repo name first.");
+            message.warning("请先预览代码仓库并输入仓库名称。");
             return;
         }
 
         setLoadingImport(true);
         API.gitRepo(gitName, commitId, folderName).then(() => {
-            message.success("Repository imported.");
+            message.success("代码仓库已导入。");
             reloadGetProjectsInfo();
             reset();
         }).catch(error => {
-            message.error(getErrorMessage(error, "Failed to import repository."));
+            message.error("导入代码仓库失败。");
             console.log(error);
         }).finally(() => {
             setLoadingImport(false);
@@ -112,10 +104,10 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             <Button icon={<GithubOutlined/>}
                     className={styles.confirmButton}
                     onClick={() => setVisible(true)}>
-                Clone from GitHub
+                从 GitHub 克隆
             </Button>
             <Modal
-                title="Clone a Java or Python project from GitHub"
+                title="从 GitHub 克隆 Java 或 Python 项目"
                 open={visible}
                 onOk={handleImport}
                 onCancel={handleCancel}
@@ -126,17 +118,17 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             >
                 <div style={{display: "flex", flexDirection: "column", gap: 10}}>
                     <Input
-                        placeholder="GitHub repo, e.g., Naccl/NBlog"
+                        placeholder="GitHub 仓库，例如 Naccl/NBlog"
                         value={gitName}
                         onChange={(e) => setGitName(e.target.value)}
                     />
                     <Input
-                        placeholder="Commit id, optional"
+                        placeholder="提交 ID（选填）"
                         value={commitId}
                         onChange={(e) => setCommitId(e.target.value)}
                     />
                     <Button onClick={handlePreview} loading={loadingPreview}>
-                        Preview
+                        预览
                     </Button>
                 </div>
 
@@ -144,10 +136,10 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
                             <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
-                            <span>{treeData.length > 0 ? "Source tree ready" : "No source files"}</span>
+                            <span>{treeData.length > 0 ? "源文件目录已就绪" : "未找到源文件"}</span>
                         </div>
                     )}
-                    <Spin spinning={loadingPreview} tip="Fetching repository...">
+                    <Spin spinning={loadingPreview} tip="正在获取代码仓库……">
                         {treeData.length > 0 && (
                             <Tree treeData={treeData} defaultExpandAll showIcon height={320}/>
                         )}
@@ -155,7 +147,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
                 </div>
 
                 <Input
-                    placeholder="Please enter repo's name"
+                    placeholder="请输入代码仓库名称"
                     value={folderName}
                     onChange={(e) => setFolderName(e.target.value)}
                 />

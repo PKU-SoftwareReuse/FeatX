@@ -20,6 +20,12 @@ import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderC
 const {Panel} = Collapse;
 const {TextArea} = Input;
 
+const getModuleDescription = (module) =>
+    module.moduleDescCN || module.moduleDescCn || module.moduleDesc;
+
+const getFeatureDescription = (feature) =>
+    feature.featureDescriptionCn || feature.featureDescriptionCN || feature.featureDescription;
+
 const DebloatingPage = () => {
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
@@ -155,7 +161,7 @@ const DebloatingPage = () => {
                 // getCodeDiff(classNodeId)
             })
         } else {
-            alert("Maybe Not Todo")
+            alert("当前没有可执行的操作")
         }
 
     }
@@ -171,11 +177,11 @@ const DebloatingPage = () => {
     const handleSelect = (item) => {
         if (selectedType == "add" || selectedType == "edit") {
             modal.confirm({
-                title: 'You are trying to do another thing',
+                title: '确认切换操作',
                 icon: <ExclamationCircleOutlined/>,
-                content: 'Do you want to give up your modification?',
-                okText: 'Yes, give up!',
-                cancelText: 'Cancel',
+                content: '确定要放弃当前修改吗？',
+                okText: '放弃修改',
+                cancelText: '取消',
                 onOk: async () => {
                     await getFeatureData()
                     goSelect(item)
@@ -201,11 +207,11 @@ const DebloatingPage = () => {
     const handleDelete = (item) => {
         if (selectedType == "add" || selectedType == "edit") {
             modal.confirm({
-                title: 'You are trying to do another thing',
+                title: '确认切换操作',
                 icon: <ExclamationCircleOutlined/>,
-                content: 'Do you want to give up your modification?',
-                okText: 'Yes, give up!',
-                cancelText: 'Cancel',
+                content: '确定要放弃当前修改吗？',
+                okText: '放弃修改',
+                cancelText: '取消',
                 onOk: async () => {
                     await getFeatureData()
                     goDelete(item)
@@ -231,11 +237,11 @@ const DebloatingPage = () => {
     const handleEdit = (item) => {
         if (selectedType == "add" || (selectedType == "edit" && selectedFeatureItem != null && selectedFeatureItem.featureId != item.featureId)) {
             modal.confirm({
-                title: 'You are trying to do another thing',
+                title: '确认切换操作',
                 icon: <ExclamationCircleOutlined/>,
-                content: 'Do you want to give up your modification?',
-                okText: 'Yes, give up!',
-                cancelText: 'Cancel',
+                content: '确定要放弃当前修改吗？',
+                okText: '放弃修改',
+                cancelText: '取消',
                 onOk: async () => {
                     await getFeatureData()
                     goEdit(item)
@@ -255,7 +261,7 @@ const DebloatingPage = () => {
 
         setSelectedFeatureItem(item)
         setSelectedType("edit")
-        setEditedText(item.featureDescription)
+        setEditedText(getFeatureDescription(item))
         getFeatureGraphData(item.featureId, "edit")
     }
 
@@ -265,11 +271,11 @@ const DebloatingPage = () => {
     const changeActiveKey = (newActiveKey) => {
         if (selectedType == "edit" || selectedType == "add") {
             modal.confirm({
-                title: 'You are trying to do another thing',
+                title: '确认切换操作',
                 icon: <ExclamationCircleOutlined/>,
-                content: 'Do you want to give up your modification?',
-                okText: 'Yes, give up!',
-                cancelText: 'Cancel',
+                content: '确定要放弃当前修改吗？',
+                okText: '放弃修改',
+                cancelText: '取消',
                 onOk: async () => {
                     await getFeatureData()
                     setSelectedType(null)
@@ -288,7 +294,7 @@ const DebloatingPage = () => {
         let timestamp = Date.now();
         return {
             featureId: `new-${timestamp}`, // 唯一id
-            featureDescription: `new SubFeature Item ${timestamp}`,
+            featureDescription: `新建子特性 ${timestamp}`,
             isNew: true,
             moduleId: moduleId, // 添加moduleId
         }
@@ -297,11 +303,11 @@ const DebloatingPage = () => {
     const handleAdd = (module) => {
         if (selectedType == "edit" || (selectedType == "add" && activeKey != module.moduleId)) {
             modal.confirm({
-                title: 'You are trying to do another thing',
+                title: '确认切换操作',
                 icon: <ExclamationCircleOutlined/>,
-                content: 'Do you want to give up your modification?',
-                okText: 'Yes, give up!',
-                cancelText: 'Cancel',
+                content: '确定要放弃当前修改吗？',
+                okText: '放弃修改',
+                cancelText: '取消',
                 onOk: async () => {
                     await getFeatureData()
                     goAdd(module)
@@ -503,7 +509,7 @@ const DebloatingPage = () => {
                     console.error('Error Confirm Delete Feature:', error)
                 });
         }else{
-            alert('This is a [Fake] success message')
+            alert('操作已完成')
         }
 
     }
@@ -512,20 +518,20 @@ const DebloatingPage = () => {
     return (
         <>
             {contextHolder}
-            <Spin spinning={loadingConfirm} tip={"Applying the Code Diff..."} size={"large"}>
+            <Spin spinning={loadingConfirm} tip={"正在应用代码差异……"} size={"large"}>
                 <Splitter className={styles.background_area}>
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel defaultSize="21%" resizable={false} className={styles.main_area}>
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    Feature Panel
+                                    特性面板
                                 </div>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
-                            <Spin spinning={loadingFeatureList} tip={"Fetching repo's feature summary."} size="large">
+                            <Spin spinning={loadingFeatureList} tip={"正在获取代码仓库的特性摘要。"} size="large">
                                 <div className={styles.scrollContainer}>
                                     <Collapse
                                         accordion
@@ -538,7 +544,7 @@ const DebloatingPage = () => {
                                             <Panel
                                                 header={
                                                     <div className={styles.moduleTitle}>
-                                                        <div>{`${moduleIndex + 1}. ${module.moduleDesc}`}</div>
+                                                        <div>{`${moduleIndex + 1}. ${getModuleDescription(module)}`}</div>
                                                         <div className={styles.iconContainer}>
                                                             <Button
                                                                 type="text"
@@ -580,7 +586,7 @@ const DebloatingPage = () => {
                                                                     {`${moduleIndex + 1}.${displayIndex} `}
                                                                     {(selectedType === 'edit' || selectedType === 'add') && selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId ? (
                                                                         <Tooltip
-                                                                            title={!submitEnabled ? "You have made some modifications. Please confirm or drop it." : ""}
+                                                                            title={!submitEnabled ? "您已提交修改，请确认应用或放弃修改。" : ""}
                                                                         >
                                                                             <div>
                                                                                 <TextArea
@@ -599,12 +605,12 @@ const DebloatingPage = () => {
                                                                                     }}
                                                                                     disabled={!submitEnabled}
                                                                                 >
-                                                                                    Submit
+                                                                                    提交
                                                                                 </Button>
                                                                             </div>
                                                                         </Tooltip>
                                                                     ) : (
-                                                                        item.featureDescription
+                                                                        getFeatureDescription(item)
                                                                     )}
                                                                 </div>
                                                                 <div className={styles.iconContainer}>
@@ -651,7 +657,7 @@ const DebloatingPage = () => {
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
-                                            {chatMode ? `Agent Panel` : `CodeMap Panel`}
+                                            {chatMode ? `智能体面板` : `CodeMap 面板`}
                                         </div>
                                         <div className={styles.iconContainer}>
                                             <Button
@@ -675,7 +681,7 @@ const DebloatingPage = () => {
                                     </div>
                                 </div>
                                 <div style={{display: chatMode ? 'none' : 'block', height: '100%'}}>
-                                    <Spin spinning={loadingFeatureGraph} tip={"fetching codeMap."} size={"large"}>
+                                    <Spin spinning={loadingFeatureGraph} tip={"正在获取 CodeMap。"} size={"large"}>
                                         <FeatureGraph
                                             ref={featureGraphRef}
                                             graphData={graphData}
@@ -692,26 +698,26 @@ const DebloatingPage = () => {
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    Diff Panel
+                                    差异面板
                                 </div>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
 
-                            <Spin spinning={loadingCode} tip={"Fetching code details."} size="large">
+                            <Spin spinning={loadingCode} tip={"正在获取代码详情。"} size="large">
                                 <CodeDiffComponent
                                     diffText={codeDiff}
                                     isPlainCode={false}
                                 />
                                 <Tooltip
-                                    title={!confirmEnabled ? "You haven't made any modifications. Please submit first." : ""}
+                                    title={!confirmEnabled ? "您尚未提交任何修改，请先提交。" : ""}
                                 >
-                                    <Popconfirm title="Confirm All Code Diff"
-                                                description="Have you read all the diff(the node marked with red)?"
+                                    <Popconfirm title="确认所有代码差异"
+                                                description="您是否已检查全部差异（红色标记的节点）？"
                                                 onConfirm={confirmDiff}
-                                                okText="Yes"
-                                                cancelText="No"
+                                                okText="确认应用"
+                                                cancelText="取消"
                                     >
                                         <div className={styles.centerButtonWrapper}>
                                             <Button
@@ -719,7 +725,7 @@ const DebloatingPage = () => {
                                                 // onClick={confirmDiff}
                                                 disabled={!confirmEnabled}
                                             >
-                                                Confirm Apply the Diff
+                                                确认应用差异
                                             </Button>
                                         </div>
                                     </Popconfirm>

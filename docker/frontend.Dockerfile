@@ -12,6 +12,7 @@ RUN npm run build
 FROM nginx:1.27-alpine
 
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --chmod=755 --from=frontend-build /src/Frontend/build /usr/share/nginx/html
+COPY --from=frontend-build /src/Frontend/build /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html
 
 EXPOSE 80

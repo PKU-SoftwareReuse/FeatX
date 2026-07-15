@@ -327,7 +327,8 @@ DOCKERFILE
   docker build -t featx-frontend:ase26 -f - "$tmp_dir/frontend" <<'DOCKERFILE'
 FROM featx-frontend:ase26
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY --chmod=755 build /usr/share/nginx/html
+COPY build /usr/share/nginx/html
+RUN chmod -R a+rX /usr/share/nginx/html
 DOCKERFILE
 
   rm -rf "$tmp_dir"

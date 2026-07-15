@@ -190,7 +190,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
                 if (!analysis.projectType) {
                     setStatus("unsupported");
-                    message.warning("Only Java and Python projects are supported.");
+                    message.warning("仅支持 Java 和 Python 项目。");
                     return;
                 }
 
@@ -201,7 +201,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
     const handleOk = async () => {
         if (!sourceFiles.length || !folderName || !projectType) {
-            message.warning("Please select a Java or Python project and enter a repo name.");
+            message.warning("请选择 Java 或 Python 项目，并输入代码仓库名称。");
             return;
         }
 
@@ -215,10 +215,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
         API.uploadProject(projectData).then(() => {
             handleCancel();
-            message.success("Upload succeeded.");
+            message.success("上传成功。");
             reloadGetProjectsInfo();
         }).catch(error => {
-            message.error("Upload failed.");
+            message.error("上传失败。");
             console.log(error);
         });
     };
@@ -242,10 +242,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             <Button icon={<UploadOutlined/>}
                     className={styles.confirmButton}
                     onClick={() => setVisible(true)}>
-                Upload New Repo
+                上传新代码仓库
             </Button>
             <Modal
-                title="Upload a Java or Python project"
+                title="上传 Java 或 Python 项目"
                 open={visible}
                 onOk={handleOk}
                 onCancel={handleCancel}
@@ -262,7 +262,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                         <p className="ant-upload-drag-icon">
                             <InboxOutlined/>
                         </p>
-                        <p className="ant-upload-text">Drag a project folder here or click to select it</p>
+                        <p className="ant-upload-text">将项目文件夹拖到此处，或点击选择文件夹</p>
                     </Dragger>
                 </div>
 
@@ -270,13 +270,13 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
                             <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
-                            <span>{sourceFiles.length.toLocaleString()} source files selected</span>
+                            <span>已选择 {sourceFiles.length.toLocaleString()} 个源文件</span>
                             {sourceFiles.length > SOURCE_TREE_LIMIT && (
-                                <span>Showing first {SOURCE_TREE_LIMIT.toLocaleString()} files</span>
+                                <span>仅显示前 {SOURCE_TREE_LIMIT.toLocaleString()} 个文件</span>
                             )}
                         </div>
                     )}
-                    {status === "processing" && <p>Reading folder...</p>}
+                    {status === "processing" && <p>正在读取文件夹……</p>}
                     {treeData.length > 0 && (
                         <Tree treeData={treeData} defaultExpandAll showIcon height={320}/>
                     )}
@@ -284,7 +284,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
                 <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
                     <Input
-                        placeholder="Please enter repo's name"
+                        placeholder="请输入代码仓库名称"
                         value={folderName}
                         onChange={(e) => setFolderName(e.target.value)}
                     />

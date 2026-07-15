@@ -50,7 +50,7 @@ const Template = () => {
         API.getTemplateJsonFile()
             .then(response => {
                 const contentDisposition = response.headers.get("Content-Disposition");
-                let filename = "Code Template by LoCoTeM.json"; // 默认文件名
+                let filename = "LoCoTeM 代码模板.json"; // 默认文件名
 
                 if (contentDisposition) {
                     const match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);

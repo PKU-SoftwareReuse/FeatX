@@ -11,23 +11,31 @@ import GitDownModal from "./GitDownModal/GitDownModal";
 
 const formatMetric = (value) => value === null || value === undefined ? "-" : value.toLocaleString();
 
+const getGithubName = (project) => {
+    if (!project.githubLink) return "未关联";
+    if (!project.githubName || project.githubName === "Blank Git Link" || project.githubName === "Error in Extract Git Name") {
+        return project.githubLink;
+    }
+    return project.githubName;
+};
+
 const getProjectStats = (project) => {
     if (project.projectType === "PYTHON") {
         return [
-            ["Language", "Python"],
-            ["Line of Codes", project.loc],
-            ["Python Files", project.nof],
-            ["Functions / Methods", project.nom],
-            ["Classes", project.noc],
+            ["编程语言", "Python"],
+            ["代码行数", project.loc],
+            ["Python 文件数", project.nof],
+            ["函数 / 方法数", project.nom],
+            ["类数量", project.noc],
         ];
     }
 
     return [
-        ["Language", "Java"],
-        ["Line of Codes", project.loc],
-        ["Number of Classes", project.noc],
-        ["Number of Methods", project.nom],
-        ["Number of Fields", project.nof],
+        ["编程语言", "Java"],
+        ["代码行数", project.loc],
+        ["类数量", project.noc],
+        ["方法数量", project.nom],
+        ["字段数量", project.nof],
     ];
 };
 
@@ -89,11 +97,11 @@ const WelcomePage = () => {
     const handleDropButton = (repoId) => {
         setLoadingConnect(true);
         API.postDropRepo(repoId).then(() => {
-            message.success("Project deleted.");
+            message.success("项目已删除。");
             getProjects();
         }).catch(error => {
             setLoadingConnect(false);
-            message.error(error?.response?.data?.message || "Failed to delete project.");
+            message.error("项目删除失败。");
             console.log(error)
         })
     }
@@ -102,12 +110,12 @@ const WelcomePage = () => {
         <div className={styles.welcomePage}>
 
             {/* LOGO */}
-            <h1 className={styles.logo1}>A Feature-Oriented Interface for LLM Programming</h1>
-            <h1 className={styles.logo2}>FeatX: Editing Software by Editing Features</h1>
+            <h1 className={styles.logo1}>面向大语言模型编程的特性化界面</h1>
+            <h1 className={styles.logo2}>FeatX：通过编辑特性来编辑软件</h1>
 
 
-            <Spin tip={"We're analyzing and processing your selected repo."} size={"large"} spinning={loadingAnalyse}>
-                <Spin tip={"Connecting...."} size={"large"} spinning={loadingConnect}>
+            <Spin tip={"正在分析并处理所选代码仓库。"} size={"large"} spinning={loadingAnalyse}>
+                <Spin tip={"正在连接……"} size={"large"} spinning={loadingConnect}>
                     <div className={styles.projectGrid}>
                         {projectOptions ? (
                             projectOptions.map((project, index) => (
@@ -116,13 +124,13 @@ const WelcomePage = () => {
                                     title={
                                         <div className={styles.cardTitle}>
                                             <Popconfirm
-                                                title="Confirm Delete Project"
-                                                description="Do you want to delete this project? This cannot be restored."
+                                                title="确认删除项目"
+                                                description="确定要删除此项目吗？删除后无法恢复。"
                                                 onConfirm={() => {
                                                     handleDropButton(project.id);
                                                 }}
-                                                okText="Yes"
-                                                cancelText="No"
+                                                okText="删除"
+                                                cancelText="取消"
                                             >
                                                 <Button
                                                     type="text"
@@ -133,13 +141,13 @@ const WelcomePage = () => {
                                             </Popconfirm>
                                             <span className={styles.cardTitleText}>{project.projectName}</span>
                                             <Popconfirm
-                                                title="Confirm ReSummary"
-                                                description="Do you want to get a brand new summary? It will take some minutes..."
+                                                title="确认重新生成摘要"
+                                                description="确定要重新生成项目摘要吗？此过程可能需要几分钟。"
                                                 onConfirm={() => {
                                                     handleResummaryButton(project.id);
                                                 }}
-                                                okText="Yes"
-                                                cancelText="No"
+                                                okText="确认"
+                                                cancelText="取消"
                                             >
                                                 <Button
                                                     type="text"
@@ -159,19 +167,19 @@ const WelcomePage = () => {
                                                 {typeof value === "number" ? formatMetric(value) : value}
                                             </Descriptions.Item>
                                         ))}
-                                        <Descriptions.Item label="GitHub">
+                                        <Descriptions.Item label="GitHub 仓库">
                                             {project.githubLink ? (
                                                 <a href={project.githubLink} target="_blank"
                                                    rel="noopener noreferrer">
                                                     <GithubOutlined style={{marginRight: 8}}/>
-                                                    {project.githubName}
+                                                    {getGithubName(project)}
                                                 </a>
-                                            ) : project.githubName}
+                                            ) : getGithubName(project)}
                                         </Descriptions.Item>
                                     </Descriptions>
                                     <p style={{textAlign: "center"}}>{project.description}</p>
                                     <Tooltip
-                                        title={project.projectType === "PYTHON" ? "Python analysis pipeline will be added later." : (!project.summaryFlag ? "Repo summary in progress..." : "")}
+                                        title={project.projectType === "PYTHON" ? "Python 分析功能将在后续版本中提供。" : (!project.summaryFlag ? "正在生成代码仓库摘要……" : "")}
                                     >
                                         <div className={styles.buttonContainer}>
                                             <Button
@@ -181,7 +189,7 @@ const WelcomePage = () => {
                                                 }}
                                                 disabled={!project.summaryFlag || project.projectType === "PYTHON"}
                                             >
-                                                Open
+                                                打开
                                             </Button>
                                         </div>
                                     </Tooltip>
@@ -198,11 +206,11 @@ const WelcomePage = () => {
 
             {/* 介绍文本 */}
             <div className={styles.introText}>
-                <p>FeatX provides an integrated environment that supports editing software by editing features. Its workflow can be described as follows:</p>
-                <p>1. <strong>Feature Summarization.</strong> Constructs a hierarchical feature list to organize repository code into features and epics.</p>
-                <p>2. <strong>CodeMap Construction.</strong> Builds a comprehensive CodeMap that captures the full implementation context of each feature.</p>
-                <p>3. <strong>CodeAgent Generation.</strong> A three-stage CodeAgent pipeline generates consistent file-level modifications following established software engineering workflows.</p>
-                <p>4. <strong>Diff Confirmation.</strong> The user reviews the code modifications and applies the confirmed changes back to the repository.</p>
+                <p>FeatX 提供一体化环境，支持通过编辑特性来编辑软件。其工作流程如下：</p>
+                <p>1. <strong>特性摘要。</strong>构建分层特性列表，将代码仓库中的代码组织为特性与史诗。</p>
+                <p>2. <strong>CodeMap 构建。</strong>构建完整的 CodeMap，涵盖每项特性的全部实现上下文。</p>
+                <p>3. <strong>CodeAgent 生成。</strong>采用三阶段 CodeAgent 流程，按照成熟的软件工程工作流生成一致的文件级修改。</p>
+                <p>4. <strong>差异确认。</strong>用户审核代码修改，并将确认后的变更应用回代码仓库。</p>
             </div>
         </div>
 
