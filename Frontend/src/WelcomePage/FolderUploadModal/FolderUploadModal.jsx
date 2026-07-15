@@ -3,11 +3,41 @@ import {Modal, Button, Input, Upload, Tree, message, Tag} from "antd";
 import {InboxOutlined, FileOutlined, UploadOutlined} from "@ant-design/icons";
 import API from "../../API";
 import styles from "../WelcomePage.module.css";
+import {useLanguage} from "../../i18n/LanguageContext";
 
 
 const {Dragger} = Upload;
 
 const SOURCE_TREE_LIMIT = 1000;
+
+const UPLOAD_COPY = {
+    zh: {
+        unsupported: "仅支持 Java 和 Python 项目。",
+        incomplete: "请选择 Java 或 Python 项目，并输入代码仓库名称。",
+        succeeded: "上传成功。",
+        failed: "上传失败。",
+        openButton: "上传新代码仓库",
+        title: "上传 Java 或 Python 项目",
+        dragHint: "将项目文件夹拖到此处，或点击选择文件夹",
+        selectedFiles: (count) => `已选择 ${count} 个源文件`,
+        showingFiles: (count) => `仅显示前 ${count} 个文件`,
+        reading: "正在读取文件夹……",
+        repositoryName: "请输入代码仓库名称",
+    },
+    en: {
+        unsupported: "Only Java and Python projects are supported.",
+        incomplete: "Please select a Java or Python project and enter a repo name.",
+        succeeded: "Upload succeeded.",
+        failed: "Upload failed.",
+        openButton: "Upload New Repo",
+        title: "Upload a Java or Python project",
+        dragHint: "Drag a project folder here or click to select it",
+        selectedFiles: (count) => `${count} source files selected`,
+        showingFiles: (count) => `Showing first ${count} files`,
+        reading: "Reading folder...",
+        repositoryName: "Please enter repo's name",
+    },
+};
 
 const normalizePath = (path) => (path || "").replace(/\\/g, "/");
 
@@ -146,6 +176,8 @@ const analyzeFiles = (fileList) => {
 };
 
 const FolderUploadModal = ({reloadGetProjectsInfo}) => {
+    const {language} = useLanguage();
+    const copy = UPLOAD_COPY[language];
     const [visible, setVisible] = useState(false);
     const [sourceFiles, setSourceFiles] = useState([]);
     const [folderName, setFolderName] = useState("");
@@ -190,7 +222,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
                 if (!analysis.projectType) {
                     setStatus("unsupported");
-                    message.warning("仅支持 Java 和 Python 项目。");
+                    message.warning(copy.unsupported);
                     return;
                 }
 
@@ -201,7 +233,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
     const handleOk = async () => {
         if (!sourceFiles.length || !folderName || !projectType) {
-            message.warning("请选择 Java 或 Python 项目，并输入代码仓库名称。");
+            message.warning(copy.incomplete);
             return;
         }
 
@@ -215,10 +247,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
         API.uploadProject(projectData).then(() => {
             handleCancel();
-            message.success("上传成功。");
+            message.success(copy.succeeded);
             reloadGetProjectsInfo();
         }).catch(error => {
-            message.error("上传失败。");
+            message.error(copy.failed);
             console.log(error);
         });
     };
@@ -242,10 +274,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             <Button icon={<UploadOutlined/>}
                     className={styles.confirmButton}
                     onClick={() => setVisible(true)}>
-                上传新代码仓库
+                {copy.openButton}
             </Button>
             <Modal
-                title="上传 Java 或 Python 项目"
+                title={copy.title}
                 open={visible}
                 onOk={handleOk}
                 onCancel={handleCancel}
@@ -262,7 +294,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                         <p className="ant-upload-drag-icon">
                             <InboxOutlined/>
                         </p>
-                        <p className="ant-upload-text">将项目文件夹拖到此处，或点击选择文件夹</p>
+                        <p className="ant-upload-text">{copy.dragHint}</p>
                     </Dragger>
                 </div>
 
@@ -270,13 +302,13 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
                             <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
-                            <span>已选择 {sourceFiles.length.toLocaleString()} 个源文件</span>
+                            <span>{copy.selectedFiles(sourceFiles.length.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
                             {sourceFiles.length > SOURCE_TREE_LIMIT && (
-                                <span>仅显示前 {SOURCE_TREE_LIMIT.toLocaleString()} 个文件</span>
+                                <span>{copy.showingFiles(SOURCE_TREE_LIMIT.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
                             )}
                         </div>
                     )}
-                    {status === "processing" && <p>正在读取文件夹……</p>}
+                    {status === "processing" && <p>{copy.reading}</p>}
                     {treeData.length > 0 && (
                         <Tree treeData={treeData} defaultExpandAll showIcon height={320}/>
                     )}
@@ -284,7 +316,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
 
                 <div style={{display: "flex", flexDirection: "column", gap: "10px"}}>
                     <Input
-                        placeholder="请输入代码仓库名称"
+                        placeholder={copy.repositoryName}
                         value={folderName}
                         onChange={(e) => setFolderName(e.target.value)}
                     />

@@ -61,6 +61,7 @@ services:
       dockerfile: docker/frontend.Dockerfile
       args:
         REACT_APP_API_BASE_URL: /api
+        REACT_APP_DEFAULT_LANGUAGE: ${REACT_APP_DEFAULT_LANGUAGE:-CN}
     image: featx-frontend:ase26
     depends_on:
       - backend

@@ -3,7 +3,42 @@ import {Button, Input, message, Modal, Spin, Tag, Tree} from "antd";
 import {FileOutlined, GithubOutlined} from "@ant-design/icons";
 import API from "../../API";
 import styles from "../WelcomePage.module.css";
+import {useLanguage} from "../../i18n/LanguageContext";
 
+const GIT_COPY = {
+    zh: {
+        enterGithub: "请输入 GitHub 代码仓库名称。",
+        cloneFailed: "克隆代码仓库失败。",
+        previewFirst: "请先预览代码仓库并输入仓库名称。",
+        imported: "代码仓库已导入。",
+        importFailed: "导入代码仓库失败。",
+        openButton: "从 GitHub 克隆",
+        title: "从 GitHub 克隆 Java 或 Python 项目",
+        githubRepository: "GitHub 仓库，例如 Naccl/NBlog",
+        commitId: "提交 ID（选填）",
+        preview: "预览",
+        treeReady: "源文件目录已就绪",
+        noSourceFiles: "未找到源文件",
+        fetching: "正在获取代码仓库……",
+        repositoryName: "请输入代码仓库名称",
+    },
+    en: {
+        enterGithub: "Please enter a GitHub repo name.",
+        cloneFailed: "Failed to clone repository.",
+        previewFirst: "Please preview the repository and enter a repo name first.",
+        imported: "Repository imported.",
+        importFailed: "Failed to import repository.",
+        openButton: "Clone from GitHub",
+        title: "Clone a Java or Python project from GitHub",
+        githubRepository: "GitHub repo, e.g., Naccl/NBlog",
+        commitId: "Commit id, optional",
+        preview: "Preview",
+        treeReady: "Source tree ready",
+        noSourceFiles: "No source files",
+        fetching: "Fetching repository...",
+        repositoryName: "Please enter repo's name",
+    },
+};
 
 const buildFileTree = (paths) => {
     const root = {};
@@ -33,7 +68,19 @@ const buildFileTree = (paths) => {
     return toTreeData(root);
 };
 
+const getErrorMessage = (error, fallback, language) => {
+    if (language !== "en") return fallback;
+
+    const data = error?.response?.data;
+    if (typeof data === "string" && data.trim()) {
+        return data;
+    }
+    return data?.detail || data?.message || data?.error || fallback;
+};
+
 const GitDownModal = ({reloadGetProjectsInfo}) => {
+    const {language} = useLanguage();
+    const copy = GIT_COPY[language];
     const [visible, setVisible] = useState(false);
     const [loadingPreview, setLoadingPreview] = useState(false);
     const [loadingImport, setLoadingImport] = useState(false);
@@ -63,7 +110,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
 
     const handlePreview = () => {
         if (!gitName) {
-            message.warning("请输入 GitHub 代码仓库名称。");
+            message.warning(copy.enterGithub);
             return;
         }
 
@@ -73,7 +120,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             setFolderName(data.repoName || "");
             setTreeData(buildFileTree(data.paths || []));
         }).catch(error => {
-            message.error("克隆代码仓库失败。");
+            message.error(getErrorMessage(error, copy.cloneFailed, language));
             console.log(error);
         }).finally(() => {
             setLoadingPreview(false);
@@ -82,17 +129,17 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
 
     const handleImport = () => {
         if (!gitName || !folderName || !projectType) {
-            message.warning("请先预览代码仓库并输入仓库名称。");
+            message.warning(copy.previewFirst);
             return;
         }
 
         setLoadingImport(true);
         API.gitRepo(gitName, commitId, folderName).then(() => {
-            message.success("代码仓库已导入。");
+            message.success(copy.imported);
             reloadGetProjectsInfo();
             reset();
         }).catch(error => {
-            message.error("导入代码仓库失败。");
+            message.error(getErrorMessage(error, copy.importFailed, language));
             console.log(error);
         }).finally(() => {
             setLoadingImport(false);
@@ -104,10 +151,10 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             <Button icon={<GithubOutlined/>}
                     className={styles.confirmButton}
                     onClick={() => setVisible(true)}>
-                从 GitHub 克隆
+                {copy.openButton}
             </Button>
             <Modal
-                title="从 GitHub 克隆 Java 或 Python 项目"
+                title={copy.title}
                 open={visible}
                 onOk={handleImport}
                 onCancel={handleCancel}
@@ -118,17 +165,17 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
             >
                 <div style={{display: "flex", flexDirection: "column", gap: 10}}>
                     <Input
-                        placeholder="GitHub 仓库，例如 Naccl/NBlog"
+                        placeholder={copy.githubRepository}
                         value={gitName}
                         onChange={(e) => setGitName(e.target.value)}
                     />
                     <Input
-                        placeholder="提交 ID（选填）"
+                        placeholder={copy.commitId}
                         value={commitId}
                         onChange={(e) => setCommitId(e.target.value)}
                     />
                     <Button onClick={handlePreview} loading={loadingPreview}>
-                        预览
+                        {copy.preview}
                     </Button>
                 </div>
 
@@ -136,10 +183,10 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
                             <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
-                            <span>{treeData.length > 0 ? "源文件目录已就绪" : "未找到源文件"}</span>
+                            <span>{treeData.length > 0 ? copy.treeReady : copy.noSourceFiles}</span>
                         </div>
                     )}
-                    <Spin spinning={loadingPreview} tip="正在获取代码仓库……">
+                    <Spin spinning={loadingPreview} tip={copy.fetching}>
                         {treeData.length > 0 && (
                             <Tree treeData={treeData} defaultExpandAll showIcon height={320}/>
                         )}
@@ -147,7 +194,7 @@ const GitDownModal = ({reloadGetProjectsInfo}) => {
                 </div>
 
                 <Input
-                    placeholder="请输入代码仓库名称"
+                    placeholder={copy.repositoryName}
                     value={folderName}
                     onChange={(e) => setFolderName(e.target.value)}
                 />

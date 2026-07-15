@@ -16,17 +16,73 @@ import API from "../API";
 import FeatureGraph from "../graph/featureGraph/FeatureGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
+import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
 
-const getModuleDescription = (module) =>
-    module.moduleDescCN || module.moduleDescCn || module.moduleDesc;
+const DEBLOATING_COPY = {
+    zh: {
+        noAction: "当前没有可执行的操作",
+        switchTitle: "确认切换操作",
+        switchDescription: "确定要放弃当前修改吗？",
+        discard: "放弃修改",
+        cancel: "取消",
+        newSubfeature: "新建子功能特征 ",
+        completed: "操作已完成",
+        applyingChanges: "正在应用代码变更……",
+        featurePanel: "功能特征面板",
+        fetchingFeatureSummary: "正在获取代码仓库的功能特征摘要。",
+        pendingChanges: "请确认应用或放弃修改。",
+        submit: "提交",
+        agentPanel: "智能体生成",
+        graphPanel: "相关代码图谱",
+        fetchingGraph: "正在获取相关代码图谱。",
+        changesPanel: "代码变更",
+        fetchingCode: "正在获取代码详情。",
+        noSubmittedChanges: "您尚未提交任何修改，请先提交。",
+        confirmAllChanges: "确认所有代码变更",
+        reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
+        confirmApply: "确认应用",
+        decline: "取消",
+        applyChanges: "确认应用代码变更",
+    },
+    en: {
+        noAction: "Maybe Not Todo",
+        switchTitle: "You are trying to do another thing",
+        switchDescription: "Do you want to give up your modification?",
+        discard: "Yes, give up!",
+        cancel: "Cancel",
+        newSubfeature: "new SubFeature Item ",
+        completed: "This is a [Fake] success message",
+        applyingChanges: "Applying the Code Diff...",
+        featurePanel: "Feature Panel",
+        fetchingFeatureSummary: "Fetching repo's feature summary.",
+        pendingChanges: "You have made some modifications. Please confirm or drop it.",
+        submit: "Submit",
+        agentPanel: "Agent Panel",
+        graphPanel: "CodeMap Panel",
+        fetchingGraph: "fetching codeMap.",
+        changesPanel: "Diff Panel",
+        fetchingCode: "Fetching code details.",
+        noSubmittedChanges: "You haven't made any modifications. Please submit first.",
+        confirmAllChanges: "Confirm All Code Diff",
+        reviewAllChanges: "Have you read all the diff(the node marked with red)?",
+        confirmApply: "Yes",
+        decline: "No",
+        applyChanges: "Confirm Apply the Diff",
+    },
+};
 
-const getFeatureDescription = (feature) =>
-    feature.featureDescriptionCn || feature.featureDescriptionCN || feature.featureDescription;
+const getModuleDescription = (module, language) =>
+    getLocalizedField(module, "moduleDesc", language);
+
+const getFeatureDescription = (feature, language) =>
+    getLocalizedField(feature, "featureDescription", language);
 
 const DebloatingPage = () => {
+    const {language} = useLanguage();
+    const copy = DEBLOATING_COPY[language];
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
@@ -161,7 +217,7 @@ const DebloatingPage = () => {
                 // getCodeDiff(classNodeId)
             })
         } else {
-            alert("当前没有可执行的操作")
+            alert(copy.noAction)
         }
 
     }
@@ -177,11 +233,11 @@ const DebloatingPage = () => {
     const handleSelect = (item) => {
         if (selectedType == "add" || selectedType == "edit") {
             modal.confirm({
-                title: '确认切换操作',
+                title: copy.switchTitle,
                 icon: <ExclamationCircleOutlined/>,
-                content: '确定要放弃当前修改吗？',
-                okText: '放弃修改',
-                cancelText: '取消',
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
                 onOk: async () => {
                     await getFeatureData()
                     goSelect(item)
@@ -207,11 +263,11 @@ const DebloatingPage = () => {
     const handleDelete = (item) => {
         if (selectedType == "add" || selectedType == "edit") {
             modal.confirm({
-                title: '确认切换操作',
+                title: copy.switchTitle,
                 icon: <ExclamationCircleOutlined/>,
-                content: '确定要放弃当前修改吗？',
-                okText: '放弃修改',
-                cancelText: '取消',
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
                 onOk: async () => {
                     await getFeatureData()
                     goDelete(item)
@@ -237,11 +293,11 @@ const DebloatingPage = () => {
     const handleEdit = (item) => {
         if (selectedType == "add" || (selectedType == "edit" && selectedFeatureItem != null && selectedFeatureItem.featureId != item.featureId)) {
             modal.confirm({
-                title: '确认切换操作',
+                title: copy.switchTitle,
                 icon: <ExclamationCircleOutlined/>,
-                content: '确定要放弃当前修改吗？',
-                okText: '放弃修改',
-                cancelText: '取消',
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
                 onOk: async () => {
                     await getFeatureData()
                     goEdit(item)
@@ -261,7 +317,7 @@ const DebloatingPage = () => {
 
         setSelectedFeatureItem(item)
         setSelectedType("edit")
-        setEditedText(getFeatureDescription(item))
+        setEditedText(getFeatureDescription(item, language))
         getFeatureGraphData(item.featureId, "edit")
     }
 
@@ -271,11 +327,11 @@ const DebloatingPage = () => {
     const changeActiveKey = (newActiveKey) => {
         if (selectedType == "edit" || selectedType == "add") {
             modal.confirm({
-                title: '确认切换操作',
+                title: copy.switchTitle,
                 icon: <ExclamationCircleOutlined/>,
-                content: '确定要放弃当前修改吗？',
-                okText: '放弃修改',
-                cancelText: '取消',
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
                 onOk: async () => {
                     await getFeatureData()
                     setSelectedType(null)
@@ -294,7 +350,7 @@ const DebloatingPage = () => {
         let timestamp = Date.now();
         return {
             featureId: `new-${timestamp}`, // 唯一id
-            featureDescription: `新建子功能特征 ${timestamp}`,
+            featureDescription: `${copy.newSubfeature}${timestamp}`,
             isNew: true,
             moduleId: moduleId, // 添加moduleId
         }
@@ -303,11 +359,11 @@ const DebloatingPage = () => {
     const handleAdd = (module) => {
         if (selectedType == "edit" || (selectedType == "add" && activeKey != module.moduleId)) {
             modal.confirm({
-                title: '确认切换操作',
+                title: copy.switchTitle,
                 icon: <ExclamationCircleOutlined/>,
-                content: '确定要放弃当前修改吗？',
-                okText: '放弃修改',
-                cancelText: '取消',
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
                 onOk: async () => {
                     await getFeatureData()
                     goAdd(module)
@@ -509,7 +565,7 @@ const DebloatingPage = () => {
                     console.error('Error Confirm Delete Feature:', error)
                 });
         }else{
-            alert('操作已完成')
+            alert(copy.completed)
         }
 
     }
@@ -518,20 +574,20 @@ const DebloatingPage = () => {
     return (
         <>
             {contextHolder}
-            <Spin spinning={loadingConfirm} tip={"正在应用代码变更……"} size={"large"}>
+            <Spin spinning={loadingConfirm} tip={copy.applyingChanges} size={"large"}>
                 <Splitter className={styles.background_area}>
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel defaultSize="21%" resizable={false} className={styles.main_area}>
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    功能特征面板
+                                    {copy.featurePanel}
                                 </div>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
-                            <Spin spinning={loadingFeatureList} tip={"正在获取代码仓库的功能特征摘要。"} size="large">
+                            <Spin spinning={loadingFeatureList} tip={copy.fetchingFeatureSummary} size="large">
                                 <div className={styles.scrollContainer}>
                                     <Collapse
                                         accordion
@@ -544,7 +600,7 @@ const DebloatingPage = () => {
                                             <Panel
                                                 header={
                                                     <div className={styles.moduleTitle}>
-                                                        <div>{`${moduleIndex + 1}. ${getModuleDescription(module)}`}</div>
+                                                        <div>{`${moduleIndex + 1}. ${getModuleDescription(module, language)}`}</div>
                                                         <div className={styles.iconContainer}>
                                                             <Button
                                                                 type="text"
@@ -586,7 +642,7 @@ const DebloatingPage = () => {
                                                                     {`${moduleIndex + 1}.${displayIndex} `}
                                                                     {(selectedType === 'edit' || selectedType === 'add') && selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId ? (
                                                                         <Tooltip
-                                                                            title={!submitEnabled ? "请确认应用或放弃修改。" : ""}
+                                                                            title={!submitEnabled ? copy.pendingChanges : ""}
                                                                         >
                                                                             <div>
                                                                                 <TextArea
@@ -605,12 +661,12 @@ const DebloatingPage = () => {
                                                                                     }}
                                                                                     disabled={!submitEnabled}
                                                                                 >
-                                                                                    提交
+                                                                                    {copy.submit}
                                                                                 </Button>
                                                                             </div>
                                                                         </Tooltip>
                                                                     ) : (
-                                                                        getFeatureDescription(item)
+                                                                        getFeatureDescription(item, language)
                                                                     )}
                                                                 </div>
                                                                 <div className={styles.iconContainer}>
@@ -657,7 +713,7 @@ const DebloatingPage = () => {
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
-                                            {chatMode ? `智能体生成` : `相关代码图谱`}
+                                            {chatMode ? copy.agentPanel : copy.graphPanel}
                                         </div>
                                         <div className={styles.iconContainer}>
                                             <Button
@@ -681,7 +737,7 @@ const DebloatingPage = () => {
                                     </div>
                                 </div>
                                 <div style={{display: chatMode ? 'none' : 'block', height: '100%'}}>
-                                    <Spin spinning={loadingFeatureGraph} tip={"正在获取相关代码图谱。"} size={"large"}>
+                                    <Spin spinning={loadingFeatureGraph} tip={copy.fetchingGraph} size={"large"}>
                                         <FeatureGraph
                                             ref={featureGraphRef}
                                             graphData={graphData}
@@ -698,26 +754,26 @@ const DebloatingPage = () => {
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    代码变更
+                                    {copy.changesPanel}
                                 </div>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
 
-                            <Spin spinning={loadingCode} tip={"正在获取代码详情。"} size="large">
+                            <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
                                 <CodeDiffComponent
                                     diffText={codeDiff}
                                     isPlainCode={false}
                                 />
                                 <Tooltip
-                                    title={!confirmEnabled ? "您尚未提交任何修改，请先提交。" : ""}
+                                    title={!confirmEnabled ? copy.noSubmittedChanges : ""}
                                 >
-                                    <Popconfirm title="确认所有代码变更"
-                                                description="您是否已检查全部代码变更（红色标记的节点）？"
+                                    <Popconfirm title={copy.confirmAllChanges}
+                                                description={copy.reviewAllChanges}
                                                 onConfirm={confirmDiff}
-                                                okText="确认应用"
-                                                cancelText="取消"
+                                                okText={copy.confirmApply}
+                                                cancelText={copy.decline}
                                     >
                                         <div className={styles.centerButtonWrapper}>
                                             <Button
@@ -725,7 +781,7 @@ const DebloatingPage = () => {
                                                 // onClick={confirmDiff}
                                                 disabled={!confirmEnabled}
                                             >
-                                                确认应用代码变更
+                                                {copy.applyChanges}
                                             </Button>
                                         </div>
                                     </Popconfirm>

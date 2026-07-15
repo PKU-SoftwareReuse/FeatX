@@ -6,10 +6,14 @@ import Template from "./template/Template";
 import DebloatingPage from "./DebloatingPage/DebloatingPage";
 import {ConfigProvider} from "antd";
 import zhCN from "antd/locale/zh_CN";
+import enUS from "antd/locale/en_US";
+import {LanguageProvider, useLanguage} from "./i18n/LanguageContext";
 
-function App() {
+const AppContent = () => {
+    const {language} = useLanguage();
+
     return (
-        <ConfigProvider locale={zhCN}>
+        <ConfigProvider locale={language === "zh" ? zhCN : enUS}>
             <Router>
                 <Routes>
                     <Route path="/" element={<Navigate to="/welcome"/>}/>
@@ -21,6 +25,14 @@ function App() {
                 </Routes>
             </Router>
         </ConfigProvider>
+    );
+};
+
+function App() {
+    return (
+        <LanguageProvider>
+            <AppContent/>
+        </LanguageProvider>
     );
 }
 

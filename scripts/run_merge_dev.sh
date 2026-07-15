@@ -283,6 +283,9 @@ prepare_mysql_port() {
 }
 
 host_overlay_build() {
+  local default_language
+  default_language="$(read_env_value REACT_APP_DEFAULT_LANGUAGE CN)"
+
   if ! image_exists featx-backend:ase26 || ! image_exists featx-frontend:ase26; then
     echo "Cannot use host overlay build because base FeatX images are missing." >&2
     echo "Use rootful Docker or run: FEATX_BUILD_MODE=compose scripts/run_merge_dev.sh up" >&2
@@ -296,7 +299,7 @@ host_overlay_build() {
   if [[ ! -d Frontend/node_modules ]]; then
     (cd Frontend && npm install)
   fi
-  (cd Frontend && REACT_APP_API_BASE_URL=/api npm run build)
+  (cd Frontend && REACT_APP_API_BASE_URL=/api REACT_APP_DEFAULT_LANGUAGE="$default_language" npm run build)
 
   local tmp_dir
   local backend_jar
