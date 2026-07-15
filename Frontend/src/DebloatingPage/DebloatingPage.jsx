@@ -294,7 +294,7 @@ const DebloatingPage = () => {
         let timestamp = Date.now();
         return {
             featureId: `new-${timestamp}`, // 唯一id
-            featureDescription: `新建子特性 ${timestamp}`,
+            featureDescription: `新建子功能特征 ${timestamp}`,
             isNew: true,
             moduleId: moduleId, // 添加moduleId
         }
@@ -518,20 +518,20 @@ const DebloatingPage = () => {
     return (
         <>
             {contextHolder}
-            <Spin spinning={loadingConfirm} tip={"正在应用代码差异……"} size={"large"}>
+            <Spin spinning={loadingConfirm} tip={"正在应用代码变更……"} size={"large"}>
                 <Splitter className={styles.background_area}>
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel defaultSize="21%" resizable={false} className={styles.main_area}>
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    特性面板
+                                    功能特征面板
                                 </div>
                             }
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
-                            <Spin spinning={loadingFeatureList} tip={"正在获取代码仓库的特性摘要。"} size="large">
+                            <Spin spinning={loadingFeatureList} tip={"正在获取代码仓库的功能特征摘要。"} size="large">
                                 <div className={styles.scrollContainer}>
                                     <Collapse
                                         accordion
@@ -586,7 +586,7 @@ const DebloatingPage = () => {
                                                                     {`${moduleIndex + 1}.${displayIndex} `}
                                                                     {(selectedType === 'edit' || selectedType === 'add') && selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId ? (
                                                                         <Tooltip
-                                                                            title={!submitEnabled ? "您已提交修改，请确认应用或放弃修改。" : ""}
+                                                                            title={!submitEnabled ? "请确认应用或放弃修改。" : ""}
                                                                         >
                                                                             <div>
                                                                                 <TextArea
@@ -657,7 +657,7 @@ const DebloatingPage = () => {
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
-                                            {chatMode ? `智能体面板` : `CodeMap 面板`}
+                                            {chatMode ? `智能体生成` : `相关代码图谱`}
                                         </div>
                                         <div className={styles.iconContainer}>
                                             <Button
@@ -681,7 +681,7 @@ const DebloatingPage = () => {
                                     </div>
                                 </div>
                                 <div style={{display: chatMode ? 'none' : 'block', height: '100%'}}>
-                                    <Spin spinning={loadingFeatureGraph} tip={"正在获取 CodeMap。"} size={"large"}>
+                                    <Spin spinning={loadingFeatureGraph} tip={"正在获取相关代码图谱。"} size={"large"}>
                                         <FeatureGraph
                                             ref={featureGraphRef}
                                             graphData={graphData}
@@ -698,7 +698,7 @@ const DebloatingPage = () => {
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    差异面板
+                                    代码变更
                                 </div>
                             }
                             bordered={false}
@@ -713,8 +713,8 @@ const DebloatingPage = () => {
                                 <Tooltip
                                     title={!confirmEnabled ? "您尚未提交任何修改，请先提交。" : ""}
                                 >
-                                    <Popconfirm title="确认所有代码差异"
-                                                description="您是否已检查全部差异（红色标记的节点）？"
+                                    <Popconfirm title="确认所有代码变更"
+                                                description="您是否已检查全部代码变更（红色标记的节点）？"
                                                 onConfirm={confirmDiff}
                                                 okText="确认应用"
                                                 cancelText="取消"
@@ -725,7 +725,7 @@ const DebloatingPage = () => {
                                                 // onClick={confirmDiff}
                                                 disabled={!confirmEnabled}
                                             >
-                                                确认应用差异
+                                                确认应用代码变更
                                             </Button>
                                         </div>
                                     </Popconfirm>

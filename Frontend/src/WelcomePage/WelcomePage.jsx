@@ -110,8 +110,8 @@ const WelcomePage = () => {
         <div className={styles.welcomePage}>
 
             {/* LOGO */}
-            <h1 className={styles.logo1}>面向大语言模型编程的特性化界面</h1>
-            <h1 className={styles.logo2}>FeatX：通过编辑特性来编辑软件</h1>
+            <h1 className={styles.logo1}>面向大语言模型编程的功能特征导向界面</h1>
+            <h1 className={styles.logo2}>FeatX：通过编辑功能特征来编辑软件</h1>
 
 
             <Spin tip={"正在分析并处理所选代码仓库。"} size={"large"} spinning={loadingAnalyse}>
@@ -141,8 +141,8 @@ const WelcomePage = () => {
                                             </Popconfirm>
                                             <span className={styles.cardTitleText}>{project.projectName}</span>
                                             <Popconfirm
-                                                title="确认重新生成摘要"
-                                                description="确定要重新生成项目摘要吗？此过程可能需要几分钟。"
+                                                title="确认重新生成功能特征摘要"
+                                                description="确定要重新生成功能特征摘要吗？此过程可能需要几分钟。"
                                                 onConfirm={() => {
                                                     handleResummaryButton(project.id);
                                                 }}
@@ -179,7 +179,7 @@ const WelcomePage = () => {
                                     </Descriptions>
                                     <p style={{textAlign: "center"}}>{project.description}</p>
                                     <Tooltip
-                                        title={project.projectType === "PYTHON" ? "Python 分析功能将在后续版本中提供。" : (!project.summaryFlag ? "正在生成代码仓库摘要……" : "")}
+                                        title={project.projectType === "PYTHON" ? "Python 分析功能将在后续版本中提供。" : (!project.summaryFlag ? "正在生成功能特征摘要……" : "")}
                                     >
                                         <div className={styles.buttonContainer}>
                                             <Button
@@ -206,11 +206,11 @@ const WelcomePage = () => {
 
             {/* 介绍文本 */}
             <div className={styles.introText}>
-                <p>FeatX 提供一体化环境，支持通过编辑特性来编辑软件。其工作流程如下：</p>
-                <p>1. <strong>特性摘要。</strong>构建分层特性列表，将代码仓库中的代码组织为特性与史诗。</p>
-                <p>2. <strong>CodeMap 构建。</strong>构建完整的 CodeMap，涵盖每项特性的全部实现上下文。</p>
-                <p>3. <strong>CodeAgent 生成。</strong>采用三阶段 CodeAgent 流程，按照成熟的软件工程工作流生成一致的文件级修改。</p>
-                <p>4. <strong>差异确认。</strong>用户审核代码修改，并将确认后的变更应用回代码仓库。</p>
+                <p>FeatX 提供一体化环境，支持通过编辑功能特征来编辑软件。其工作流程如下：</p>
+                <p>1. <strong>功能特征摘要。</strong>构建分层的功能特征列表，将代码仓库中的代码组织为功能主题及其下属功能特征。</p>
+                <p>2. <strong>相关代码图谱构建。</strong>构建完整的相关代码图谱，涵盖每项功能特征的全部实现上下文。</p>
+                <p>3. <strong>智能体生成。</strong>采用三阶段智能体流程，按照成熟的软件工程工作流生成一致的文件级修改。</p>
+                <p>4. <strong>代码变更确认。</strong>用户审核生成的代码变更，并将确认后的内容应用回代码仓库。</p>
             </div>
         </div>
 
