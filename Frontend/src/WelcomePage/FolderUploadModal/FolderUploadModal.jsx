@@ -16,6 +16,8 @@ const UPLOAD_COPY = {
         incomplete: "请选择 Java 或 Python 项目，并输入代码仓库名称。",
         succeeded: "上传成功。",
         failed: "上传失败。",
+        tooLarge: "上传失败：项目超过当前服务器上传大小限制。",
+        failedWithReason: (reason) => `上传失败：${reason}`,
         openButton: "上传新代码仓库",
         title: "上传 Java 或 Python 项目",
         dragHint: "将项目文件夹拖到此处，或点击选择文件夹",
@@ -29,6 +31,8 @@ const UPLOAD_COPY = {
         incomplete: "Please select a Java or Python project and enter a repo name.",
         succeeded: "Upload succeeded.",
         failed: "Upload failed.",
+        tooLarge: "Upload failed: project is larger than the current server upload limit.",
+        failedWithReason: (reason) => `Upload failed: ${reason}`,
         openButton: "Upload New Repo",
         title: "Upload a Java or Python project",
         dragHint: "Drag a project folder here or click to select it",
@@ -185,6 +189,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const [treeData, setTreeData] = useState([]);
     const [projectType, setProjectType] = useState(null);
     const [status, setStatus] = useState("empty");
+    const [uploading, setUploading] = useState(false);
     const debounceRef = useRef(null);
     const hasUploadedRef = useRef(false);
 
@@ -232,6 +237,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     };
 
     const handleOk = async () => {
+        if (uploading) {
+            return;
+        }
+
         if (!sourceFiles.length || !folderName || !projectType) {
             message.warning(copy.incomplete);
             return;
@@ -245,13 +254,22 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         projectData.append("folderName", folderName);
         projectData.append("projectType", projectType);
 
+        setUploading(true);
         API.uploadProject(projectData).then(() => {
             handleCancel();
             message.success(copy.succeeded);
             reloadGetProjectsInfo();
         }).catch(error => {
-            message.error(copy.failed);
+            const statusCode = error.response?.status;
+            if (statusCode === 413) {
+                message.error(copy.tooLarge);
+            } else {
+                const serverMessage = error.response?.data?.message || error.response?.data;
+                message.error(serverMessage ? copy.failedWithReason(serverMessage) : copy.failed);
+            }
             console.log(error);
+        }).finally(() => {
+            setUploading(false);
         });
     };
 
@@ -263,6 +281,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         setFolderName("");
         setProjectType(null);
         setStatus("empty");
+        setUploading(false);
         hasUploadedRef.current = false;
         if (debounceRef.current) {
             clearTimeout(debounceRef.current);
@@ -281,7 +300,8 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                 open={visible}
                 onOk={handleOk}
                 onCancel={handleCancel}
-                okButtonProps={{disabled: status !== "ready"}}
+                okButtonProps={{disabled: status !== "ready" || uploading}}
+                confirmLoading={uploading}
                 width={640}
                 maskClosable={false}
             >

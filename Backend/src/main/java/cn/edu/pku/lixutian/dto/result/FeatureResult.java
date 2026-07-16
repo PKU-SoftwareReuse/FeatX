@@ -2,6 +2,7 @@ package cn.edu.pku.lixutian.dto.result;
 
 import cn.edu.pku.lixutian.dao.CodeMap;
 import cn.edu.pku.lixutian.dao.Feature;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import com.github.javaparser.ast.body.CallableDeclaration;
@@ -32,6 +33,15 @@ public class FeatureResult {
         this.featureDescription = feature.getFeatureDesc();
         this.featureDescriptionCn = feature.getFeatureDescCN();
         this.candidateMethods = new ArrayList<>();
+
+        if (ProjectState.getInstance().isPython()) {
+            for (CodeMap codeMap : feature.getMethodNameList()) {
+                CandidateMethod candidateMethod = new CandidateMethod(codeMap.getMethodName());
+                candidateMethod.addPythonCandidateMethod(codeMap.getMethodName());
+                candidateMethods.add(candidateMethod);
+            }
+            return;
+        }
 
         VertexMap vertexMap = VertexMap.getInstance();
         Map<String, Vertex<CallableDeclaration<?>>> methodDeclarationMap = vertexMap.getMethodDeclarationMap();
@@ -167,6 +177,10 @@ public class FeatureResult {
             this.lxtFull.add(new FullCandidateMethod(lxtFullSignature));
         }
 
+        public void addPythonCandidateMethod(String signature) {
+            this.lxtFull.add(new FullCandidateMethod(signature, Collections.emptySet()));
+        }
+
         @Getter
         @Setter
         public static class FullCandidateMethod {
@@ -181,6 +195,11 @@ public class FeatureResult {
                 this.lxtFullSignature = lxtFullSignature;
                 this.clusterIds = VertexMap.getInstance().getMethodDeclarationMap()
                         .get(lxtFullSignature).getClusterIds();
+            }
+
+            public FullCandidateMethod(String lxtFullSignature, Set<Integer> clusterIds) {
+                this.lxtFullSignature = lxtFullSignature;
+                this.clusterIds = clusterIds == null ? new HashSet<>() : new HashSet<>(clusterIds);
             }
         }
     }

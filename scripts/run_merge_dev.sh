@@ -292,8 +292,20 @@ host_overlay_build() {
     exit 1
   fi
 
-  echo "Building backend jar on host..."
-  (cd Backend && ./mvnw -q -DskipTests package)
+  if command -v javac >/dev/null 2>&1; then
+    echo "Building backend jar on host..."
+    (cd Backend && ./mvnw -q -DskipTests package)
+  else
+    echo "Host javac was not found; building backend jar in a JDK 17 container..."
+    docker run --rm \
+      -e HOME=/tmp \
+      -e MAVEN_USER_HOME=/root/.m2 \
+      -v "$ROOT_DIR:/workspace" \
+      -v featx-maven-cache:/root/.m2 \
+      -w /workspace/Backend \
+      eclipse-temurin:17-jdk-jammy \
+      sh -lc "./mvnw -q -DskipTests package && chmod -R a+rwX target"
+  fi
 
   echo "Building frontend bundle on host..."
   if [[ ! -d Frontend/node_modules ]]; then

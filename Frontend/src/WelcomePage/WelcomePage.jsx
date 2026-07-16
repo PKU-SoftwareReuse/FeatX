@@ -2,8 +2,8 @@
 import React, {useEffect, useState} from "react";
 import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
-import {Button, Card, Descriptions, Form, Input, message, Modal, Popconfirm, Segmented, Spin, Tooltip,} from "antd";
-import {DeleteOutlined, GithubOutlined, SettingOutlined, SyncOutlined, TranslationOutlined} from '@ant-design/icons';
+import {Button, Card, Descriptions, Form, Input, message, Modal, Popconfirm, Popover, Progress, Segmented, Spin, Tag, Tooltip,} from "antd";
+import {DeleteOutlined, DownOutlined, GithubOutlined, SettingOutlined, SyncOutlined, TranslationOutlined} from '@ant-design/icons';
 import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
@@ -42,8 +42,15 @@ const WELCOME_COPY = {
         deleteAction: "删除项目",
         close: "取消",
         notLinked: "未关联",
-        pythonUnavailable: "Python 分析功能将在后续版本中提供。",
         summaryInProgress: "正在生成功能特征摘要……",
+        summaryProgressTitle: "功能特征摘要进度",
+        summaryProgressUnavailable: "此运行暂未捕获结构化进度。",
+        summaryProgressFallback: "功能特征摘要正在运行。",
+        summaryProgressPendingDetail: "新启动的任务会显示详细进度。",
+        summaryDetails: "详情",
+        elapsed: "已用时",
+        step: "步骤",
+        waiting: "等待中。",
         open: "打开",
         metrics: {
             language: "编程语言",
@@ -94,8 +101,15 @@ const WELCOME_COPY = {
         deleteAction: "Delete Project",
         close: "Cancel",
         notLinked: "Blank Git Link",
-        pythonUnavailable: "Python analysis pipeline will be added later.",
         summaryInProgress: "Repo summary in progress...",
+        summaryProgressTitle: "Repo Summary Progress",
+        summaryProgressUnavailable: "No structured progress has been captured for this run yet.",
+        summaryProgressFallback: "Repo summary is running.",
+        summaryProgressPendingDetail: "Detailed progress will appear for newly captured runs.",
+        summaryDetails: "Details",
+        elapsed: "Elapsed",
+        step: "Step",
+        waiting: "Waiting.",
         open: "Open",
         metrics: {
             language: "Language",
@@ -120,6 +134,30 @@ const WELCOME_COPY = {
 const formatMetric = (value, language) => value === null || value === undefined
     ? "-"
     : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US");
+
+const formatDuration = (milliseconds) => {
+    if (!milliseconds || milliseconds < 0) {
+        return "0s";
+    }
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+};
+
+const statusColor = (status) => {
+    if (status === "done" || status === "complete") return "success";
+    if (status === "running") return "processing";
+    if (status === "failed") return "error";
+    return "default";
+};
 
 const getGitLink = (project) => project.gitLink || project.githubLink || "";
 
@@ -159,6 +197,7 @@ const WelcomePage = () => {
     const [settingsProject, setSettingsProject] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [settingsAction, setSettingsAction] = useState(null);
+    const [summaryProgressByRepo, setSummaryProgressByRepo] = useState({});
     const [settingsForm] = Form.useForm();
 
 
@@ -190,16 +229,46 @@ const WelcomePage = () => {
         })
     }
 
-    const getProjects = () => {
-        setLoadingConnect(true);
+    const getProjects = (silent = false) => {
+        if (!silent) {
+            setLoadingConnect(true);
+        }
         API.getProjectsInfo().then(data => {
             setProjectOptions(data);
-            setLoadingConnect(false);
+            if (!silent) {
+                setLoadingConnect(false);
+            }
         }).catch(err => {
             console.log(err);
-            getProjects();
+            if (!silent) {
+                setLoadingConnect(false);
+                getProjects();
+            }
         })
     }
+
+    const fetchSummaryProgress = () => {
+        API.getSummaryProgressAll().then(data => {
+            setSummaryProgressByRepo(data || {});
+        }).catch(err => {
+            console.log(err);
+        });
+    }
+
+    const hasPendingSummary = projectOptions?.some(project => !project.summaryFlag);
+
+    useEffect(() => {
+        if (!hasPendingSummary) {
+            return;
+        }
+        fetchSummaryProgress();
+        const progressTimer = setInterval(fetchSummaryProgress, 2000);
+        const projectTimer = setInterval(() => getProjects(true), 5000);
+        return () => {
+            clearInterval(progressTimer);
+            clearInterval(projectTimer);
+        };
+    }, [hasPendingSummary]);
 
     const handleConfirmButton = (repoId) => {
         setLoadingAnalyse(true);
@@ -287,6 +356,94 @@ const WelcomePage = () => {
         }
     };
 
+    const progressForProject = (project) => {
+        return summaryProgressByRepo?.[project.id] || summaryProgressByRepo?.[String(project.id)];
+    }
+
+    const progressPercent = (progress) => {
+        if (!progress) return 0;
+        if (typeof progress.percent === "number") {
+            return Math.max(0, Math.min(100, progress.percent));
+        }
+        if (progress.totalSteps) {
+            return Math.round(((progress.currentStep || 1) - 1) * 100 / progress.totalSteps);
+        }
+        return 0;
+    }
+
+    const summaryTooltip = (project) => {
+        const progress = progressForProject(project);
+        if (project.summaryFlag) {
+            return "";
+        }
+        if (!progress) {
+            return (
+                <div>
+                    <div>{copy.summaryProgressFallback}</div>
+                    <div>{copy.summaryProgressPendingDetail}</div>
+                </div>
+            );
+        }
+        return (
+            <div>
+                <div>{progress.message || copy.summaryProgressFallback}</div>
+                <div>{copy.elapsed}: {formatDuration(progress.elapsedMs)}</div>
+                <div>{copy.step}: {progress.currentStep}/{progress.totalSteps}</div>
+            </div>
+        );
+    }
+
+    const renderSummaryProgress = (project) => {
+        const progress = progressForProject(project);
+        if (!progress) {
+            return (
+                <div className={styles.summaryProgressPanel}>
+                    <div className={styles.summaryProgressTitle}>{copy.summaryProgressFallback}</div>
+                    <div className={styles.summaryProgressMuted}>
+                        {copy.summaryProgressUnavailable}
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className={styles.summaryProgressPanel}>
+                <div className={styles.summaryProgressHeader}>
+                    <div>
+                        <div className={styles.summaryProgressTitle}>{progress.message || copy.summaryProgressFallback}</div>
+                        <div className={styles.summaryProgressMuted}>
+                            {copy.elapsed} {formatDuration(progress.elapsedMs)} · {copy.step} {progress.currentStep}/{progress.totalSteps}
+                        </div>
+                    </div>
+                    <Tag color={statusColor(progress.status)}>{progress.status}</Tag>
+                </div>
+                <Progress
+                    percent={Math.round(progressPercent(progress))}
+                    size="small"
+                    status={progress.status === "failed" ? "exception" : "active"}
+                    className={styles.summaryProgressBar}
+                />
+                <div className={styles.summaryStepList}>
+                    {(progress.steps || []).map(step => (
+                        <div key={step.id} className={styles.summaryStepItem}>
+                            <Tag color={statusColor(step.status)} className={styles.summaryStepTag}>
+                                {step.status}
+                            </Tag>
+                            <div className={styles.summaryStepBody}>
+                                <div className={styles.summaryStepLabel}>{step.label}</div>
+                                <div className={styles.summaryProgressMuted}>
+                                    {step.detail || copy.waiting}
+                                    {step.elapsedMs ? ` · ${formatDuration(step.elapsedMs)}` : ""}
+                                    {typeof step.percent === "number" ? ` · ${Math.round(step.percent)}%` : ""}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className={styles.welcomePage}>
 
@@ -356,19 +513,29 @@ const WelcomePage = () => {
                                     <p className={styles.projectDescription}>
                                         {getLocalizedField(project, "description", language)}
                                     </p>
-                                    <Tooltip
-                                        title={project.projectType === "PYTHON" ? copy.pythonUnavailable : (!project.summaryFlag ? copy.summaryInProgress : "")}
-                                    >
+                                    <Tooltip title={!project.summaryFlag ? summaryTooltip(project) : ""}>
                                         <div className={styles.buttonContainer}>
                                             <Button
                                                 type="primary"
                                                 onClick={() => {
                                                     handleConfirmButton(project.id);
                                                 }}
-                                                disabled={!project.summaryFlag || project.projectType === "PYTHON"}
+                                                disabled={!project.summaryFlag}
                                             >
                                                 {copy.open}
                                             </Button>
+                                            {!project.summaryFlag ? (
+                                                <Popover
+                                                    title={copy.summaryProgressTitle}
+                                                    content={renderSummaryProgress(project)}
+                                                    trigger="click"
+                                                    placement="top"
+                                                >
+                                                    <Button icon={<DownOutlined/>}>
+                                                        {copy.summaryDetails}
+                                                    </Button>
+                                                </Popover>
+                                            ) : null}
                                         </div>
                                     </Tooltip>
                                 </Card>
@@ -425,12 +592,12 @@ const WelcomePage = () => {
                             onConfirm={() => handleResummaryButton(settingsProject?.id)}
                             okText={copy.confirm}
                             cancelText={copy.cancel}
-                            disabled={!settingsProject?.summaryFlag || settingsProject?.projectType === "PYTHON"}
+                            disabled={!settingsProject?.summaryFlag}
                         >
                             <Button
                                 icon={<SyncOutlined/>}
                                 loading={settingsAction === "resummary"}
-                                disabled={settingsSaving || !settingsProject?.summaryFlag || settingsProject?.projectType === "PYTHON"}
+                                disabled={settingsSaving || !settingsProject?.summaryFlag}
                             >
                                 {copy.resummary}
                             </Button>

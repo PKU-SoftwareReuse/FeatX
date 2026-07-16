@@ -1,0 +1,109 @@
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.metaRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    margin-bottom: 10px;
+    color: #334155;
+    font-size: 13px;
+    line-height: 18px;
+}
+
+.counts {
+    margin-left: auto;
+    color: #64748b;
+    white-space: nowrap;
+}
+
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 10px;
+    color: #475569;
+    font-size: 12px;
+}
+
+.legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.seedDot,
+.expandDot,
+.classDot,
+.fadeDot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    display: inline-block;
+    border: 1px solid;
+}
+
+.seedDot {
+    background: #e6f4ff;
+    border-color: #1677ff;
+}
+
+.expandDot {
+    background: #f6ffed;
+    border-color: #52c41a;
+}
+
+.classDot {
+    background: #fff7e6;
+    border-color: #d48806;
+}
+
+.fadeDot {
+    background: rgba(229, 231, 235, 0.42);
+    border-color: rgba(148, 163, 184, 0.5);
+}
+
+.graphCanvas {
+    height: 560px;
+    min-height: 560px;
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #ffffff;
+    overflow: hidden;
+}
+
+.stageList {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.stageCard {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    color: #475569;
+    background: #fafafa;
+    font-size: 12px;
+}
+
+.stageCard strong {
+    color: #1f2937;
+    font-size: 13px;
+}
+
+.stageCardActive {
+    border-color: #1677ff;
+    background: #e6f4ff;
+}

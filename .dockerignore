@@ -4,6 +4,8 @@
 Thumbs.db
 .run
 gdshow
+Py
+out
 **/*.iml
 
 **/node_modules

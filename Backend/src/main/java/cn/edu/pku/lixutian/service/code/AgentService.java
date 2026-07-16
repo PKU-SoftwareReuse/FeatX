@@ -8,13 +8,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class AgentService {
     protected static final ObjectMapper objectMapper = new ObjectMapper();
     protected final Logger logger = LoggerFactory.getLogger(getClass());
+    public static final String DELETE_FILE_SENTINEL = "__FEATX_DELETE_FILE__";
 
     public static Map<String, String> modificationMap;
+    public static Set<String> pythonModifiedMethods;
 
     @Autowired
     protected LlmClient llmClient;

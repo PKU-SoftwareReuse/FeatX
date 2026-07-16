@@ -24,7 +24,7 @@ public class Module {
     @Column(name = "cluster_id")
     private Integer clusterId;
 
-    @Column(name = "module_desc")
+    @Column(name = "module_desc", columnDefinition = "TEXT")
     private String moduleDesc;
 
     @Column(name = "module_desc_CN")

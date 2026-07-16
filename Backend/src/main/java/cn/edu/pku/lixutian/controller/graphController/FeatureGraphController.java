@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.controller.graphController;
 
 import cn.edu.pku.lixutian.service.code.ModifyAgentService;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.controller.FeatureController;
 import cn.edu.pku.lixutian.dto.result.FeatureGraphResult;
 import cn.edu.pku.lixutian.service.CodeMapService;
@@ -22,18 +23,27 @@ public class FeatureGraphController {
     @GetMapping("/maxGraph")
     public FeatureGraphResult getMaxGraph(@RequestParam Integer featureId) {
         featureController.select(featureId);
+        if (ProjectState.getInstance().isPython()) {
+            return codemapService.getPythonFeatureGraph(featureId);
+        }
         return codemapService.getMaxGraph();
     }
 
     @GetMapping("/debloatGraph")
     public FeatureGraphResult getDebloatOnMaxGraph(@RequestParam Integer featureId) {
         featureController.select(featureId);
+        if (ProjectState.getInstance().isPython()) {
+            return codemapService.getPythonFeatureGraph(featureId);
+        }
         FeatureGraphResult maxGraph = codemapService.getMaxGraph();
         return maxGraph.setDebloatType();
     }
 
     @GetMapping("/newGraph")
     public FeatureGraphResult getNewOnMaxGraph() {
+        if (ProjectState.getInstance().isPython()) {
+            return codemapService.getPythonModificationGraph();
+        }
         FeatureGraphResult maxGraph = codemapService.getMaxGraph();
         FeatureGraphResult newGraph = new FeatureGraphResult(ModifyAgentService.modificationMap.keySet());
         return maxGraph.setNewType(newGraph);

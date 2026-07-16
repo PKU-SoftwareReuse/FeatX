@@ -49,10 +49,21 @@ LLM_RETRY_MAX_DELAY = float(os.getenv("REPOSUMMARY_LLM_RETRY_MAX_DELAY", "60.0")
 LLM_MAX_WORKERS = get_positive_int_env("REPOSUMMARY_LLM_MAX_WORKERS", 50)
 
 
-client = OpenAI(
-    api_key=os.getenv("OPENAI_API_KEY"),
-    base_url=os.getenv("OPENAI_BASE_URL")
-)
+openai_client: Optional[OpenAI] = None
+
+
+def get_openai_client() -> OpenAI:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set")
+
+    global openai_client
+    if openai_client is None:
+        openai_client = OpenAI(
+            api_key=api_key,
+            base_url=os.getenv("OPENAI_BASE_URL")
+        )
+    return openai_client
 
 
 @dataclass
@@ -226,8 +237,10 @@ def class_name_from_method_row(row) -> str:
 
 def compute_similarity_matrix(files: List[File]):
     # 提取文件向量
-    txt_vectors = [file.file_txt_vector for file in files]
-    normalized_vectors = txt_vectors / np.linalg.norm(txt_vectors, axis=1, keepdims=True)
+    txt_vectors = np.asarray([file.file_txt_vector for file in files], dtype=float)
+    norms = np.linalg.norm(txt_vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    normalized_vectors = txt_vectors / norms
     # 计算相似度矩阵
     similarity_matrix = np.dot(normalized_vectors, np.transpose(normalized_vectors))
     # 将相似度矩阵的值设置为0-1之间
@@ -1250,11 +1263,19 @@ B) Then use the actions you identified to create User Story When creating the Us
 - The User Story's description uses this format as a guideline:
 * As a [type of user], I want to [action or goal] so that [reason or benefit].
 * For example: As a frequent traveler, I want to be able to filter hotel search results by distance from a specific landmark, so that I can find accommodations close to my desired location.
-C) Keep the summary concise, and try to keep each summary within 75 words while being complete, and never exceed 150 words
-
+C) The observable behavior in your code is divided into steps in the order of trigger condition → system action → data flow/state change → output/feedback, making sure that at each step you can find a function, method, API call, validation logic, or data structure in your code.
+- The user story's flow uses this format as a guideline:
+* Step 1: [Entry: route/handler/function] receives [method/path or function call] with [inputs].\n Step 2: [Validation module] checks [rules] and returns [error] on failure.\n Step 3: [Service] performs [core logic] and accesses [DB/Repo/externals]; [key computations].\n Step 4: Writes to [storage/cache/queue], records [logs/metrics].\n Step 5: Returns [status/body]; on [error conditions] returns [mapped status/messages].
+* Return flow as a single plain text string (no objects, no arrays). Use bullet lines starting with '- ' separated by newlines.
+D) Extract the "how to" constraints visible in the code into verifiable non-functional requirements, including robustness, security, performance, concurrency, observability, compatibility, and compliance. Still need to be "based on code evidence only"
+- The non-functional requirements uses this format as a guideline:
+* -Security: [auth/role checks].\n  -Validation: [input limits/schema].\n  -Performance: [pagination/index/cache/limits/timeout].\n  -Reliability: [transactions/retries/rollback].\n  -Concurrency: [locks/unique keys/idempotency].\n  -Observability: [structured logs/metrics/tracing].\n  -Compatibility: [API version/content-type].
+* Return notf as a single plain text string (no objects, no arrays). Use bullet lines starting with '- ' separated by newlines.
 Please return the response in the following JSON format:
 {{
-"description": "User Story description"
+	"description": "User Story description",
+	"flow": "User Story events",
+	"notf":"Non-functional requirements"
 }}
 """
 
@@ -1411,7 +1432,7 @@ def parse_description_response(content: str) -> str:
 
 
 def request_description(prompt: str, modelname: str) -> str:
-    response = client.chat.completions.create(
+    response = get_openai_client().chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
         model=modelname,
         response_format={"type": "json_object"},
@@ -1421,6 +1442,23 @@ def request_description(prompt: str, modelname: str) -> str:
         presence_penalty=0.2
     )
     return parse_description_response(response.choices[0].message.content)
+
+
+def request_usecase(prompt: str, modelname: str) -> "usecase":
+    response = get_openai_client().chat.completions.create(
+        messages=[{"role": "user", "content": prompt}],
+        model=modelname,
+        response_format={"type": "json_object"},
+        temperature=0.3,
+        top_p=0.95,
+        frequency_penalty=0.5,
+        presence_penalty=0.2
+    )
+    data = parse_usecase_payload(response.choices[0].message.content or "")
+    result = usecase.model_validate(data)
+    if not result.description or result.description.lower() in {"null", "none", "n/a"}:
+        raise ValueError("missing description in LLM response")
+    return result
 
 
 def generate_description_with_retry(prompt: str, modelname: str, fallback: str, label: str) -> str:
@@ -1460,6 +1498,8 @@ def fallback_module_description(method_cluster: method_Cluster, related_features
 
 class usecase(BaseModel):
     description: str
+    flow: str = ""
+    notf: str = ""
 
 
 def build_feature_prompt(feature: Feature) -> str:
@@ -1473,12 +1513,16 @@ def build_feature_prompt(feature: Feature) -> str:
 
 def describe_feature(feature: Feature, modelname: str):
     prompt = build_feature_prompt(feature)
-    feature.feature_desc = generate_description_with_retry(
-        prompt=prompt,
-        modelname=modelname,
-        fallback=fallback_feature_description(feature),
-        label=f"feature {feature.feature_id}"
-    )
+    try:
+        result = call_with_retry(lambda: request_usecase(prompt, modelname))
+        feature.feature_desc = result.description
+        feature.feature_flow = result.flow
+        feature.feature_notf = result.notf
+    except Exception as e:
+        print(f"LLM feature generation failed for feature {feature.feature_id}; using fallback. Error: {e}")
+        feature.feature_desc = fallback_feature_description(feature)
+        feature.feature_flow = ""
+        feature.feature_notf = ""
     print(
         f"Feature ID: {feature.feature_id}, Description: {feature.feature_desc}, Flow: {feature.feature_flow}, Non-functional requirements: {feature.feature_notf}")
     return feature
@@ -1524,7 +1568,6 @@ use the following steps to summary:
 - Merge features with same/core-related objects into one macro-features;
 - The generated macro-features cannot already be present in the current system macro-features list;
 - example: "User adds comment" and "User edits comment" can be merged into "comments management"
-- Please use less than 10 words
 Please return the response in the following JSON format:
 {{
 "description": "macro-feature description"
@@ -1742,13 +1785,37 @@ def repo_summary(project_root: str, output_dir: str):
 def main(project_id):
     here = os.path.dirname(os.path.abspath(__file__))
     all_projects_dir = os.path.normpath(os.getenv("LOTM_REPO_PATH"))
-    project_root = os.path.join(all_projects_dir, str(project_id), "src","main","java")
     output_dir = os.path.join(here, "..", "output", str(project_id))
     output_dir = os.path.normpath(output_dir)
-    repo_summary(
-        project_root=project_root,
-        output_dir=output_dir
-    )
+    repo_root = os.path.join(all_projects_dir, str(project_id))
+    java_root = os.path.join(repo_root, "src", "main", "java")
+    python_root = os.path.join(repo_root, "src", "main", "python")
+
+    def has_source(root_path: str, extension: str) -> bool:
+        if not os.path.isdir(root_path):
+            return False
+        for current_root, _, files in os.walk(root_path):
+            if any(file.endswith(extension) for file in files):
+                return True
+        return False
+
+    if has_source(java_root, ".java"):
+        repo_summary(
+            project_root=java_root,
+            output_dir=output_dir
+        )
+        return
+
+    if has_source(python_root, ".py"):
+        from . import python_repo_summary
+
+        python_repo_summary.repo_summary(
+            project_root=python_root,
+            output_dir=output_dir
+        )
+        return
+
+    raise RuntimeError(f"No supported Java or Python sources found for project {project_id} under {repo_root}")
 
 
 if __name__ == '__main__':

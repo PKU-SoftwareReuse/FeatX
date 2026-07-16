@@ -170,7 +170,7 @@ public class CodeDiffHelper {
         return generateDiffByCode("", "// Class not found in memory structures: " + classId, classId);
     }
 
-    private static String generateDiffByCode(String oldCode, String newCode, String fileName) {
+    public static String generateDiffByCode(String oldCode, String newCode, String fileName) {
         List<String> original = Arrays.asList(oldCode.split("\n"));
         List<String> revised = Arrays.asList(newCode.split("\n"));
 

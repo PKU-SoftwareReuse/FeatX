@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class GenerateImportLinesService extends AgentService {
@@ -24,7 +25,11 @@ public class GenerateImportLinesService extends AgentService {
         String prompt = buildPrompt(fileName, originalCode, fileList);
         String result = llmClient.generateWithSinglePrompt(prompt);
         String javaStr = parseResult(result);
-        List<String> importList = Arrays.asList(javaStr.split("\\r?\\n"));
+        List<String> importList = Arrays.stream(javaStr.split("\\r?\\n"))
+                .map(String::trim)
+                .filter(line -> line.startsWith("import ") && line.endsWith(";"))
+                .distinct()
+                .collect(Collectors.toList());
         return importList;
     }
 
