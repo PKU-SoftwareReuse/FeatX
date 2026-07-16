@@ -448,6 +448,8 @@ start_host_stack() {
   local llm_api_url llm_api_key
   local openai_base_url openai_api_key openai_api_model sentence_transformer_model
   local git_proxy_host git_proxy_port
+  local models_host
+  local model_volume_args=()
 
   prepare_mysql_port
   mysql_root_password="$(read_env_value MYSQL_ROOT_PASSWORD featx_root)"
@@ -460,9 +462,21 @@ start_host_stack() {
   openai_api_key="$(read_env_value OPENAI_API_KEY "")"
   openai_api_model="$(read_env_value OPENAI_API_MODEL deepseek-v4-pro)"
   sentence_transformer_model="$(read_env_value SENTENCE_TRANSFORMER_MODEL sentence-transformers/all-mpnet-base-v2)"
+  models_host="$(read_env_value FEATX_MODELS_HOST ../models)"
   git_proxy_host="$(read_env_value GIT_PROXY_HOST 10.0.2.2)"
   git_proxy_port="$(read_env_value GIT_PROXY_PORT "")"
   git_proxy_host="$(prepare_git_proxy_host "$git_proxy_host" "$git_proxy_port")"
+
+  if [[ -n "$models_host" ]]; then
+    if [[ "$models_host" != /* ]]; then
+      models_host="$ROOT_DIR/$models_host"
+    fi
+    if [[ -d "$models_host" ]]; then
+      model_volume_args=(-v "$models_host:/app/models:ro")
+    else
+      echo "Models directory $models_host was not found; backend will use image/default model fallbacks." >&2
+    fi
+  fi
 
   docker volume create "$HOST_MYSQL_VOLUME" >/dev/null
   seed_repos_volume
@@ -481,6 +495,7 @@ start_host_stack() {
   wait_for_mysql "$mysql_user" "$mysql_password"
 
   docker run -d --name "$HOST_BACKEND_CONTAINER" --network host \
+    --env-file .env \
     -e SERVER_PORT="$BACKEND_PORT" \
     -e LTM_REPO_PATH=/workspace/repos \
     -e LOTM_REPO_PATH=/workspace/repos \
@@ -503,6 +518,7 @@ start_host_stack() {
     -e REPOSUMMARY_PYTHON=/opt/reposummary-venv/bin/python \
     -e REPOSUMMARY_DIR=/app/RepoSummary \
     -e LOMBOK_JAR=/app/Backend/tools/lombok-1.18.36.jar \
+    "${model_volume_args[@]}" \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
     featx-backend:ase26 >/dev/null
 
