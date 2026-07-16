@@ -41,19 +41,26 @@
 }
 
 .featurePanelCard :global(.ant-card-head-wrapper) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     min-width: 0;
+    align-items: center;
     gap: 8px;
 }
 
 .featurePanelCard :global(.ant-card-head-title) {
+    width: max-content;
+    max-width: 100%;
     min-width: 0;
-    flex: 1 1 auto;
+    grid-column: 2;
+    justify-self: center;
 }
 
 .featurePanelCard :global(.ant-card-extra) {
     min-width: 0;
     max-width: 100%;
-    flex: 0 1 auto;
+    grid-column: 3;
+    justify-self: end;
 }
 
 .featurePanelCard .card_title {
