@@ -2,13 +2,14 @@
 
 import styles from './DebloatingPage.module.css';
 import React, {useEffect, useRef, useState} from "react";
-import {Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm} from "antd";
+import {Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, message, Progress} from "antd";
 import {
     DeleteTwoTone,
     EditTwoTone,
     PlusSquareTwoTone,
     ExclamationCircleOutlined,
-    SwapOutlined
+    SwapOutlined,
+    ApartmentOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
 
@@ -16,6 +17,7 @@ import API from "../API";
 import FeatureGraph from "../graph/featureGraph/FeatureGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
+import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
@@ -25,13 +27,46 @@ const DebloatingPage = () => {
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
     const [loadingCode, setLoadingCode] = useState(false);
+    const [currentProject, setCurrentProject] = useState(null);
+    const [operationProgress, setOperationProgress] = useState(null);
+    const [focusGraphStages, setFocusGraphStages] = useState([]);
+    const [focusGraphModalOpen, setFocusGraphModalOpen] = useState(false);
+    const progressTimerRef = useRef(null);
+    const expectedProgressOperationRef = useRef(null);
+    const graphRefreshTimerRef = useRef(null);
+    const chatCloseTimerRef = useRef(null);
+    const eventSourceRef = useRef(null);
+    const isPythonProject = currentProject?.projectType === "PYTHON";
+
+    const clearPostAgentTimers = () => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        if (graphRefreshTimerRef.current) {
+            clearTimeout(graphRefreshTimerRef.current);
+            graphRefreshTimerRef.current = null;
+        }
+        if (chatCloseTimerRef.current) {
+            clearTimeout(chatCloseTimerRef.current);
+            chatCloseTimerRef.current = null;
+        }
+    }
+
+    const clearFocusGraphStages = () => {
+        setFocusGraphStages([]);
+        setFocusGraphModalOpen(false);
+    }
 
     useEffect(() => {
         const fetchData = async () => {
+            const project = await API.getCurrentProject().catch(() => null)
+            setCurrentProject(project)
             const res = await getFeatureData()
-            console.log(res)
-            setActiveKey(res[0].moduleId)
-            handleSelect(res[0].featureList[0])
+            if (res.length > 0 && res[0].featureList.length > 0) {
+                setActiveKey(res[0].moduleId)
+                handleSelect(res[0].featureList[0])
+            }
         }
         fetchData()
     }, [])
@@ -43,8 +78,6 @@ const DebloatingPage = () => {
 
     const getFeatureData = async () => {
         setLoadingFeatureList(true)
-        setLoadingFeatureGraph(true);
-        setLoadingCode(true);
         try {
             const res = await API.getFeatures()
             setFeatureData(res)
@@ -52,6 +85,10 @@ const DebloatingPage = () => {
             return res
         } catch (error) {
             console.error(error)
+            setLoadingFeatureList(false)
+            setLoadingFeatureGraph(false)
+            setLoadingCode(false)
+            message.error(errorMessage(error, "Failed to fetch feature summary."))
             return []
         }
     }
@@ -60,13 +97,16 @@ const DebloatingPage = () => {
 
     const getFeatureGraphData = (featureId, selectedType) => {
         setLoadingFeatureGraph(true);
-        setLoadingCode(true);
+        setLoadingCode(false);
+        setCodeDiff('');
         if (selectedType === 'delete') {
             API.getMinGraphData(featureId).then((data) => {
                 setGraphData(data)
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
                 console.error('Error fetching FeatureGraph data:', error)
+                setLoadingFeatureGraph(false)
+                message.error(errorMessage(error, "Failed to fetch CodeMap."))
             })
         } else if (selectedType === 'edit' || selectedType === 'select') {
             API.getMaxGraphData(featureId).then((data) => {
@@ -74,6 +114,8 @@ const DebloatingPage = () => {
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
                 console.error('Error fetching FeatureGraph data:', error)
+                setLoadingFeatureGraph(false)
+                message.error(errorMessage(error, "Failed to fetch CodeMap."))
             })
         } else if (selectedType === 'add') {
             setGraphData(null)
@@ -84,22 +126,26 @@ const DebloatingPage = () => {
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
                 console.error('Error fetching FeatureGraph data:', error)
+                setLoadingFeatureGraph(false)
+                message.error(errorMessage(error, "Failed to fetch generated graph."))
             })
+        } else {
+            setGraphData({nodes: [], edges: []})
+            setLoadingFeatureGraph(false)
         }
 
     }
 
     const featureGraphRef = useRef();
 
-    useEffect(() => {
-        if (graphData && graphData.nodes?.length > 0) {
-            featureGraphRef.current?.selectRandomNode();
-        }
-    }, [graphData]);
-
     const [codeDiff, setCodeDiff] = useState('');
 
     const getCodeDiff = (classNodeId) => {
+        if (!classNodeId) {
+            setCodeDiff('')
+            setLoadingCode(false)
+            return
+        }
         setLoadingCode(true)
 
         // 检查当前选中的feature是否是新生成的feature
@@ -122,6 +168,8 @@ const DebloatingPage = () => {
                 setLoadingCode(false);
             }).catch(error => {
                 console.error('Error fetching code diff:', error)
+                setLoadingCode(false);
+                message.error(errorMessage(error, "Failed to fetch code diff."))
                 // getCodeDiff(classNodeId)
             })
         } else if (selectedType == "edit" || selectedType === "add") {
@@ -132,6 +180,8 @@ const DebloatingPage = () => {
                     setLoadingCode(false);
                 }).catch(error => {
                     console.error('Error fetching code diff:', error)
+                    setLoadingCode(false);
+                    message.error(errorMessage(error, "Failed to fetch code context."))
                     // getCodeDiff(classNodeId)
                 })
             } else {
@@ -141,6 +191,8 @@ const DebloatingPage = () => {
                     setLoadingCode(false);
                 }).catch(error => {
                     console.error('Error fetching code diff:', error)
+                    setLoadingCode(false);
+                    message.error(errorMessage(error, "Failed to fetch generated code diff."))
                     // getCodeDiff(classNodeId)
                 })
             }
@@ -152,6 +204,8 @@ const DebloatingPage = () => {
                 setLoadingCode(false);
             }).catch(error => {
                 console.error('Error fetching code diff:', error)
+                setLoadingCode(false);
+                message.error(errorMessage(error, "Failed to fetch code context."))
                 // getCodeDiff(classNodeId)
             })
         } else {
@@ -187,6 +241,8 @@ const DebloatingPage = () => {
     }
 
     const goSelect = (item) => {
+        clearPostAgentTimers();
+        clearFocusGraphStages();
         setSubmitEnabled(false);
         setModeTrans(false);
         setChatMode(false);
@@ -217,6 +273,8 @@ const DebloatingPage = () => {
     }
 
     const goDelete = (item) => {
+        clearPostAgentTimers();
+        clearFocusGraphStages();
         setSubmitEnabled(false);
         setModeTrans(false);
         setChatMode(false);
@@ -225,7 +283,11 @@ const DebloatingPage = () => {
         setSelectedFeatureItem(item)
         setSelectedType("delete")
         getFeatureGraphData(item.featureId, "delete")
-        setConfirmEnabled(true)
+        if (isPythonProject) {
+            preparePythonDelete(item)
+        } else {
+            setConfirmEnabled(true)
+        }
     }
 
     const handleEdit = (item) => {
@@ -247,6 +309,8 @@ const DebloatingPage = () => {
     }
 
     const goEdit = (item) => {
+        clearPostAgentTimers();
+        clearFocusGraphStages();
         setSubmitEnabled(true);
         setConfirmEnabled(false);
         setModeTrans(false);
@@ -271,6 +335,7 @@ const DebloatingPage = () => {
                 okText: 'Yes, give up!',
                 cancelText: 'Cancel',
                 onOk: async () => {
+                    clearPostAgentTimers()
                     await getFeatureData()
                     setSelectedType(null)
                     setSelectedFeatureItem(null)
@@ -316,6 +381,8 @@ const DebloatingPage = () => {
 
     // Add 按钮事件
     const goAdd = (module) => {
+        clearPostAgentTimers();
+        clearFocusGraphStages();
         setSubmitEnabled(true)
         setModeTrans(false);
         setChatMode(false);
@@ -359,9 +426,20 @@ const DebloatingPage = () => {
 
 
     const handleChat = (eventSource) => {
+        clearPostAgentTimers()
+        eventSourceRef.current = eventSource
         setChatContent("");
         setChatMode(true)
         setModeTrans(true)
+        setOperationProgress({
+            operation: selectedType === 'add' ? "python-add" : "python-modify",
+            stage: "agent-stream",
+            message: "Streaming Python Agent code generation.",
+            currentStep: 8,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
         eventSource.onmessage = (event) => {
             const decoded = decodeURIComponent(escape(atob(event.data)));
             setChatContent(prev => prev + decoded);
@@ -369,37 +447,250 @@ const DebloatingPage = () => {
         eventSource.onerror = () => {
 
             eventSource.close(); // 关闭连接
+            eventSourceRef.current = null
+            stopProgressPolling()
             setLoadingFeatureList(false);
             setConfirmEnabled(true)
+            setOperationProgress({
+                operation: selectedType === 'add' ? "python-add" : "python-modify",
+                stage: "complete",
+                message: "Code generation finished. Review the diff and confirm or drop it.",
+                currentStep: 8,
+                totalSteps: 8,
+                running: false,
+                failed: false
+            })
 
-            setTimeout(() => {
+            clearPostAgentTimers()
+            graphRefreshTimerRef.current = setTimeout(() => {
                 getFeatureGraphData(0, "new")
+                graphRefreshTimerRef.current = null
             }, 1500); // 延迟 3000 毫秒（3秒）
 
-            setTimeout(() => {
+            chatCloseTimerRef.current = setTimeout(() => {
                 setChatMode(false);
+                chatCloseTimerRef.current = null
             }, 3000); // 延迟 3000 毫秒（3秒）
         };
         return () => {
             eventSource.close();
+            eventSourceRef.current = null;
         };
     }
 
     const [confirmEnabled, setConfirmEnabled] = useState(false)
     const [submitEnabled, setSubmitEnabled] = useState(false)
 
+    const errorMessage = (error, fallback) => {
+        const data = error?.response?.data;
+        if (typeof data === "string" && data.trim()) {
+            return data;
+        }
+        if (data?.message) {
+            return data.message;
+        }
+        if (error?.message) {
+            return error.message;
+        }
+        return fallback;
+    }
+
+    const progressPercent = () => {
+        if (!operationProgress) {
+            return 0;
+        }
+        const total = operationProgress.totalSteps || 1;
+        const current = operationProgress.currentStep || 0;
+        return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+    }
+
+    const isFeatureModifyProgress = () => {
+        return operationProgress?.operation === "python-modify"
+            || operationProgress?.operation === "python-add"
+            || operationProgress?.operation === "python-delete"
+            || operationProgress?.stage === "submit"
+            || operationProgress?.stage === "agent-stream";
+    }
+
+    const featureListLoadingOverlay = () => {
+        if (!isFeatureModifyProgress()) {
+            return (
+                <div className={styles.featureListLoadingMessage}>
+                    Fetching repo's feature summary.
+                </div>
+            );
+        }
+        return (
+            <div className={styles.featureListProgress}>
+                <div className={styles.featureListProgressMessage}>
+                    {operationProgress?.message || "Preparing modification."}
+                </div>
+                <Progress
+                    percent={progressPercent()}
+                    size="small"
+                    status={operationProgress?.failed ? "exception" : "active"}
+                    showInfo
+                />
+            </div>
+        );
+    }
+
+    const stopProgressPolling = () => {
+        if (progressTimerRef.current) {
+            clearInterval(progressTimerRef.current);
+            progressTimerRef.current = null;
+        }
+        expectedProgressOperationRef.current = null;
+    }
+
+    const fetchOperationProgress = (expectedOperation = expectedProgressOperationRef.current) => {
+        API.getLlmProgress()
+            .then((progress) => {
+                if (expectedOperation && progress.operation !== expectedOperation) {
+                    return;
+                }
+                setOperationProgress(progress)
+                if (!progress.running || progress.failed) {
+                    stopProgressPolling()
+                }
+            })
+            .catch((error) => {
+                console.error('Error fetching operation progress:', error)
+            })
+    }
+
+    const startProgressPolling = (expectedOperation) => {
+        stopProgressPolling()
+        expectedProgressOperationRef.current = expectedOperation || null;
+        fetchOperationProgress(expectedOperation)
+        progressTimerRef.current = setInterval(() => fetchOperationProgress(expectedOperation), 1000)
+    }
+
+    const loadFocusGraphStages = () => {
+        if (!isPythonProject || (selectedType !== "edit" && selectedType !== "add")) {
+            clearFocusGraphStages()
+            return Promise.resolve([])
+        }
+        return API.getFocusGraphStages()
+            .then((stages) => {
+                const normalized = Array.isArray(stages) ? stages : []
+                setFocusGraphStages(normalized)
+                return normalized
+            })
+            .catch((error) => {
+                console.error('Error fetching FocusGraph stages:', error)
+                setFocusGraphStages([])
+                return []
+            })
+    }
+
+    useEffect(() => {
+        return () => {
+            stopProgressPolling()
+            clearPostAgentTimers()
+        }
+    }, [])
+
+    const preparePythonDelete = (item) => {
+        setLoadingFeatureList(true)
+        setSubmitEnabled(false)
+        setConfirmEnabled(false)
+        setOperationProgress({
+            operation: "python-delete",
+            stage: "submit",
+            message: "Submitting feature deletion.",
+            currentStep: 0,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
+        startProgressPolling("python-delete")
+        API.deleteFeature({
+            featureId: item.featureId,
+            featureDescription: item.featureDescription
+        })
+            .then(() => {
+                stopProgressPolling()
+                setLoadingFeatureList(false)
+                setConfirmEnabled(true)
+                setChatMode(false)
+                setModeTrans(false)
+                API.getLlmProgress()
+                    .then((progress) => {
+                        setOperationProgress(progress)
+                    })
+                    .catch(() => {
+                        setOperationProgress({
+                            operation: "python-delete",
+                            stage: "complete",
+                            message: "Deterministic Python delete diff is ready. Review the affected files and confirm or drop it.",
+                            currentStep: 4,
+                            totalSteps: 4,
+                            running: false,
+                            failed: false
+                        })
+                    })
+                getFeatureGraphData(0, "new")
+            })
+            .catch((error) => {
+                console.error('Error Delete Feature:', error)
+                stopProgressPolling()
+                setLoadingFeatureList(false)
+                const msg = errorMessage(error, "Failed to prepare deletion context.")
+                setOperationProgress({
+                    operation: "python-delete",
+                    stage: "failed",
+                    message: msg,
+                    currentStep: operationProgress?.currentStep || 0,
+                    totalSteps: operationProgress?.totalSteps || 8,
+                    running: false,
+                    failed: true,
+                    error: msg
+                })
+                message.error(msg)
+            })
+    }
+
     const submitEdit = (item) => {
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
+        clearFocusGraphStages()
+        const expectedOperation = selectedType === 'add' ? "python-add" : "python-modify";
+        setOperationProgress({
+            operation: expectedOperation,
+            stage: "submit",
+            message: selectedType === 'add' ? "Submitting feature addition." : "Submitting feature modification.",
+            currentStep: 0,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
+        startProgressPolling(expectedOperation)
 
         if (selectedType == 'edit') {
             // console.log(editedText);
             API.modifyFeature(editedText)
-                .then((data) => {
+                .then(async (data) => {
+                    await loadFocusGraphStages()
                     handleChat(API.getLlmResponse())
                 })
                 .catch((error) => {
-                    console.error('Error Add Feature:', error)
+                    console.error('Error Modify Feature:', error)
+                    stopProgressPolling()
+                    setLoadingFeatureList(false)
+                    setSubmitEnabled(true)
+                    const msg = errorMessage(error, "Failed to prepare modification context.")
+                    setOperationProgress({
+                        operation: selectedType === 'add' ? "python-add" : "python-modify",
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                 });
         } else if (selectedType == 'add') {
             // 构建请求参数，包含moduleId
@@ -409,11 +700,27 @@ const DebloatingPage = () => {
             };
 
             API.addFeature(requestData)
-                .then((data) => {
+                .then(async (data) => {
+                    await loadFocusGraphStages()
                     handleChat(API.getLlmResponse())
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
+                    stopProgressPolling()
+                    setLoadingFeatureList(false)
+                    setSubmitEnabled(true)
+                    const msg = errorMessage(error, "Failed to add feature.")
+                    setOperationProgress({
+                        operation: "python-add",
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                 });
         }
     }
@@ -441,6 +748,8 @@ const DebloatingPage = () => {
                 })
                 .catch((error) => {
                     console.error('Error Confirm Delete Feature:', error)
+                    setLoadingConfirm(false);
+                    message.error(errorMessage(error, "Failed to apply delete diff."))
                 });
         } else if (selectedType == 'edit') {
             setLoadingConfirm(true);
@@ -470,7 +779,9 @@ const DebloatingPage = () => {
                     setLoadingConfirm(false);
                 })
                 .catch((error) => {
-                    console.error('Error Confirm Delete Feature:', error)
+                    console.error('Error Confirm Modify Feature:', error)
+                    setLoadingConfirm(false);
+                    message.error(errorMessage(error, "Failed to apply modify diff."))
                 });
         }else if (selectedType == 'add') {
             setLoadingConfirm(true);
@@ -500,13 +811,20 @@ const DebloatingPage = () => {
                     setLoadingConfirm(false);
                 })
                 .catch((error) => {
-                    console.error('Error Confirm Delete Feature:', error)
+                    console.error('Error Confirm Add Feature:', error)
+                    setLoadingConfirm(false);
+                    message.error(errorMessage(error, "Failed to apply add diff."))
                 });
         }else{
             alert('This is a [Fake] success message')
         }
 
     }
+
+    const hasFocusGraphStages = isPythonProject
+        && (selectedType === "edit" || selectedType === "add")
+        && Array.isArray(focusGraphStages)
+        && focusGraphStages.length > 0;
 
 
     return (
@@ -525,8 +843,11 @@ const DebloatingPage = () => {
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
-                            <Spin spinning={loadingFeatureList} tip={"Fetching repo's feature summary."} size="large">
-                                <div className={styles.scrollContainer}>
+                            <div className={styles.featureListBody}>
+                                <div className={classNames(styles.featureListContent, {
+                                    [styles.featureListContentLoading]: loadingFeatureList,
+                                })}>
+                                    <div className={styles.scrollContainer}>
                                     <Collapse
                                         accordion
                                         bordered={false}
@@ -638,8 +959,15 @@ const DebloatingPage = () => {
                                             </Panel>
                                         ))}
                                     </Collapse>
+                                    </div>
                                 </div>
-                            </Spin>
+                                {loadingFeatureList && (
+                                    <div className={styles.featureListOverlay}>
+                                        <Spin spinning size="large"/>
+                                        {featureListLoadingOverlay()}
+                                    </div>
+                                )}
+                            </div>
                         </Card>
                     </Splitter.Panel>
 
@@ -692,7 +1020,22 @@ const DebloatingPage = () => {
                         <Card
                             title={
                                 <div className={styles.card_title}>
-                                    Diff Panel
+                                    <div>Diff Panel</div>
+                                    <div className={styles.diffPanelActions}>
+                                        <Tooltip
+                                            title={hasFocusGraphStages
+                                                ? "Show Python FocusGraph initial, expanded, and reasoning graphs."
+                                                : "FocusGraph stages are available after Python Add/Modify submit."}
+                                        >
+                                            <Button
+                                                type="text"
+                                                icon={<ApartmentOutlined/>}
+                                                className={styles.icon}
+                                                disabled={!hasFocusGraphStages}
+                                                onClick={() => setFocusGraphModalOpen(true)}
+                                            />
+                                        </Tooltip>
+                                    </div>
                                 </div>
                             }
                             bordered={false}
@@ -729,6 +1072,11 @@ const DebloatingPage = () => {
                     </Splitter.Panel>
                 </Splitter>
             </Spin>
+            <FocusGraphStageModal
+                open={focusGraphModalOpen}
+                onClose={() => setFocusGraphModalOpen(false)}
+                stages={focusGraphStages}
+            />
         </>
 
     )

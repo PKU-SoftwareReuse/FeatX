@@ -31,13 +31,18 @@ public class FeatureController {
     }
 
     @PostMapping("/modify")
-    public void modify(@RequestBody AddOrModifyRequest request) {
+    public void modify(@RequestBody AddOrModifyRequest request) throws IOException, InterruptedException {
         llmController.modifyFeature(request);
     }
 
     @PostMapping("/add")
-    public void add(@RequestBody AddOrModifyRequest request) {
+    public void add(@RequestBody AddOrModifyRequest request) throws IOException, InterruptedException {
         llmController.addFeature(request);
+    }
+
+    @PostMapping("/delete")
+    public void delete(@RequestBody AddOrModifyRequest request) throws IOException, InterruptedException {
+        llmController.deleteFeature(request);
     }
 
     @PostMapping("/confirm/delete")

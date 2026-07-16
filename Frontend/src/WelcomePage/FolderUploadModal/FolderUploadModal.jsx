@@ -153,6 +153,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const [treeData, setTreeData] = useState([]);
     const [projectType, setProjectType] = useState(null);
     const [status, setStatus] = useState("empty");
+    const [uploading, setUploading] = useState(false);
     const debounceRef = useRef(null);
     const hasUploadedRef = useRef(false);
 
@@ -200,6 +201,10 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     };
 
     const handleOk = async () => {
+        if (uploading) {
+            return;
+        }
+
         if (!sourceFiles.length || !folderName || !projectType) {
             message.warning("Please select a Java or Python project and enter a repo name.");
             return;
@@ -213,13 +218,22 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         projectData.append("folderName", folderName);
         projectData.append("projectType", projectType);
 
+        setUploading(true);
         API.uploadProject(projectData).then(() => {
             handleCancel();
             message.success("Upload succeeded.");
             reloadGetProjectsInfo();
         }).catch(error => {
-            message.error("Upload failed.");
+            const statusCode = error.response?.status;
+            if (statusCode === 413) {
+                message.error("Upload failed: project is larger than the current server upload limit.");
+            } else {
+                const serverMessage = error.response?.data?.message || error.response?.data;
+                message.error(serverMessage ? `Upload failed: ${serverMessage}` : "Upload failed.");
+            }
             console.log(error);
+        }).finally(() => {
+            setUploading(false);
         });
     };
 
@@ -231,6 +245,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         setFolderName("");
         setProjectType(null);
         setStatus("empty");
+        setUploading(false);
         hasUploadedRef.current = false;
         if (debounceRef.current) {
             clearTimeout(debounceRef.current);
@@ -249,7 +264,8 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                 open={visible}
                 onOk={handleOk}
                 onCancel={handleCancel}
-                okButtonProps={{disabled: status !== "ready"}}
+                okButtonProps={{disabled: status !== "ready" || uploading}}
+                confirmLoading={uploading}
                 width={640}
                 maskClosable={false}
             >

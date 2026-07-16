@@ -149,7 +149,70 @@
 .buttonContainer {
     display: flex;
     justify-content: center;
+    gap: 8px;
     margin-top: 12px;
+}
+
+.summaryProgressPanel {
+    width: 360px;
+    max-width: 72vw;
+}
+
+.summaryProgressHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.summaryProgressTitle {
+    color: #1f2937;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.summaryProgressMuted {
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.summaryProgressBar {
+    margin: 10px 0 8px;
+}
+
+.summaryStepList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.summaryStepItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.summaryStepTag {
+    flex: 0 0 auto;
+    min-width: 70px;
+    text-align: center;
+    margin-inline-end: 0;
+}
+
+.summaryStepBody {
+    min-width: 0;
+}
+
+.summaryStepLabel {
+    color: #111827;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
 }
 
 .uploadModalWrapper {

@@ -10,3 +10,24 @@
     padding: 8px;
     text-align: left;
 }
+
+.agentCodeBlock {
+    margin: 12px 0;
+    padding: 12px 14px;
+    max-width: 100%;
+    overflow: auto;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #f6f8fa;
+    color: #24292f;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.45;
+    white-space: pre;
+}
+
+.agentCodeBlock code {
+    font: inherit;
+    color: inherit;
+    background: transparent;
+}

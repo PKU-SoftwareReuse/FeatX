@@ -22,10 +22,18 @@ const API = {
             repoId: repoId,
         })
     },
+    getCurrentProject: () => {
+        return axios.get(`${BASE_URL}/project/current`)
+            .then(response => response.data);
+    },
     postResummary: (repoId) => {
         return axios.post(`${BASE_URL}/project/resummary`, {
             repoId: repoId,
         })
+    },
+    getSummaryProgressAll: () => {
+        return axios.get(`${BASE_URL}/project/summary/progress/all`)
+            .then(response => response.data);
     },
     postDropRepo: (repoId) => {
         return axios.post(`${BASE_URL}/project/drop`, {
@@ -116,6 +124,9 @@ const API = {
     confirmDelete: () => {
         return axios.post(`${BASE_URL}/feature/confirm/delete`)
     },
+    deleteFeature: (requestData) => {
+        return axios.post(`${BASE_URL}/feature/delete`, requestData)
+    },
 
     modifyFeature: (featureDescription) => {
         return axios.post(`${BASE_URL}/feature/modify`, {
@@ -136,6 +147,14 @@ const API = {
     },
     getLlmResponse: () => {
         return new EventSource(`${BASE_URL}/llm/get`,)
+    },
+    getLlmProgress: () => {
+        return axios.get(`${BASE_URL}/llm/progress`)
+            .then(response => response.data);
+    },
+    getFocusGraphStages: () => {
+        return axios.get(`${BASE_URL}/llm/focusgraph/stages`)
+            .then(response => response.data);
     },
 
 

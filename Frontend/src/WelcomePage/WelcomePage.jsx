@@ -2,14 +2,38 @@
 import React, {useEffect, useState} from "react";
 import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
-import {Button, Card, Descriptions, message, Popconfirm, Spin, Tooltip,} from "antd";
-import {DeleteOutlined, GithubOutlined, SyncOutlined} from '@ant-design/icons';
+import {Button, Card, Descriptions, message, Popconfirm, Popover, Progress, Spin, Tag, Tooltip,} from "antd";
+import {DeleteOutlined, DownOutlined, GithubOutlined, SyncOutlined} from '@ant-design/icons';
 import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
 
 
 const formatMetric = (value) => value === null || value === undefined ? "-" : value.toLocaleString();
+
+const formatDuration = (milliseconds) => {
+    if (!milliseconds || milliseconds < 0) {
+        return "0s";
+    }
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+    }
+    if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+};
+
+const statusColor = (status) => {
+    if (status === "done" || status === "complete") return "success";
+    if (status === "running") return "processing";
+    if (status === "failed") return "error";
+    return "default";
+};
 
 const getProjectStats = (project) => {
     if (project.projectType === "PYTHON") {
@@ -38,6 +62,7 @@ const WelcomePage = () => {
     const [loadingConnect, setLoadingConnect] = useState(false);
     const [loadingAnalyse, setLoadingAnalyse] = useState(false);
     const [projectOptions, setProjectOptions] = useState(null);
+    const [summaryProgressByRepo, setSummaryProgressByRepo] = useState({});
 
 
     useEffect(() => {
@@ -55,16 +80,46 @@ const WelcomePage = () => {
         })
     }
 
-    const getProjects = () => {
-        setLoadingConnect(true);
+    const getProjects = (silent = false) => {
+        if (!silent) {
+            setLoadingConnect(true);
+        }
         API.getProjectsInfo().then(data => {
             setProjectOptions(data);
-            setLoadingConnect(false);
+            if (!silent) {
+                setLoadingConnect(false);
+            }
         }).catch(err => {
             console.log(err);
-            getProjects();
+            if (!silent) {
+                setLoadingConnect(false);
+                getProjects();
+            }
         })
     }
+
+    const fetchSummaryProgress = () => {
+        API.getSummaryProgressAll().then(data => {
+            setSummaryProgressByRepo(data || {});
+        }).catch(err => {
+            console.log(err);
+        });
+    }
+
+    const hasPendingSummary = projectOptions?.some(project => !project.summaryFlag);
+
+    useEffect(() => {
+        if (!hasPendingSummary) {
+            return;
+        }
+        fetchSummaryProgress();
+        const progressTimer = setInterval(fetchSummaryProgress, 2000);
+        const projectTimer = setInterval(() => getProjects(true), 5000);
+        return () => {
+            clearInterval(progressTimer);
+            clearInterval(projectTimer);
+        };
+    }, [hasPendingSummary]);
 
     const handleConfirmButton = (repoId) => {
         setLoadingAnalyse(true);
@@ -96,6 +151,94 @@ const WelcomePage = () => {
             message.error(error?.response?.data?.message || "Failed to delete project.");
             console.log(error)
         })
+    }
+
+    const progressForProject = (project) => {
+        return summaryProgressByRepo?.[project.id] || summaryProgressByRepo?.[String(project.id)];
+    }
+
+    const progressPercent = (progress) => {
+        if (!progress) return 0;
+        if (typeof progress.percent === "number") {
+            return Math.max(0, Math.min(100, progress.percent));
+        }
+        if (progress.totalSteps) {
+            return Math.round(((progress.currentStep || 1) - 1) * 100 / progress.totalSteps);
+        }
+        return 0;
+    }
+
+    const summaryTooltip = (project) => {
+        const progress = progressForProject(project);
+        if (project.summaryFlag) {
+            return "";
+        }
+        if (!progress) {
+            return (
+                <div>
+                    <div>Repo summary is running.</div>
+                    <div>Detailed progress will appear for newly captured runs.</div>
+                </div>
+            );
+        }
+        return (
+            <div>
+                <div>{progress.message || "Repo summary is running."}</div>
+                <div>Elapsed: {formatDuration(progress.elapsedMs)}</div>
+                <div>Step: {progress.currentStep}/{progress.totalSteps}</div>
+            </div>
+        );
+    }
+
+    const renderSummaryProgress = (project) => {
+        const progress = progressForProject(project);
+        if (!progress) {
+            return (
+                <div className={styles.summaryProgressPanel}>
+                    <div className={styles.summaryProgressTitle}>Repo summary is running.</div>
+                    <div className={styles.summaryProgressMuted}>
+                        No structured progress has been captured for this run yet.
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div className={styles.summaryProgressPanel}>
+                <div className={styles.summaryProgressHeader}>
+                    <div>
+                        <div className={styles.summaryProgressTitle}>{progress.message || "Repo summary is running."}</div>
+                        <div className={styles.summaryProgressMuted}>
+                            Elapsed {formatDuration(progress.elapsedMs)} · Step {progress.currentStep}/{progress.totalSteps}
+                        </div>
+                    </div>
+                    <Tag color={statusColor(progress.status)}>{progress.status}</Tag>
+                </div>
+                <Progress
+                    percent={Math.round(progressPercent(progress))}
+                    size="small"
+                    status={progress.status === "failed" ? "exception" : "active"}
+                    className={styles.summaryProgressBar}
+                />
+                <div className={styles.summaryStepList}>
+                    {(progress.steps || []).map(step => (
+                        <div key={step.id} className={styles.summaryStepItem}>
+                            <Tag color={statusColor(step.status)} className={styles.summaryStepTag}>
+                                {step.status}
+                            </Tag>
+                            <div className={styles.summaryStepBody}>
+                                <div className={styles.summaryStepLabel}>{step.label}</div>
+                                <div className={styles.summaryProgressMuted}>
+                                    {step.detail || "Waiting."}
+                                    {step.elapsedMs ? ` · ${formatDuration(step.elapsedMs)}` : ""}
+                                    {typeof step.percent === "number" ? ` · ${Math.round(step.percent)}%` : ""}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -145,7 +288,7 @@ const WelcomePage = () => {
                                                     type="text"
                                                     icon={<SyncOutlined/>}
                                                     className={styles.titleButtonRight}
-                                                    disabled={!project.summaryFlag || project.projectType === "PYTHON"}
+                                                    disabled={!project.summaryFlag}
                                                 />
                                             </Popconfirm>
                                         </div>
@@ -170,19 +313,29 @@ const WelcomePage = () => {
                                         </Descriptions.Item>
                                     </Descriptions>
                                     <p style={{textAlign: "center"}}>{project.description}</p>
-                                    <Tooltip
-                                        title={project.projectType === "PYTHON" ? "Python analysis pipeline will be added later." : (!project.summaryFlag ? "Repo summary in progress..." : "")}
-                                    >
+                                    <Tooltip title={summaryTooltip(project)}>
                                         <div className={styles.buttonContainer}>
                                             <Button
                                                 type="primary"
                                                 onClick={() => {
                                                     handleConfirmButton(project.id);
                                                 }}
-                                                disabled={!project.summaryFlag || project.projectType === "PYTHON"}
+                                                disabled={!project.summaryFlag}
                                             >
                                                 Open
                                             </Button>
+                                            {!project.summaryFlag ? (
+                                                <Popover
+                                                    title="Repo Summary Progress"
+                                                    content={renderSummaryProgress(project)}
+                                                    trigger="click"
+                                                    placement="top"
+                                                >
+                                                    <Button icon={<DownOutlined/>}>
+                                                        Details
+                                                    </Button>
+                                                </Popover>
+                                            ) : null}
                                         </div>
                                     </Tooltip>
                                 </Card>

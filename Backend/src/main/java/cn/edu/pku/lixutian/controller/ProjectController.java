@@ -10,6 +10,7 @@ import cn.edu.pku.lixutian.dto.request.GitRepoRequest;
 import cn.edu.pku.lixutian.dto.request.SelectProjectRequest;
 import cn.edu.pku.lixutian.dto.result.GitRepoPreviewResult;
 import cn.edu.pku.lixutian.dto.result.ProjectInfoResult;
+import cn.edu.pku.lixutian.dto.result.RepoSummaryProgressResult;
 import cn.edu.pku.lixutian.helper.RepoSummaryHelper;
 import cn.edu.pku.lixutian.service.ProcessService;
 import cn.edu.pku.lixutian.service.CodeMapService;
@@ -28,6 +29,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -63,16 +65,41 @@ public class ProjectController {
 
     @PostMapping("/select")
     public void selectProject(@RequestBody SelectProjectRequest request) throws ParseException, IOException, InterruptedException {
+        ProjectInfo projectInfo = projectInfoRepository.findById(request.getRepoId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found."));
+        ProjectType type = extractProjectType(projectInfo);
+
         ProjectState state = ProjectState.getInstance();
         state.setRepoId(request.getRepoId());
-        state.setProjectPath(repoId2Path(request.getRepoId()));
+        state.setProjectPath(repoId2Path(request.getRepoId()), type.name());
 
-        // 处理项目数据
-        processService.process();
+        if (type == ProjectType.JAVA) {
+            processService.process();
+        }
         CodeMapService.isBuilt = false;
 
 //        // 初始化缓存 - 在数据处理完成后进行
 //        codeMapService.initializeCache(request.getRepoId());
+    }
+
+    @GetMapping("/current")
+    public Map<String, Object> currentProject() {
+        ProjectState state = ProjectState.getInstance();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("repoId", state.getRepoId());
+        result.put("projectType", state.getProjectType());
+        result.put("sourceRoot", state.getSrcPath());
+        return result;
+    }
+
+    @GetMapping("/summary/progress")
+    public RepoSummaryProgressResult summaryProgress(@RequestParam Integer repoId) {
+        return RepoSummaryHelper.getProgress(repoId);
+    }
+
+    @GetMapping("/summary/progress/all")
+    public Map<Integer, RepoSummaryProgressResult> allSummaryProgress() {
+        return RepoSummaryHelper.getAllProgress();
     }
 
     private String repoId2Path(Integer repoId) {
@@ -187,7 +214,7 @@ public class ProjectController {
         projectInfo.setNoc(0);
         projectInfo.setNom(0);
         projectInfo.setNof(0);
-        projectInfo.setSummaryFlag(type == ProjectType.PYTHON);
+        projectInfo.setSummaryFlag(false);
         return projectInfoRepository.save(projectInfo);
     }
 
@@ -237,9 +264,19 @@ public class ProjectController {
         projectInfo.setNof(statisticInfo.get("nof"));
         projectInfoRepository.save(projectInfo);
 
-        if (type == ProjectType.JAVA) {
-            RepoSummaryHelper.runRepoSummary(projectInfo.getId());
+        RepoSummaryHelper.runRepoSummary(projectInfo.getId());
+    }
+
+    private ProjectType extractProjectType(ProjectInfo projectInfo) {
+        String description = projectInfo.getDescription();
+        if (description == null) {
+            return ProjectType.JAVA;
         }
+        String normalized = description.toLowerCase(Locale.ROOT);
+        if (normalized.contains("[python]") || normalized.contains("python repo")) {
+            return ProjectType.PYTHON;
+        }
+        return ProjectType.JAVA;
     }
 
     private void assertHasSourceFiles(List<String> paths, ProjectType type) {

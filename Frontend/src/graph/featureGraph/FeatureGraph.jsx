@@ -81,10 +81,19 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick}, ref) => {
             networkRef.current = new Network(containerRef.current, data, GraphOption.options);
 
             addClickHandler(networkRef, data);
+            const firstNodeId = nodes[0]?.id;
+            if (firstNodeId) {
+                networkRef.current.selectNodes([firstNodeId]);
+                onNodeClick(firstNodeId);
+                lastSelectedNodeRef.current = firstNodeId;
+            }
+        } else {
+            dataRef.current = null;
         }
 
         return () => {
             networkRef.current?.destroy();
+            networkRef.current = null;
         };
     }, [graphData]);
 

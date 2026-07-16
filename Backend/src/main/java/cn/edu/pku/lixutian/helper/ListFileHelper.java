@@ -50,4 +50,58 @@ public class ListFileHelper {
         return new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
     }
 
+    public static List<String> findPythonFiles(String folderPath) {
+        List<String> pythonFiles = new ArrayList<>();
+        File folder = new File(folderPath);
+        if (!folder.exists() || !folder.isDirectory()) {
+            return pythonFiles;
+        }
+        recursiveFindPython(folder, pythonFiles, folder.getAbsolutePath());
+        return pythonFiles;
+    }
+
+    private static void recursiveFindPython(File current, List<String> result, String rootPath) {
+        File[] files = current.listFiles();
+        if (files == null) return;
+
+        for (File file : files) {
+            if (file.isDirectory()) {
+                String name = file.getName();
+                if ("__pycache__".equals(name) || ".venv".equals(name) || "venv".equals(name) || "env".equals(name)) {
+                    continue;
+                }
+                recursiveFindPython(file, result, rootPath);
+            } else if (file.isFile() && file.getName().endsWith(".py")) {
+                String relativePath = file.getAbsolutePath().substring(rootPath.length() + 1);
+                result.add(relativePath.replace(File.separatorChar, '/'));
+            }
+        }
+    }
+
+    public static String getPythonFileContent(String baseFolder, String pythonFileName) throws IOException {
+        String relativePath = normalizePythonPath(pythonFileName);
+        File root = new File(baseFolder).getCanonicalFile();
+        File file = new File(root, relativePath).getCanonicalFile();
+        if (!file.toPath().startsWith(root.toPath())) {
+            throw new IOException("Invalid Python file path: " + pythonFileName);
+        }
+        if (!file.exists()) return "This file does not exist before, it's a brand new file.";
+
+        return new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+    }
+
+    private static String normalizePythonPath(String path) throws IOException {
+        if (path == null || path.isBlank()) {
+            throw new IOException("Python file path is required.");
+        }
+        String normalized = path.replace('\\', '/');
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        if (normalized.contains("../") || normalized.startsWith("/") || !normalized.endsWith(".py")) {
+            throw new IOException("Invalid Python file path: " + path);
+        }
+        return normalized;
+    }
+
 }

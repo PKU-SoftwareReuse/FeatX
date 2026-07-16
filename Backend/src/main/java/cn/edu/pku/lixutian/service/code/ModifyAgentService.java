@@ -2,6 +2,7 @@ package cn.edu.pku.lixutian.service.code;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.javaparser.StaticJavaParser;
@@ -103,8 +104,8 @@ public class ModifyAgentService extends AgentService{
             config.setPrintComments(true); // 保留注释
             config.setOrderImports(true);  // 如果要排序 import，可以加这个
 
-            // 格式化回字符串
-            javaStr = cu.toString(config);
+            // 格式化回字符串，并统一保存为不含 package/import 的类型定义。
+            javaStr = RewriteFileHelper.stripJavaPackageAndImports(cu.toString(config));
 
         } catch (Exception e) {
             throw new RuntimeException("Java 代码解析或格式化失败: " + e.getMessage(), e);

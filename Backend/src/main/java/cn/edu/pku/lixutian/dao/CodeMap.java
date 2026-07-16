@@ -18,7 +18,7 @@ public class CodeMap {
     @JoinColumn(name = "feature")
     private Feature feature;
 
-    @Column(name = "method_name")
+    @Column(name = "method_name", columnDefinition = "TEXT")
     private String methodName;
 
 

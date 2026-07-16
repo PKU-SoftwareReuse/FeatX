@@ -8,4 +8,5 @@ import lombok.Setter;
 public class AddOrModifyRequest {
     private String featureDescription;
     private Integer moduleId;   // 新增
+    private Integer featureId;
 }

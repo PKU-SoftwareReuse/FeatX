@@ -9,7 +9,9 @@ if __name__ == '__main__':
         project_id = "3"
 
     RepoSummary.main(project_id)
+    print("[reposummary-main] Writing summary to database", flush=True)
     write2database.main(project_id)
+    print("[reposummary-main] Database write complete", flush=True)
 
     # # for project_id in ["8", "12", "13", "14", "15"]:
     # for project_id in ["17"]:
