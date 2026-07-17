@@ -69,6 +69,20 @@ write_env_value() {
   fi
 }
 
+prepare_backend_build_output() {
+  local target_dir="$ROOT_DIR/Backend/target"
+  local current_uid stale_path
+
+  [[ -d "$target_dir" ]] || return
+
+  current_uid="$(id -u)"
+  stale_path="$(find "$target_dir" -xdev ! -uid "$current_uid" -print -quit 2>/dev/null || true)"
+  if [[ -n "$stale_path" ]]; then
+    echo "Removing backend build output owned by another user: $target_dir"
+    rm -rf "$target_dir"
+  fi
+}
+
 detect_host_ipv4() {
   local host_ip=""
 
@@ -349,6 +363,7 @@ host_overlay_build() {
   fi
   ensure_model_image "$models_host"
 
+  prepare_backend_build_output
   if command -v javac >/dev/null 2>&1; then
     echo "Building backend jar on host..."
     (cd Backend && ./mvnw -q -DskipTests package)
@@ -474,11 +489,15 @@ wait_for_mysql() {
 }
 
 write_host_nginx_conf() {
+  local upload_max_size
+  upload_max_size="$(read_env_value FEATX_UPLOAD_MAX_SIZE 100m)"
+
   mkdir -p .run
   cat > .run/featx-host-nginx.conf <<NGINX
 server {
     listen ${FRONTEND_PORT};
     server_name _;
+    client_max_body_size ${upload_max_size};
 
     root /usr/share/nginx/html;
     index index.html;

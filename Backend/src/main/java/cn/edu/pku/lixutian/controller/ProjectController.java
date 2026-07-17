@@ -311,6 +311,14 @@ public class ProjectController {
     }
 
     private ProjectType extractProjectType(ProjectInfo projectInfo) {
+        if (hasText(projectInfo.getProjectType())) {
+            try {
+                return ProjectType.valueOf(projectInfo.getProjectType().trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException ignored) {
+                // Fall back to the legacy description-based detection below.
+            }
+        }
+
         String description = projectInfo.getDescription();
         if (description == null) {
             return ProjectType.JAVA;

@@ -199,40 +199,48 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         }
     }, []);
 
+    const scheduleAnalysis = (files) => {
+        if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+        }
+
+        const fileList = (files || []).map(file => ({
+            uid: file.uid,
+            name: file.name,
+            originFileObj: file,
+        }));
+
+        debounceRef.current = setTimeout(() => {
+            const analysis = analyzeFiles(fileList);
+            setProjectType(analysis.projectType);
+            setSourceFiles(analysis.sourceFiles);
+            setTreeData(analysis.treeData);
+
+            if (analysis.defaultFolderName) {
+                setFolderName(currentName => currentName || analysis.defaultFolderName);
+            }
+
+            if (!analysis.projectType) {
+                setStatus("unsupported");
+                message.warning(copy.unsupported);
+                return;
+            }
+
+            setStatus(analysis.sourceFiles.length > 0 ? "ready" : "unsupported");
+        }, 300);
+    };
+
     const props = {
         multiple: true,
         directory: true,
-        beforeUpload: () => {
+        beforeUpload: (file, fileList) => {
             if (!hasUploadedRef.current) {
                 hasUploadedRef.current = true;
                 setUploaded(true);
                 setStatus("processing");
+                scheduleAnalysis(fileList);
             }
-            return false;
-        },
-        onChange(info) {
-            if (debounceRef.current) {
-                clearTimeout(debounceRef.current);
-            }
-
-            debounceRef.current = setTimeout(() => {
-                const analysis = analyzeFiles(info.fileList);
-                setProjectType(analysis.projectType);
-                setSourceFiles(analysis.sourceFiles);
-                setTreeData(analysis.treeData);
-
-                if (analysis.defaultFolderName && !folderName) {
-                    setFolderName(analysis.defaultFolderName);
-                }
-
-                if (!analysis.projectType) {
-                    setStatus("unsupported");
-                    message.warning(copy.unsupported);
-                    return;
-                }
-
-                setStatus(analysis.sourceFiles.length > 0 ? "ready" : "unsupported");
-            }, 300);
+            return Upload.LIST_IGNORE;
         },
     };
 
@@ -309,7 +317,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                     <Dragger
                         {...props}
                         showUploadList={false}
-                        fileList={[]}
                     >
                         <p className="ant-upload-drag-icon">
                             <InboxOutlined/>

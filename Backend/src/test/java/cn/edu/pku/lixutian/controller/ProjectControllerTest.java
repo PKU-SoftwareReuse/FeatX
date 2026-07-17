@@ -4,6 +4,7 @@ import cn.edu.pku.lixutian.dao.ProjectInfo;
 import cn.edu.pku.lixutian.dao.repository.GraphEdgeRepository;
 import cn.edu.pku.lixutian.dao.repository.ModuleRepository;
 import cn.edu.pku.lixutian.dao.repository.ProjectInfoRepository;
+import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.ProcessService;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,8 +18,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -46,6 +50,10 @@ class ProjectControllerTest {
 
     @BeforeEach
     void setUp() {
+        LtmConfig ltmConfig = new LtmConfig();
+        ltmConfig.setRepoPath("/tmp/featx-project-controller-test");
+        ltmConfig.init();
+
         project = new ProjectInfo();
         project.setId(12);
         project.setRepoName("Old Name");
@@ -94,5 +102,18 @@ class ProjectControllerTest {
                                 }
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void selectProjectUsesStoredPythonTypeInsteadOfDescription() throws Exception {
+        project.setDescription("Uploaded repository.");
+        project.setProjectType("PYTHON");
+
+        mockMvc.perform(post("/project/select")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"repoId\":12}"))
+                .andExpect(status().isOk());
+
+        verify(processService, never()).process();
     }
 }
