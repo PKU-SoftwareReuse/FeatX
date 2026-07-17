@@ -11,7 +11,8 @@ import {
     ExclamationCircleOutlined,
     SearchOutlined,
     SwapOutlined,
-    ApartmentOutlined
+    ApartmentOutlined,
+    DiffOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
 
@@ -48,8 +49,12 @@ const DEBLOATING_COPY = {
         graphPanel: "相关代码图谱",
         fetchingGraph: "正在获取相关代码图谱。",
         changesPanel: "代码变更",
+        viewRepositoryDiff: "查看仓库 Git Diff",
+        repositoryDiff: "仓库 Git Diff",
         closeChangesPanel: "关闭代码变更",
         fetchingCode: "正在获取代码详情。",
+        noRepositoryChanges: "当前仓库没有未提交的 Git 变更。",
+        failedFetchRepositoryDiff: "获取仓库 Git Diff 失败。",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
         confirmAllChanges: "确认所有代码变更",
         reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
@@ -100,8 +105,12 @@ const DEBLOATING_COPY = {
         graphPanel: "CodeMap Panel",
         fetchingGraph: "fetching codeMap.",
         changesPanel: "Diff Panel",
+        viewRepositoryDiff: "View repository Git diff",
+        repositoryDiff: "Repository Git Diff",
         closeChangesPanel: "Close Diff Panel",
         fetchingCode: "Fetching code details.",
+        noRepositoryChanges: "The repository has no uncommitted Git changes.",
+        failedFetchRepositoryDiff: "Failed to fetch repository Git diff.",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
         confirmAllChanges: "Confirm All Code Diff",
         reviewAllChanges: "Have you read all the diff(the node marked with red)?",
@@ -433,6 +442,8 @@ const DebloatingPage = () => {
     const [codeDiff, setCodeDiff] = useState('');
     const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
+    const [isRepositoryDiff, setIsRepositoryDiff] = useState(false);
+    const [repositoryDiffError, setRepositoryDiffError] = useState(false);
 
     useEffect(() => {
         if (!diffDrawerOpen) return undefined;
@@ -448,6 +459,8 @@ const DebloatingPage = () => {
     }, [diffDrawerOpen]);
 
     const getCodeDiff = (classNodeId) => {
+        setIsRepositoryDiff(false);
+        setRepositoryDiffError(false);
         setSelectedCodeNodeId(String(classNodeId));
         setDiffDrawerOpen(true);
         setLoadingCode(true)
@@ -520,6 +533,26 @@ const DebloatingPage = () => {
         }
 
     }
+
+    const getRepositoryDiff = () => {
+        setIsRepositoryDiff(true);
+        setRepositoryDiffError(false);
+        setSelectedCodeNodeId('Git');
+        setDiffDrawerOpen(true);
+        setCodeDiff('');
+        setLoadingCode(true);
+        API.getRepositoryDiff()
+            .then((data) => {
+                setCodeDiff(typeof data === 'string' ? data : '');
+                setLoadingCode(false);
+            })
+            .catch((error) => {
+                setCodeDiff('');
+                setRepositoryDiffError(true);
+                setLoadingCode(false);
+                message.error(errorMessage(error, copy.failedFetchRepositoryDiff));
+            });
+    };
 
     const [modal, contextHolder] = Modal.useModal();
 
@@ -1410,6 +1443,17 @@ const DebloatingPage = () => {
                                             {chatMode ? copy.agentPanel : copy.graphPanel}
                                         </div>
                                         <div className={styles.panelActions}>
+                                            <Tooltip title={copy.viewRepositoryDiff}>
+                                                <Button
+                                                    type="text"
+                                                    icon={<DiffOutlined/>}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        getRepositoryDiff();
+                                                    }}
+                                                    className={styles.icon}
+                                                />
+                                            </Tooltip>
                                             <Tooltip
                                                 title={hasFocusGraphStages ? copy.focusGraphReady : copy.focusGraphPending}
                                             >
@@ -1482,7 +1526,7 @@ const DebloatingPage = () => {
                     >
                         <header className={styles.diffDrawerHeader}>
                             <div className={styles.diffDrawerTitle}>
-                                <h2>{copy.changesPanel}</h2>
+                                <h2>{isRepositoryDiff ? copy.repositoryDiff : copy.changesPanel}</h2>
                                 {selectedCodeNodeId && <p>{selectedCodeNodeId}</p>}
                             </div>
                             <Button
@@ -1495,30 +1539,38 @@ const DebloatingPage = () => {
                         </header>
                         <div className={styles.diffDrawerBody}>
                             <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
-                                <CodeDiffComponent
-                                    diffText={codeDiff}
-                                    isPlainCode={false}
-                                />
-                                <Tooltip
-                                    title={!confirmEnabled ? copy.noSubmittedChanges : ""}
-                                >
-                                    <Popconfirm title={copy.confirmAllChanges}
-                                                description={copy.reviewAllChanges}
-                                                onConfirm={confirmDiff}
-                                                okText={copy.confirmApply}
-                                                cancelText={copy.decline}
+                                {isRepositoryDiff && repositoryDiffError ? (
+                                    <div className={styles.emptyDiff}>{copy.failedFetchRepositoryDiff}</div>
+                                ) : isRepositoryDiff && !codeDiff.trim() ? (
+                                    <div className={styles.emptyDiff}>{copy.noRepositoryChanges}</div>
+                                ) : (
+                                    <CodeDiffComponent
+                                        diffText={codeDiff}
+                                        isPlainCode={false}
+                                    />
+                                )}
+                                {!isRepositoryDiff && (
+                                    <Tooltip
+                                        title={!confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
-                                        <div className={styles.centerButtonWrapper}>
-                                            <Button
-                                                type="primary"
-                                                // onClick={confirmDiff}
-                                                disabled={!confirmEnabled}
-                                            >
-                                                {copy.applyChanges}
-                                            </Button>
-                                        </div>
-                                    </Popconfirm>
-                                </Tooltip>
+                                        <Popconfirm title={copy.confirmAllChanges}
+                                                    description={copy.reviewAllChanges}
+                                                    onConfirm={confirmDiff}
+                                                    okText={copy.confirmApply}
+                                                    cancelText={copy.decline}
+                                        >
+                                            <div className={styles.centerButtonWrapper}>
+                                                <Button
+                                                    type="primary"
+                                                    // onClick={confirmDiff}
+                                                    disabled={!confirmEnabled}
+                                                >
+                                                    {copy.applyChanges}
+                                                </Button>
+                                            </div>
+                                        </Popconfirm>
+                                    </Tooltip>
+                                )}
                             </Spin>
                         </div>
                     </aside>

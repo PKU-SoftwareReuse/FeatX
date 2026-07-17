@@ -20,6 +20,10 @@ from .structure_analsis.python.ENRE_py.enre.__main__ import main as enre_main
 
 
 BASE_DIR = Path(__file__).resolve().parent
+IGNORED_ANALYSIS_DIRECTORIES = {
+    ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+    "preprocess1", "delombok", "preprocess2"
+}
 
 load_dotenv(BASE_DIR.parent.parent / ".env")
 load_dotenv()
@@ -833,6 +837,8 @@ def _python_file_name(rel_path: str) -> str:
 def _create_python_files(project_path: Path) -> list[fg_summary.File]:
     files: list[fg_summary.File] = []
     for path in sorted(project_path.rglob("*.py")):
+        if any(part in IGNORED_ANALYSIS_DIRECTORIES for part in path.relative_to(project_path).parts):
+            continue
         rel_path = _normalize_rel_file(path.relative_to(project_path))
         try:
             file_code = path.read_text(encoding="utf-8", errors="replace")

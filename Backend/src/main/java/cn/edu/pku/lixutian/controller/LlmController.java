@@ -94,9 +94,9 @@ public class LlmController {
 
 
         allFiles = "";
-        List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
-        for (String javaFile : javaFiles) {
-            allFiles += javaFile + "\n";
+        List<String> projectFiles = ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath());
+        for (String projectFile : projectFiles) {
+            allFiles += projectFile + "\n";
         }
     }
 
@@ -167,11 +167,7 @@ public class LlmController {
                     7,
                     8
             );
-            StringBuilder fileList = new StringBuilder();
-            for (String pythonFile : ListFileHelper.findPythonFiles(ProjectState.getInstance().getSrcPath())) {
-                fileList.append(pythonFile).append("\n");
-            }
-            allFiles = fileList.toString();
+            allFiles = projectFileList();
             progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
@@ -222,9 +218,9 @@ public class LlmController {
         }
 
         allFiles = "";
-        List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
-        for (String javaFile : javaFiles) {
-            allFiles += javaFile + "\n";
+        List<String> projectFiles = ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath());
+        for (String projectFile : projectFiles) {
+            allFiles += projectFile + "\n";
         }
 
         codeMapService.selectFeature(null);
@@ -264,7 +260,7 @@ public class LlmController {
                     7,
                     8
             );
-            allFiles = pythonFileList();
+            allFiles = projectFileList();
             progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
@@ -525,10 +521,10 @@ public class LlmController {
         return currentCodeMap;
     }
 
-    private String pythonFileList() {
+    private String projectFileList() {
         StringBuilder fileList = new StringBuilder();
-        for (String pythonFile : ListFileHelper.findPythonFiles(ProjectState.getInstance().getSrcPath())) {
-            fileList.append(pythonFile).append("\n");
+        for (String projectFile : ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath())) {
+            fileList.append(projectFile).append("\n");
         }
         return fileList.toString();
     }

@@ -18,7 +18,6 @@ import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.CombinedTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.JavaParserTypeSolver;
 import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeSolver;
-import com.github.javaparser.utils.SourceRoot;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -30,6 +29,11 @@ import java.util.*;
 import java.util.stream.Stream;
 
 public class PreprocessHelper {
+    private static final Set<String> IGNORED_DIRECTORIES = Set.of(
+            ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+            "preprocess1", "delombok", "preprocess2"
+    );
+
     public static NodeList<CompilationUnit> parseAllFiles() throws ParseException, IOException, InterruptedException {
         // 强制预处理，删除文件夹
         if (ProjectState.getInstance().isForcePreprocessOption()) {
@@ -69,13 +73,21 @@ public class PreprocessHelper {
             System.out.println("==========1. Pre Process 1 ==========");
             NodeList<CompilationUnit> units1 = onlyParseAllFiles(ProjectState.getInstance().getSrcPath());
             preprocess1(units1);
-            writeBack(units1, ProjectState.getInstance().getPreprocess1Path());
+            writeBack(
+                    units1,
+                    ProjectState.getInstance().getSrcPath(),
+                    ProjectState.getInstance().getPreprocess1Path()
+            );
             System.out.println("==========2. Execute Delombok CMD ==========");
             runDelombok(ProjectState.getInstance().getPreprocess1Path(), ProjectState.getInstance().getDelombokPath());
             System.out.println("==========3. Pre Process 2 ==========");
             NodeList<CompilationUnit> units2 = onlyParseAllFiles(ProjectState.getInstance().getDelombokPath());
             preprocess2(units2);
-            writeBack(units2, ProjectState.getInstance().getPreprocess2Path());
+            writeBack(
+                    units2,
+                    ProjectState.getInstance().getDelombokPath(),
+                    ProjectState.getInstance().getPreprocess2Path()
+            );
             System.out.println("==========4. Recursion ==========");
             return oldParseAllFiles();
         } else {
@@ -87,23 +99,9 @@ public class PreprocessHelper {
     }
 
     private static NodeList<CompilationUnit> onlyParseAllFiles(String srcPath) throws ParseException, IOException {
-        NodeList<CompilationUnit> units = new NodeList<>();
-        List<Problem> problems = new ArrayList<>();
-
-        ParserConfiguration config = new ParserConfiguration()
-                .setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-        SourceRoot sourceRoot = new SourceRoot(Paths.get(srcPath), config);
-        sourceRoot.tryToParse().forEach(parseResult -> {
-            assert parseResult.getResult().isPresent();
-            units.add(parseResult.getResult().get());
-            problems.addAll(parseResult.getProblems());
-        });
-        if (!problems.isEmpty()) {
-            for (Problem p : problems)
-                System.out.println(" * " + p.getVerboseMessage());
-            throw new ParseException("Some problems were found while parsing files or folders");
-        }
-        return units;
+        // Use the same filtered file walk as the final parser so retained
+        // build/dependency/cache directories never enter preprocessing.
+        return finallyParseAllFiles(srcPath);
     }
 
     private static void preprocess1(NodeList<CompilationUnit> nodeList) {
@@ -224,10 +222,19 @@ public class PreprocessHelper {
         }, null);
     }
 
-    private static void writeBack(NodeList<CompilationUnit> units, String preprocessPath) throws IOException {
+    private static void writeBack(
+            NodeList<CompilationUnit> units,
+            String inputRootPath,
+            String preprocessPath
+    ) throws IOException {
+        Path inputRoot = Paths.get(inputRootPath).toAbsolutePath().normalize();
         for (CompilationUnit unit : units) {
             assert unit.getStorage().isPresent();
-            Path relativePath = unit.getStorage().get().getSourceRoot().relativize(unit.getStorage().get().getPath());
+            Path sourcePath = unit.getStorage().get().getPath().toAbsolutePath().normalize();
+            if (!sourcePath.startsWith(inputRoot)) {
+                throw new IOException("Parsed Java file is outside the input root: " + sourcePath);
+            }
+            Path relativePath = inputRoot.relativize(sourcePath);
             Path newPath = Paths.get(preprocessPath, relativePath.toString());
             Files.createDirectories(newPath.getParent());
             Files.write(newPath, unit.toString().getBytes());
@@ -278,7 +285,7 @@ public class PreprocessHelper {
         if (files == null)
             return;
         for (File f : files) {
-            if (f.isDirectory())
+            if (f.isDirectory() && !IGNORED_DIRECTORIES.contains(f.getName()))
                 findAllJavaFiles(f, builder);
             else if (f.getName().endsWith(".java"))
                 builder.accept(f);

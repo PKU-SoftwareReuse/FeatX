@@ -6,6 +6,11 @@ from collections import defaultdict
 from typing import Dict, List, Set, Tuple, Any, Optional
 
 class JavaMethodAnalyzer:
+    IGNORED_DIRECTORIES = {
+        ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+        "preprocess1", "delombok", "preprocess2"
+    }
+
     def __init__(self):
         # 存储方法信息：ID -> (方法签名, 方法代码, 类名, 文件名, 起始行, 结束行)
         self.methods: Dict[int, Tuple[str, str, str, str, int, int]] = {}
@@ -50,7 +55,8 @@ class JavaMethodAnalyzer:
     
     def _collect_java_files(self, root_dir: str) -> List[str]:
         java_files = []
-        for root, _, files in os.walk(root_dir):
+        for root, dirs, files in os.walk(root_dir):
+            dirs[:] = [name for name in dirs if name not in self.IGNORED_DIRECTORIES]
             for file in files:
                 if file.endswith(".java"):
                     java_files.append(os.path.join(root, file))

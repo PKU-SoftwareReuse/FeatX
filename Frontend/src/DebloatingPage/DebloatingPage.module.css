@@ -354,6 +354,15 @@
     overflow: visible;
 }
 
+.emptyDiff {
+    min-height: 300px;
+    display: grid;
+    padding: 24px;
+    color: #667085;
+    place-items: center;
+    text-align: center;
+}
+
 /* 加到你的 CSS 里 */
 [data-diff-symbol="+"]::before {
     content: "+";

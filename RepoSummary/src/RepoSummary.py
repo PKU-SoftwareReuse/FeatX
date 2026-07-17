@@ -26,6 +26,28 @@ from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+IGNORED_ANALYSIS_DIRECTORIES = {
+    ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+    "preprocess1", "delombok", "preprocess2"
+}
+
+
+def _analysis_root(repo_root: str, source_directory: str, extension: str) -> str:
+    conventional_root = os.path.join(repo_root, "src", "main", source_directory)
+    if os.path.isdir(conventional_root) and _has_source_files(conventional_root, extension):
+        return conventional_root
+    return repo_root
+
+
+def _has_source_files(root_path: str, extension: str) -> bool:
+    if not os.path.isdir(root_path):
+        return False
+    for root, dirs, files in os.walk(root_path):
+        dirs[:] = [name for name in dirs if name not in IGNORED_ANALYSIS_DIRECTORIES]
+        if any(file.endswith(extension) for file in files):
+            return True
+    return False
+
 load_dotenv()
 
 
@@ -133,6 +155,7 @@ def create_directory_summary(root_path):
     Files_summary = []
     num = 0
     for root, dirs, files in os.walk(root_path):
+        dirs[:] = [name for name in dirs if name not in IGNORED_ANALYSIS_DIRECTORIES]
         for file in files:
             if file.endswith(('.java')):
                 afile_path = os.path.join(root, file)
@@ -170,7 +193,13 @@ def normalize_java_class_name(value: Any) -> str:
 
 
 def java_class_path_from_file(path: str) -> str:
-    class_path = os.path.splitext(str(path))[0]
+    class_path = os.path.splitext(str(path))[0].replace("\\", "/")
+    lower_path = class_path.lower()
+    for marker in ("src/main/java/", "src/main/kotlin/", "java/"):
+        index = lower_path.find(marker)
+        if index >= 0:
+            class_path = class_path[index + len(marker):]
+            break
     return normalize_java_class_name(class_path)
 
 
@@ -1789,25 +1818,17 @@ def main(project_id):
     output_dir = os.path.join(here, "..", "output", str(project_id))
     output_dir = os.path.normpath(output_dir)
     repo_root = os.path.join(all_projects_dir, str(project_id))
-    java_root = os.path.join(repo_root, "src", "main", "java")
-    python_root = os.path.join(repo_root, "src", "main", "python")
+    java_root = _analysis_root(repo_root, "java", ".java")
+    python_root = _analysis_root(repo_root, "python", ".py")
 
-    def has_source(root_path: str, extension: str) -> bool:
-        if not os.path.isdir(root_path):
-            return False
-        for current_root, _, files in os.walk(root_path):
-            if any(file.endswith(extension) for file in files):
-                return True
-        return False
-
-    if has_source(java_root, ".java"):
+    if _has_source_files(java_root, ".java"):
         repo_summary(
             project_root=java_root,
             output_dir=output_dir
         )
         return
 
-    if has_source(python_root, ".py"):
+    if _has_source_files(python_root, ".py"):
         from . import python_repo_summary
 
         python_repo_summary.repo_summary(

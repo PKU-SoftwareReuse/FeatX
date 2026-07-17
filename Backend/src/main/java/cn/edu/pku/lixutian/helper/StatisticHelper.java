@@ -14,11 +14,17 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public class StatisticHelper {
+    private static final Set<String> IGNORED_DIRECTORIES = Set.of(
+            ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+            "preprocess1", "delombok", "preprocess2"
+    );
+
     public static Map<String, Integer> countInRepo(String repoPath) {
         return countJavaProject(repoPath);
     }
@@ -73,6 +79,9 @@ public class StatisticHelper {
 
         for (File file : files) {
             if (file.isDirectory()) {
+                if (IGNORED_DIRECTORIES.contains(file.getName())) {
+                    continue;
+                }
                 countInDir(file, totalLOC, totalClasses, totalMethods, totalFields, totalFiles); // 递归扫描子目录
             } else if (file.getName().endsWith(".java")) {
                 totalFiles.incrementAndGet();

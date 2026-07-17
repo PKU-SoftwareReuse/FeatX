@@ -127,6 +127,11 @@ def merge_db(package_db: RootDB) -> "DepDB":
 
 
 class AnalyzeManager:
+    IGNORED_DIRECTORIES = {
+        ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+        "preprocess1", "delombok", "preprocess2"
+    }
+
     def __init__(self, root_path: Path, builtin_path: ty.Optional[Path]):
         self.project_root = root_path
         self.root_db = RootDB(root_path)
@@ -146,6 +151,8 @@ class AnalyzeManager:
         if file_path.is_dir():
 
             for sub_file_path in file_path.iterdir():
+                if sub_file_path.name in self.IGNORED_DIRECTORIES:
+                    continue
                 if self.dir_structure_init(sub_file_path):
                     in_package = True
             if in_package:
@@ -174,6 +181,8 @@ class AnalyzeManager:
         print(path)
         if path.is_dir():
             for sub_file in path.iterdir():
+                if sub_file.name in self.IGNORED_DIRECTORIES:
+                    continue
                 self.iter_dir(sub_file)
         elif path.name.endswith(".py"):
             rel_path = path.relative_to(self.project_root.parent)

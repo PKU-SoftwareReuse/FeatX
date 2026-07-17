@@ -124,6 +124,10 @@ const API = {
             }
         }).then(response => response.data);
     },
+    getRepositoryDiff: () => {
+        return axios.get(`${BASE_URL}/code/repositoryDiff`)
+            .then(response => response.data);
+    },
 
     confirmDelete: () => {
         return axios.post(`${BASE_URL}/feature/confirm/delete`)

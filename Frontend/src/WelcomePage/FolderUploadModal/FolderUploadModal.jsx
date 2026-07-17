@@ -21,7 +21,7 @@ const UPLOAD_COPY = {
         openButton: "上传新代码仓库",
         title: "上传 Java 或 Python 项目",
         dragHint: "将项目文件夹拖到此处，或点击选择文件夹",
-        selectedFiles: (count) => `已选择 ${count} 个源文件`,
+        selectedFiles: (count) => `已选择 ${count} 个项目文件`,
         showingFiles: (count) => `仅显示前 ${count} 个文件`,
         reading: "正在读取文件夹……",
         repositoryName: "请输入代码仓库名称",
@@ -36,7 +36,7 @@ const UPLOAD_COPY = {
         openButton: "Upload New Repo",
         title: "Upload a Java or Python project",
         dragHint: "Drag a project folder here or click to select it",
-        selectedFiles: (count) => `${count} source files selected`,
+        selectedFiles: (count) => `${count} project files selected`,
         showingFiles: (count) => `Showing first ${count} files`,
         reading: "Reading folder...",
         repositoryName: "Please enter repo's name",
@@ -52,26 +52,6 @@ const isSourceFile = (path, projectType) => {
     return projectType === "JAVA" ? lowerPath.endsWith(".java") : lowerPath.endsWith(".py");
 };
 
-const stripThrough = (path, marker) => {
-    const lowerPath = path.toLowerCase();
-    const index = lowerPath.indexOf(marker);
-    return index >= 0 ? path.substring(index + marker.length) : path;
-};
-
-const stripPythonSourceRoot = (path) => {
-    const lowerPath = path.toLowerCase();
-    if (lowerPath.startsWith("src/")) {
-        return path.substring("src/".length);
-    }
-
-    const nestedSourceRootIndex = lowerPath.indexOf("/src/");
-    if (nestedSourceRootIndex >= 0) {
-        return path.substring(nestedSourceRootIndex + "/src/".length);
-    }
-
-    return path;
-};
-
 const sharedTopLevel = (paths) => {
     if (!paths.length) return "";
     const first = paths[0].split("/")[0];
@@ -84,19 +64,8 @@ const stripTopLevel = (path, topLevel) => {
     return path === topLevel ? "" : path.startsWith(`${topLevel}/`) ? path.substring(topLevel.length + 1) : path;
 };
 
-const normalizeSourcePath = (path, projectType, topLevel) => {
-    let sourcePath = stripTopLevel(normalizePath(path), topLevel);
-    if (projectType === "JAVA") {
-        sourcePath = stripThrough(sourcePath, "src/main/java/");
-        if (sourcePath.toLowerCase().startsWith("java/")) {
-            sourcePath = sourcePath.substring("java/".length);
-        }
-    } else {
-        sourcePath = stripThrough(sourcePath, "src/main/python/");
-        sourcePath = stripPythonSourceRoot(sourcePath);
-    }
-
-    return sourcePath
+const normalizeProjectPath = (path, topLevel) => {
+    return stripTopLevel(normalizePath(path), topLevel)
         .split("/")
         .filter(part => part && part !== "." && part !== "..")
         .join("/");
@@ -163,18 +132,20 @@ const analyzeFiles = (fileList) => {
     }
 
     const topLevel = sharedTopLevel(rawPaths);
-    const sourceFiles = files
-        .filter(file => isSourceFile(getRawPath(file), projectType))
+    const projectFiles = files
         .map(file => ({
             file,
-            path: normalizeSourcePath(getRawPath(file), projectType, topLevel),
+            path: normalizeProjectPath(getRawPath(file), topLevel),
         }))
         .filter(entry => entry.path);
+    const sourceFiles = projectFiles
+        .filter(({file}) => isSourceFile(getRawPath(file), projectType));
 
     return {
         projectType,
+        projectFiles,
         sourceFiles,
-        treeData: buildFileTree(sourceFiles.slice(0, SOURCE_TREE_LIMIT).map(entry => entry.path)),
+        treeData: buildFileTree(projectFiles.slice(0, SOURCE_TREE_LIMIT).map(entry => entry.path)),
         defaultFolderName: topLevel,
     };
 };
@@ -183,6 +154,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const {language} = useLanguage();
     const copy = UPLOAD_COPY[language];
     const [visible, setVisible] = useState(false);
+    const [projectFiles, setProjectFiles] = useState([]);
     const [sourceFiles, setSourceFiles] = useState([]);
     const [folderName, setFolderName] = useState("");
     const [uploaded, setUploaded] = useState(false);
@@ -213,6 +185,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         debounceRef.current = setTimeout(() => {
             const analysis = analyzeFiles(fileList);
             setProjectType(analysis.projectType);
+            setProjectFiles(analysis.projectFiles || []);
             setSourceFiles(analysis.sourceFiles);
             setTreeData(analysis.treeData);
 
@@ -249,13 +222,13 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             return;
         }
 
-        if (!sourceFiles.length || !folderName || !projectType) {
+        if (!projectFiles.length || !sourceFiles.length || !folderName || !projectType) {
             message.warning(copy.incomplete);
             return;
         }
 
         const projectData = new FormData();
-        sourceFiles.forEach(({file, path}) => {
+        projectFiles.forEach(({file, path}) => {
             projectData.append("files", file.originFileObj);
             projectData.append("paths", path);
         });
@@ -284,6 +257,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const handleCancel = () => {
         setVisible(false);
         setUploaded(false);
+        setProjectFiles([]);
         setSourceFiles([]);
         setTreeData([]);
         setFolderName("");
@@ -329,8 +303,8 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
                             <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
-                            <span>{copy.selectedFiles(sourceFiles.length.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
-                            {sourceFiles.length > SOURCE_TREE_LIMIT && (
+                            <span>{copy.selectedFiles(projectFiles.length.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
+                            {projectFiles.length > SOURCE_TREE_LIMIT && (
                                 <span>{copy.showingFiles(SOURCE_TREE_LIMIT.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
                             )}
                         </div>

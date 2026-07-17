@@ -18,6 +18,11 @@ import java.rmi.UnexpectedException;
 import java.util.*;
 
 public class ImportAnalyzer {
+    private static final Set<String> IGNORED_DIRECTORIES = Set.of(
+            ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+            "preprocess1", "delombok", "preprocess2"
+    );
+
     private static final Map<String, String> classToFileMap = new HashMap<>();
     private static final Map<String, Set<String>> packageClassesMap = new HashMap<>();
     private static final List<String> allClasses = new ArrayList<>();
@@ -52,6 +57,7 @@ public class ImportAnalyzer {
     private static void collectJavaFiles(Path root) throws IOException {
         Files.walk(root)
                 .filter(Files::isRegularFile)
+                .filter(p -> !hasIgnoredAncestor(root, p))
                 .filter(p -> p.toString().endsWith(".java"))
                 .forEach(p -> {
                     try {
@@ -90,6 +96,7 @@ public class ImportAnalyzer {
     private static void analyzeDependencies(Path root) throws IOException {
         Files.walk(root)
                 .filter(Files::isRegularFile)
+                .filter(p -> !hasIgnoredAncestor(root, p))
                 .filter(p -> p.toString().endsWith(".java"))
                 .forEach(p -> {
                     try {
@@ -139,6 +146,15 @@ public class ImportAnalyzer {
                         e.printStackTrace();
                     }
                 });
+    }
+
+    private static boolean hasIgnoredAncestor(Path root, Path path) {
+        for (Path part : root.relativize(path)) {
+            if (IGNORED_DIRECTORIES.contains(part.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void writeAdjacencyMatrix(String outputFile) throws IOException {

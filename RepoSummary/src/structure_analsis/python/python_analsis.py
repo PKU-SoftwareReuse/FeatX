@@ -6,6 +6,11 @@ from typing import Dict, List, Set, Tuple, Any, Optional
 from collections import defaultdict
 
 class PythonMethodAnalyzer:
+    IGNORED_DIRECTORIES = {
+        ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
+        "preprocess1", "delombok", "preprocess2"
+    }
+
     def __init__(self):
         # 存储函数信息：ID -> (函数签名, 函数代码, 类/模块名, 文件名, 起始行, 结束行)
         self.methods: Dict[int, Tuple[str, str, str, str, int, int]] = {}
@@ -71,7 +76,8 @@ class PythonMethodAnalyzer:
         python_files = []
         # DEBUG: 统计测试文件数量
         test_file_num = 0
-        for root, _, files in os.walk(root_dir):
+        for root, dirs, files in os.walk(root_dir):
+            dirs[:] = [name for name in dirs if name not in self.IGNORED_DIRECTORIES]
             for file in files:
                 relative_path = os.path.relpath(os.path.join(root, file), root_dir)
                 # 如果路径中包含 "test"，说明大概率是测试代码，不纳入分析

@@ -13,13 +13,26 @@ import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import com.github.javaparser.ast.body.TypeDeclaration;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/code")
 public class CodeDiffController {
+    private static final Set<String> GENERATED_DIRECTORIES = Set.of(
+            "preprocess1", "delombok", "preprocess2"
+    );
 
     @GetMapping("/deleteDiffByClass")
     public String deleteDiffByClass(@RequestParam String classId) throws IOException {
@@ -117,6 +130,92 @@ public class CodeDiffController {
         }
         // 从内存中获取新生成的代码
         return CodeDiffHelper.generateNewFeatureCode(classId);
+    }
+
+    @GetMapping("/repositoryDiff")
+    public String repositoryDiff() throws IOException, InterruptedException {
+        String projectPath = ProjectState.getInstance().getProjectPath();
+        if (projectPath == null || projectPath.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "No project is currently selected."
+            );
+        }
+        Path repoPath = Path.of(projectPath).normalize();
+        Path gitPath = repoPath.resolve(".git");
+        if (!Files.isDirectory(gitPath) && !Files.isRegularFile(gitPath)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The current project is not backed by a Git repository."
+            );
+        }
+
+        StringBuilder diff = new StringBuilder(runGitCommand(
+                repoPath,
+                List.of("git", "diff", "--no-ext-diff", "--unified=80", "HEAD", "--"),
+                0
+        ));
+
+        String untrackedOutput = runGitCommand(
+                repoPath,
+                List.of("git", "ls-files", "--others", "--exclude-standard", "-z"),
+                0
+        );
+        for (String relativePath : splitNullDelimited(untrackedOutput)) {
+            if (isGeneratedPath(relativePath)) {
+                continue;
+            }
+            diff.append(runGitCommand(
+                    repoPath,
+                    List.of("git", "diff", "--no-ext-diff", "--no-index", "--unified=80", "--", "/dev/null", relativePath),
+                    0, 1
+            ));
+        }
+        return diff.toString();
+    }
+
+    private boolean isGeneratedPath(String relativePath) {
+        for (Path part : Path.of(relativePath)) {
+            if (GENERATED_DIRECTORIES.contains(part.toString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String runGitCommand(Path workingDirectory, List<String> command, int... acceptedExitCodes)
+            throws IOException, InterruptedException {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(workingDirectory.toFile());
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(10, TimeUnit.SECONDS);
+        }
+
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!exited) {
+            throw new IOException("Git diff command timed out.\n" + output);
+        }
+
+        int exitCode = process.exitValue();
+        boolean accepted = Arrays.stream(acceptedExitCodes).anyMatch(code -> code == exitCode);
+        if (!accepted) {
+            throw new IOException("Git diff command failed with exit code " + exitCode + "\n" + output);
+        }
+        return output;
+    }
+
+    private List<String> splitNullDelimited(String output) {
+        List<String> paths = new ArrayList<>();
+        for (String path : output.split("\\u0000")) {
+            if (path != null && !path.isBlank()) {
+                paths.add(path);
+            }
+        }
+        return paths;
     }
 
 }

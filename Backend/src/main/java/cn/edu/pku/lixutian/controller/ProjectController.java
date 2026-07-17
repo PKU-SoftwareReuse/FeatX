@@ -26,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -169,7 +170,8 @@ public class ProjectController {
         );
         Path repoPath = repoPath(projectInfo.getId());
 
-        saveUploadedSourceFiles(files, paths, repoPath, type);
+        saveUploadedFiles(files, paths, repoPath);
+        initializeUploadedRepository(repoPath);
         finishProjectImport(projectInfo, type, repoPath);
     }
 
@@ -188,7 +190,7 @@ public class ProjectController {
         }
 
         ProjectType type = detectProjectType(listRelativePaths(stagingPath));
-        return new GitRepoPreviewResult(defaultRepoName(request), type.name(), listNormalizedSourcePaths(stagingPath, type));
+        return new GitRepoPreviewResult(defaultRepoName(request), type.name(), listNormalizedProjectPaths(stagingPath));
     }
 
     @PostMapping("/gitrepo")
@@ -212,7 +214,8 @@ public class ProjectController {
         );
 
         Path repoPath = repoPath(projectInfo.getId());
-        copySourceFiles(stagingPath, repoPath, type);
+        moveGitWorkspace(stagingPath, repoPath);
+        createFeatxBranch(repoPath, detectOriginalBranch(repoPath));
         finishProjectImport(projectInfo, type, repoPath);
         deleteDirectoryIfExists(stagingPath);
     }
@@ -261,16 +264,16 @@ public class ProjectController {
         return projectInfoRepository.save(projectInfo);
     }
 
-    private void saveUploadedSourceFiles(List<MultipartFile> files, List<String> paths, Path repoPath, ProjectType type) throws IOException {
+    private void saveUploadedFiles(List<MultipartFile> files, List<String> paths, Path repoPath) throws IOException {
         int savedFiles = 0;
-        Path targetRoot = sourceRoot(repoPath, type);
+        Path targetRoot = repoPath.normalize();
         for (int i = 0; i < files.size(); i++) {
             String originalPath = paths.get(i);
-            if (!isSourceFile(originalPath, type)) {
+            if (isRepositoryMetadataPath(Path.of(originalPath.replace("\\", "/")))) {
                 continue;
             }
 
-            String relativePath = normalizeSourcePath(originalPath, type);
+            String relativePath = normalizeProjectPath(originalPath);
             Path targetFile = safeResolve(targetRoot, relativePath);
             Files.createDirectories(targetFile.getParent());
             files.get(i).transferTo(targetFile);
@@ -282,25 +285,75 @@ public class ProjectController {
         }
     }
 
-    private void copySourceFiles(Path sourceRepoPath, Path targetRepoPath, ProjectType type) throws IOException {
-        List<Path> sourceFiles = listSourceFiles(sourceRepoPath, type);
-        if (sourceFiles.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No source files were found in the cloned project.");
+    private void initializeUploadedRepository(Path repoPath) throws IOException, InterruptedException {
+        runCommand(repoPath, List.of("git", "init", "-b", "main"));
+        runCommand(repoPath, List.of("git", "add", "-A"));
+        runCommand(repoPath, List.of(
+                "git", "-c", "user.name=FeatX", "-c", "user.email=featx@localhost",
+                "commit", "--allow-empty", "-m", "FeatX import baseline"
+        ));
+        createFeatxBranch(repoPath, "main");
+    }
+
+    private void moveGitWorkspace(Path sourceRepoPath, Path targetRepoPath) throws IOException {
+        Files.createDirectories(targetRepoPath.getParent());
+        try {
+            Files.move(sourceRepoPath, targetRepoPath, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException ignored) {
+            Files.move(sourceRepoPath, targetRepoPath);
+        }
+    }
+
+    private void createFeatxBranch(Path repoPath, String originalBranch) throws IOException, InterruptedException {
+        String branch = "featx-dev/" + normalizeBranchName(originalBranch);
+        runCommand(repoPath, List.of("git", "checkout", "-B", branch));
+    }
+
+    private String detectOriginalBranch(Path repoPath) {
+        String remoteHead = tryGitOutput(repoPath, List.of("git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"));
+        if (hasText(remoteHead)) {
+            String value = remoteHead.trim();
+            if (value.startsWith("origin/")) {
+                value = value.substring("origin/".length());
+            }
+            if (hasText(value) && !value.equals("HEAD")) {
+                return value;
+            }
         }
 
-        Path targetRoot = sourceRoot(targetRepoPath, type);
-        for (Path sourceFile : sourceFiles) {
-            String relativePath = normalizeSourcePath(sourceRepoPath.relativize(sourceFile).toString(), type);
-            Path targetFile = safeResolve(targetRoot, relativePath);
-            Files.createDirectories(targetFile.getParent());
-            Files.copy(sourceFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
+        String currentBranch = tryGitOutput(repoPath, List.of("git", "branch", "--show-current"));
+        return hasText(currentBranch) && !currentBranch.trim().equals("HEAD")
+                ? currentBranch.trim()
+                : "main";
+    }
+
+    private String normalizeBranchName(String value) {
+        String normalized = hasText(value) ? value.trim().replace('\\', '/') : "main";
+        normalized = normalized.replaceFirst("^origin/", "");
+        normalized = normalized.replaceAll("[^A-Za-z0-9._/-]+", "_");
+        normalized = normalized.replaceAll("/{2,}", "/");
+        normalized = normalized.replace("..", "_");
+        normalized = normalized.replaceAll("(?i)\\.lock(?=/|$)", "_lock");
+        normalized = normalized.replaceAll("^[/.-]+|[/.-]+$", "");
+        return hasText(normalized) ? normalized : "main";
+    }
+
+    private String tryGitOutput(Path workingDirectory, List<String> command) {
+        try {
+            return runCommandOutput(workingDirectory, command);
+        } catch (IOException | InterruptedException | ResponseStatusException ignored) {
+            if (ignored instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return "";
         }
     }
 
     private void finishProjectImport(ProjectInfo projectInfo, ProjectType type, Path repoPath) throws IOException {
+        Path analysisRoot = resolveAnalysisRoot(repoPath, type);
         Map<String, Integer> statisticInfo = type == ProjectType.JAVA
-                ? StatisticHelper.countJavaProject(sourceRoot(repoPath, type).toString())
-                : StatisticHelper.countPythonProject(sourceRoot(repoPath, type).toString());
+                ? StatisticHelper.countJavaProject(analysisRoot.toString())
+                : StatisticHelper.countPythonProject(analysisRoot.toString());
         projectInfo.setLoc(statisticInfo.get("loc"));
         projectInfo.setNoc(statisticInfo.get("noc"));
         projectInfo.setNom(statisticInfo.get("nom"));
@@ -388,31 +441,36 @@ public class ProjectController {
         }
     }
 
-    private List<String> listNormalizedSourcePaths(Path root, ProjectType type) throws IOException {
-        return listSourceFiles(root, type).stream()
-                .map(path -> normalizeSourcePath(root.relativize(path).toString(), type))
+    private List<String> listNormalizedProjectPaths(Path root) throws IOException {
+        return listProjectFiles(root).stream()
+                .map(path -> normalizeProjectPath(root.relativize(path).toString()))
                 .distinct()
                 .sorted()
                 .limit(1000)
                 .toList();
     }
 
+    private List<Path> listProjectFiles(Path root) throws IOException {
+        try (Stream<Path> stream = Files.walk(root)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> !isRepositoryMetadataPath(root.relativize(path)))
+                    .toList();
+        }
+    }
+
     private boolean isSourceFile(String path, ProjectType type) {
         return path != null && path.toLowerCase(Locale.ROOT).endsWith(type.extension);
     }
 
-    private String normalizeSourcePath(String rawPath, ProjectType type) {
-        String path = rawPath.replace("\\", "/");
-        String lowerPath = path.toLowerCase(Locale.ROOT);
+    private String normalizeProjectPath(String rawPath) {
+        if (rawPath == null || rawPath.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project path.");
+        }
 
-        if (type == ProjectType.JAVA) {
-            path = stripThrough(path, lowerPath, "src/main/java/");
-            if (path.toLowerCase(Locale.ROOT).startsWith("java/")) {
-                path = path.substring("java/".length());
-            }
-        } else {
-            path = stripThrough(path, lowerPath, "src/main/python/");
-            path = stripPythonSourceRoot(path);
+        String path = rawPath.replace("\\", "/");
+        if (path.startsWith("/") || path.matches("^[A-Za-z]:/.*")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid project path: " + rawPath);
         }
 
         String[] parts = path.split("/");
@@ -434,28 +492,6 @@ public class ProjectController {
         return sanitizedPath.toString();
     }
 
-    private String stripThrough(String path, String lowerPath, String marker) {
-        int index = lowerPath.indexOf(marker);
-        if (index < 0) {
-            return path;
-        }
-        return path.substring(index + marker.length());
-    }
-
-    private String stripPythonSourceRoot(String path) {
-        String lowerPath = path.toLowerCase(Locale.ROOT);
-        if (lowerPath.startsWith("src/")) {
-            return path.substring("src/".length());
-        }
-
-        int nestedSourceRootIndex = lowerPath.indexOf("/src/");
-        if (nestedSourceRootIndex >= 0) {
-            return path.substring(nestedSourceRootIndex + "/src/".length());
-        }
-
-        return path;
-    }
-
     private Path safeResolve(Path root, String relativePath) {
         Path normalizedRoot = root.normalize();
         Path target = normalizedRoot.resolve(relativePath).normalize();
@@ -471,6 +507,14 @@ public class ProjectController {
 
     private Path sourceRoot(Path repoPath, ProjectType type) {
         return repoPath.resolve(Path.of("src", "main", type.sourceDirectory));
+    }
+
+    private Path resolveAnalysisRoot(Path repoPath, ProjectType type) throws IOException {
+        Path conventionalRoot = sourceRoot(repoPath, type);
+        if (Files.isDirectory(conventionalRoot) && !listSourceFiles(conventionalRoot, type).isEmpty()) {
+            return conventionalRoot;
+        }
+        return repoPath;
     }
 
     private void validateGitRequest(GitRepoRequest request) {
@@ -567,6 +611,10 @@ public class ProjectController {
     }
 
     private void runCommand(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
+        runCommandOutput(workingDirectory, command);
+    }
+
+    private String runCommandOutput(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workingDirectory.toFile());
         applyGitProxy(processBuilder);
@@ -587,6 +635,7 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "Command failed: " + String.join(" ", command) + "\n" + output);
         }
+        return output;
     }
 
     private void applyGitProxy(ProcessBuilder processBuilder) {
@@ -638,7 +687,19 @@ public class ProjectController {
                     || Objects.equals(name, "__pycache__")
                     || Objects.equals(name, ".venv")
                     || Objects.equals(name, "venv")
-                    || Objects.equals(name, "env")) {
+                    || Objects.equals(name, "env")
+                    || Objects.equals(name, "preprocess1")
+                    || Objects.equals(name, "delombok")
+                    || Objects.equals(name, "preprocess2")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isRepositoryMetadataPath(Path path) {
+        for (Path part : path) {
+            if (Objects.equals(part.toString(), ".git")) {
                 return true;
             }
         }

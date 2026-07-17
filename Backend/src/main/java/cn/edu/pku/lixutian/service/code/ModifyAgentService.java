@@ -236,7 +236,7 @@ public class ModifyAgentService extends AgentService{
                 \"\"\"
                 %s
                 \"\"\"
-                4. 软件项目的完整文件列表（文件名、路径）
+                4. 软件项目的完整文件列表（文件名、路径；路径相对于原始 srcPath）
                 \"\"\"
                 %s
                 \"\"\"
@@ -292,7 +292,7 @@ public class ModifyAgentService extends AgentService{
                 \"\"\"
                 %s
                 \"\"\"
-                4. 软件项目中一些额外的参考（代码和理由）
+                4. 软件项目中一些额外的参考（代码和理由；路径相对于原始 srcPath）
                 \"\"\"
                 %s
                 \"\"\"
