@@ -16,4 +16,7 @@ __pycache__/
 
 out/
 
+# Local model weights are packaged into Docker images but are not source files.
+/models/
+
 /Py

@@ -21,6 +21,7 @@ from typing import List, Dict, Optional, Iterable, Any, Tuple
 
 from dotenv import load_dotenv
 
+from .llm_config import openai_base_url
 from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
 import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +62,7 @@ def get_openai_client() -> OpenAI:
     if openai_client is None:
         openai_client = OpenAI(
             api_key=api_key,
-            base_url=os.getenv("OPENAI_BASE_URL")
+            base_url=openai_base_url()
         )
     return openai_client
 

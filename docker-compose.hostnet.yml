@@ -43,7 +43,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://127.0.0.1:3307/${MYSQL_DATABASE:-lotm}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-featx}
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-featx}
-      LLM_API_URL: ${LLM_API_URL:-https://api.deepseek.com/chat/completions}
+      LLM_API_URL: ${LLM_API_URL:-https://api.deepseek.com}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-v4-pro}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
@@ -81,7 +81,6 @@ services:
     volumes:
       - featx-repos:/workspace/repos
       - featx-reposummary-output:/app/RepoSummary/output
-      - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     restart: unless-stopped
 
   frontend:

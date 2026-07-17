@@ -300,7 +300,7 @@ public class LlmClient {
                     "LLM API URL must be a base URL without /chat/completions"
             );
         }
-        return normalized;
+        return lowerCaseUrl.endsWith("/v1") ? normalized : normalized + "/v1";
     }
 
     private static String extractContentFromChunk(String jsonChunk) {

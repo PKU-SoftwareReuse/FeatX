@@ -27,6 +27,7 @@ RUN python3 -m venv /opt/reposummary-venv \
 COPY --from=backend-build /src/Backend/target/*.jar /app/featx-backend.jar
 COPY Backend/tools /app/Backend/tools
 COPY RepoSummary /app/RepoSummary
+COPY models /app/models
 
 RUN mkdir -p /workspace/repos
 COPY datasets/repos /workspace/repos

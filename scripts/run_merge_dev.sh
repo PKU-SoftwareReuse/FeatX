@@ -34,6 +34,8 @@ HOST_FRONTEND_CONTAINER=featx-merge-dev-frontend
 LEGACY_MYSQL_CONTAINER=featx_ae_current-mysql-1
 HOST_MYSQL_VOLUME=featx_ae_current_featx-mysql-data
 HOST_REPOS_VOLUME=featx_ae_current_featx-repos
+HOST_BASE_BACKEND_IMAGE=featx-backend-runtime:ase26
+HOST_MODEL_IMAGE=featx-models:ase26
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -227,6 +229,55 @@ image_exists() {
   docker image inspect "$1" >/dev/null 2>&1
 }
 
+model_tree_signature() {
+  local models_host="$1"
+  find "$models_host" -type f -printf '%P\t%s\t%T@\n' \
+    | LC_ALL=C sort \
+    | sha256sum \
+    | awk '{print $1}'
+}
+
+ensure_model_image() {
+  local models_host="$1"
+  local models_signature base_image_id current_signature current_base
+
+  if [[ ! -d "$models_host" ]]; then
+    echo "Models directory was not found: $models_host" >&2
+    echo "Put the required models under the project models/ directory before building." >&2
+    exit 1
+  fi
+
+  if ! image_exists "$HOST_BASE_BACKEND_IMAGE"; then
+    if ! image_exists featx-backend:ase26; then
+      echo "Base backend image is missing: featx-backend:ase26" >&2
+      exit 1
+    fi
+    docker tag featx-backend:ase26 "$HOST_BASE_BACKEND_IMAGE"
+  fi
+
+  models_signature="$(model_tree_signature "$models_host")"
+  base_image_id="$(docker image inspect "$HOST_BASE_BACKEND_IMAGE" --format '{{.Id}}')"
+  current_signature="$(docker image inspect "$HOST_MODEL_IMAGE" --format '{{index .Config.Labels "org.featx.models.signature"}}' 2>/dev/null || true)"
+  current_base="$(docker image inspect "$HOST_MODEL_IMAGE" --format '{{index .Config.Labels "org.featx.models.base"}}' 2>/dev/null || true)"
+
+  if [[ "$models_signature" == "$current_signature" && "$base_image_id" == "$current_base" ]]; then
+    return
+  fi
+
+  echo "Building model layer image from $models_host (about 7.5 GB on first build)..."
+  docker build --network host \
+    --build-arg "BASE_IMAGE=$HOST_BASE_BACKEND_IMAGE" \
+    --label "org.featx.models.signature=$models_signature" \
+    --label "org.featx.models.base=$base_image_id" \
+    -t "$HOST_MODEL_IMAGE" \
+    -f - "$models_host" <<'DOCKERFILE'
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+RUN rm -rf /app/models && mkdir -p /app/models
+COPY . /app/models
+DOCKERFILE
+}
+
 ensure_env_file() {
   if [[ ! -f .env ]]; then
     cp .env.example .env
@@ -283,7 +334,7 @@ prepare_mysql_port() {
 }
 
 host_overlay_build() {
-  local default_language
+  local default_language models_host
   default_language="$(read_env_value REACT_APP_DEFAULT_LANGUAGE CN)"
 
   if ! image_exists featx-backend:ase26 || ! image_exists featx-frontend:ase26; then
@@ -291,6 +342,12 @@ host_overlay_build() {
     echo "Use rootful Docker or run: FEATX_BUILD_MODE=compose scripts/run_merge_dev.sh up" >&2
     exit 1
   fi
+
+  models_host="$(read_env_value FEATX_MODELS_HOST ./models)"
+  if [[ "$models_host" != /* ]]; then
+    models_host="$ROOT_DIR/$models_host"
+  fi
+  ensure_model_image "$models_host"
 
   if command -v javac >/dev/null 2>&1; then
     echo "Building backend jar on host..."
@@ -328,7 +385,7 @@ host_overlay_build() {
   cp "$backend_jar" "$tmp_dir/backend/featx-backend.jar"
   cp -a RepoSummary "$tmp_dir/backend/RepoSummary"
   docker build --network host -t featx-backend:ase26 -f - "$tmp_dir/backend" <<'DOCKERFILE'
-FROM featx-backend:ase26
+FROM featx-models:ase26
 RUN command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*)
 COPY featx-backend.jar /app/featx-backend.jar
 RUN rm -rf /app/RepoSummary
@@ -448,8 +505,6 @@ start_host_stack() {
   local llm_api_url llm_api_key
   local openai_base_url openai_api_key openai_api_model sentence_transformer_model
   local git_proxy_host git_proxy_port
-  local models_host
-  local model_volume_args=()
 
   prepare_mysql_port
   mysql_root_password="$(read_env_value MYSQL_ROOT_PASSWORD featx_root)"
@@ -462,21 +517,9 @@ start_host_stack() {
   openai_api_key="$(read_env_value OPENAI_API_KEY "")"
   openai_api_model="$(read_env_value OPENAI_API_MODEL deepseek-v4-pro)"
   sentence_transformer_model="$(read_env_value SENTENCE_TRANSFORMER_MODEL sentence-transformers/all-mpnet-base-v2)"
-  models_host="$(read_env_value FEATX_MODELS_HOST ../models)"
   git_proxy_host="$(read_env_value GIT_PROXY_HOST 10.0.2.2)"
   git_proxy_port="$(read_env_value GIT_PROXY_PORT "")"
   git_proxy_host="$(prepare_git_proxy_host "$git_proxy_host" "$git_proxy_port")"
-
-  if [[ -n "$models_host" ]]; then
-    if [[ "$models_host" != /* ]]; then
-      models_host="$ROOT_DIR/$models_host"
-    fi
-    if [[ -d "$models_host" ]]; then
-      model_volume_args=(-v "$models_host:/app/models:ro")
-    else
-      echo "Models directory $models_host was not found; backend will use image/default model fallbacks." >&2
-    fi
-  fi
 
   docker volume create "$HOST_MYSQL_VOLUME" >/dev/null
   seed_repos_volume
@@ -518,7 +561,6 @@ start_host_stack() {
     -e REPOSUMMARY_PYTHON=/opt/reposummary-venv/bin/python \
     -e REPOSUMMARY_DIR=/app/RepoSummary \
     -e LOMBOK_JAR=/app/Backend/tools/lombok-1.18.36.jar \
-    "${model_volume_args[@]}" \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
     featx-backend:ase26 >/dev/null
 

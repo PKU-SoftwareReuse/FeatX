@@ -29,7 +29,7 @@ class LlmClientTest {
     void setUp() throws IOException {
         server = new MockWebServer();
         server.start();
-        client = new LlmClient(server.url("/v1/").toString(), "test-key");
+        client = new LlmClient(server.url("/").toString(), "test-key");
     }
 
     @AfterEach
@@ -71,6 +71,12 @@ class LlmClientTest {
                 IllegalArgumentException.class,
                 () -> new LlmClient("https://api.deepseek.com/chat/completions", "test-key")
         );
+    }
+
+    @Test
+    void baseUrlGetsTheApiVersionPathExactlyOnce() {
+        assertEquals("https://api.example.com/v1", LlmClient.normalizeBaseUrl("https://api.example.com"));
+        assertEquals("https://api.example.com/v1", LlmClient.normalizeBaseUrl("https://api.example.com/v1/"));
     }
 
     @Test

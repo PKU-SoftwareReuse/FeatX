@@ -15,6 +15,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from . import RepoSummary as fg_summary
+from .llm_config import openai_base_url
 from .structure_analsis.python.ENRE_py.enre.__main__ import main as enre_main
 
 
@@ -108,10 +109,9 @@ def _llm_description(file_path: str, rows: list[dict[str, str]]) -> tuple[str | 
     except Exception:
         return None, "fallback:missing_openai_package"
 
-    base_url = os.getenv("OPENAI_BASE_URL")
     model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
     timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
 
     snippets = []
     for row in rows[:5]:
@@ -1138,10 +1138,9 @@ def _llm_feature_description(feature: fg_summary.Feature) -> tuple[str | None, s
     except Exception:
         return None, "", "", "fallback:missing_openai_package"
 
-    base_url = os.getenv("OPENAI_BASE_URL")
     model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
     timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
     try:
         response = client.chat.completions.create(
             model=model,
@@ -1198,10 +1197,9 @@ def _llm_module_description(prompt: str, label: str) -> tuple[str | None, str]:
     except Exception:
         return None, "fallback:missing_openai_package"
 
-    base_url = os.getenv("OPENAI_BASE_URL")
     model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
     timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
     try:
         request = {
             "model": model,
