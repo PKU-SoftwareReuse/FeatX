@@ -128,6 +128,18 @@ const API = {
         return axios.get(`${BASE_URL}/code/repositoryDiff`)
             .then(response => response.data);
     },
+    getCandidateDiff: (classId, operation) => {
+        return axios.get(`${BASE_URL}/code/candidateDiff`, {
+            params: {classId, operation}
+        }).then(response => response.data);
+    },
+    updateCandidateDiff: (key, operation, content) => {
+        return axios.put(`${BASE_URL}/code/candidateDiff`, {
+            key,
+            operation,
+            content,
+        }).then(response => response.data);
+    },
 
     confirmDelete: () => {
         return axios.post(`${BASE_URL}/feature/confirm/delete`)

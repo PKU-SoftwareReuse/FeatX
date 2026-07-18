@@ -1,11 +1,13 @@
 package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.service.CandidateCodeService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,6 +23,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CodeDiffControllerTest {
     @Autowired
     private MockMvc mockMvc;
+
+    @MockitoBean
+    private CandidateCodeService candidateCodeService;
 
     @Test
     void repositoryDiffIncludesTrackedAndUntrackedFiles(@TempDir Path repoPath) throws Exception {

@@ -115,6 +115,9 @@ public class CodeMapService {
     @Autowired
     private GenerateImportLinesService generateImportLinesService;
 
+    @Autowired
+    private CandidateCodeService candidateCodeService;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -499,7 +502,12 @@ public class CodeMapService {
                 .filter(node -> node.getType() == "Modify")
                 .forEach(node -> {
                     try {
-                        RewriteFileHelper.rewriteFile(node.getId(), codeDiffController.deleteCodeByClass(node.getId()));
+                        Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(node.getId());
+                        if (editedContent.isPresent()) {
+                            RewriteFileHelper.rewriteJavaFileContent(node.getId(), editedContent.get());
+                        } else {
+                            RewriteFileHelper.rewriteFile(node.getId(), codeDiffController.deleteCodeByClass(node.getId()));
+                        }
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -626,6 +634,7 @@ public class CodeMapService {
         // 3. 生成import语句、更新邻接表、重写文件
         for (Map.Entry<String, String> entry : AgentService.modificationMap.entrySet()) {
             try {
+                Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(entry.getKey());
 
                 String allFiles = "";
                 List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
@@ -633,7 +642,9 @@ public class CodeMapService {
                     allFiles += javaFile + "\n";
                 }
                 // 3.1 生成import语句
-                List<String> importLines = generateImportLinesService.generate(entry.getKey(), entry.getValue(), allFiles);
+                List<String> importLines = editedContent.isPresent()
+                        ? RewriteFileHelper.extractJavaImportLines(editedContent.get())
+                        : generateImportLinesService.generate(entry.getKey(), entry.getValue(), allFiles);
                 // 3.2 更新邻接表
                 // 3.2.1 出边
                 Set<String> imports = new HashSet<>();
@@ -690,12 +701,19 @@ public class CodeMapService {
                     }
                 }
                 // 3.3 重写文件
-                RewriteFileHelper.rewriteFile(entry.getKey(), entry.getValue(), importLines);
+                if (editedContent.isPresent()) {
+                    RewriteFileHelper.rewriteJavaFileContent(entry.getKey(), editedContent.get());
+                } else {
+                    RewriteFileHelper.rewriteFile(entry.getKey(), entry.getValue(), importLines);
+                }
 
                 // 3.4 写入CodeMap数据库
                 try {
                     // 用 JavaParser 解析
-                    CompilationUnit cu = StaticJavaParser.parse(entry.getValue());
+                    String candidateBody = editedContent
+                            .map(RewriteFileHelper::stripJavaPackageAndImports)
+                            .orElse(entry.getValue());
+                    CompilationUnit cu = StaticJavaParser.parse(candidateBody);
 
                     // 访问所有方法
                     cu.findAll(MethodDeclaration.class).forEach(cd -> {

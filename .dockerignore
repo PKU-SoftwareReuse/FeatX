@@ -6,6 +6,8 @@ Thumbs.db
 gdshow
 Py
 out
+repos
+RepoSummary/output
 **/*.iml
 
 **/node_modules

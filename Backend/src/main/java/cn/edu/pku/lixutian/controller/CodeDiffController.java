@@ -2,6 +2,8 @@ package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.request.UpdateCodeFileRequest;
+import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.graph.SKG;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
@@ -11,6 +13,7 @@ import cn.edu.pku.lixutian.helper.graphAggregationHelper.DeleteHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.http.HttpStatus;
@@ -24,6 +27,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -33,6 +37,12 @@ public class CodeDiffController {
     private static final Set<String> GENERATED_DIRECTORIES = Set.of(
             "preprocess1", "delombok", "preprocess2"
     );
+
+    private final CandidateCodeService candidateCodeService;
+
+    public CodeDiffController(CandidateCodeService candidateCodeService) {
+        this.candidateCodeService = candidateCodeService;
+    }
 
     @GetMapping("/deleteDiffByClass")
     public String deleteDiffByClass(@RequestParam String classId) throws IOException {
@@ -130,6 +140,82 @@ public class CodeDiffController {
         }
         // 从内存中获取新生成的代码
         return CodeDiffHelper.generateNewFeatureCode(classId);
+    }
+
+    @GetMapping("/candidateDiff")
+    public CodeFileDiffResult candidateDiff(
+            @RequestParam String classId,
+            @RequestParam String operation
+    ) throws IOException, InterruptedException {
+        if (classId == null || classId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class or file id is required.");
+        }
+
+        try {
+            if (ProjectState.getInstance().isPython()) {
+                String filePath = CodeMapService.resolvePythonNodeToFile(classId);
+                Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
+                if (candidateEntry == null) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + filePath);
+                }
+                return candidateCodeService.preparePythonCandidate(filePath, filePath, candidateEntry.getValue());
+            }
+
+            Map.Entry<String, String> candidateEntry = "delete".equalsIgnoreCase(operation)
+                    ? Map.entry(classId, deleteCodeByClass(classId))
+                    : findCandidateEntry(classId, classId);
+            String candidate = candidateEntry == null ? null : candidateEntry.getValue();
+            if (candidate == null) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + classId);
+            }
+            return candidateCodeService.prepareJavaCandidate(candidateEntry.getKey(), operation, candidate);
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+        }
+    }
+
+    @PutMapping("/candidateDiff")
+    public CodeFileDiffResult updateCandidateDiff(@RequestBody UpdateCodeFileRequest request)
+            throws IOException, InterruptedException {
+        if (request == null || request.getKey() == null || request.getKey().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate file key is required.");
+        }
+        try {
+            return candidateCodeService.updateCandidate(
+                    request.getKey(),
+                    request.getOperation(),
+                    request.getContent()
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+        }
+    }
+
+    private Map.Entry<String, String> findCandidateEntry(String primaryKey, String fallbackKey) {
+        if (AgentService.modificationMap == null) {
+            return null;
+        }
+        String candidate = AgentService.modificationMap.get(primaryKey);
+        String candidateKey = primaryKey;
+        if (candidate == null && fallbackKey != null) {
+            candidate = AgentService.modificationMap.get(fallbackKey);
+            candidateKey = fallbackKey;
+        }
+        if (candidate != null) {
+            return Map.entry(candidateKey, candidate);
+        }
+        for (var entry : AgentService.modificationMap.entrySet()) {
+            if (entry.getKey().equals(primaryKey)
+                    || entry.getKey().endsWith("." + primaryKey)
+                    || primaryKey.endsWith("." + entry.getKey())) {
+                return Map.entry(entry.getKey(), entry.getValue());
+            }
+        }
+        return null;
     }
 
     @GetMapping("/repositoryDiff")

@@ -78,7 +78,11 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick}, ref) => {
             };
             dataRef.current = data; // 保存起来
 
-            networkRef.current = new Network(containerRef.current, data, GraphOption.options);
+            const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+            const networkOptions = reduceMotion
+                ? {...GraphOption.options, physics: {enabled: false}}
+                : GraphOption.options;
+            networkRef.current = new Network(containerRef.current, data, networkOptions);
 
             addClickHandler(networkRef, data);
             const firstNodeId = nodes[0]?.id;

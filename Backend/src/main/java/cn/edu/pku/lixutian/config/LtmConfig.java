@@ -23,4 +23,12 @@ public class LtmConfig {
     public static String getRepoPath() {
         return instance.repoPath;
     }
+
+    /**
+     * Instance accessor for services that receive the configuration through
+     * Spring injection. The static accessor above remains for legacy callers.
+     */
+    public String getConfiguredRepoPath() {
+        return repoPath;
+    }
 }

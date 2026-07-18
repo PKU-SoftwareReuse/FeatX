@@ -104,7 +104,7 @@
 }
 
 .debloatingPage {
-    --diff-drawer-width: 560px;
+    --diff-drawer-width: clamp(720px, 62vw, 980px);
 
     height: 100vh;
     height: 100dvh;
@@ -280,6 +280,7 @@
     top: 0;
     right: 0;
     z-index: 1000;
+    box-sizing: border-box;
     display: flex;
     width: min(var(--diff-drawer-width), 100vw);
     height: 100vh;
@@ -340,6 +341,12 @@
     flex: 0 0 34px;
 }
 
+.diffDrawerHeaderActions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .diffDrawerBody {
     min-height: 0;
     padding: 18px 20px 22px;
@@ -352,6 +359,93 @@
     min-height: 300px;
     max-height: none;
     overflow: visible;
+}
+
+.diffDrawerBodyEditor {
+    display: flex;
+    padding: 12px 16px 18px;
+    overflow: hidden;
+    flex-direction: column;
+}
+
+.diffDrawerBodyEditor > :global(.ant-spin-nested-loading),
+.diffDrawerBodyEditor > :global(.ant-spin-nested-loading) > :global(.ant-spin-container) {
+    height: 100%;
+    min-height: 0;
+}
+
+.diffDrawerBodyEditor > :global(.ant-spin-nested-loading) > :global(.ant-spin-container) {
+    display: flex;
+    flex-direction: column;
+}
+
+.candidateDiffWorkspace {
+    display: flex;
+    height: auto;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.gitDiffMeta {
+    display: flex;
+    min-height: 30px;
+    padding: 0 2px;
+    color: #475467;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.diffViewSwitch {
+    margin-left: auto;
+}
+
+.candidateEditorView,
+.gitPatchView {
+    min-height: 0;
+    flex: 1;
+}
+
+.candidateEditorView {
+    overflow: hidden;
+}
+
+.gitPatchView {
+    padding: 10px;
+    overflow: auto;
+    background: #f8fafc;
+    border: 1px solid #d8dee9;
+}
+
+.candidateViewHidden {
+    display: none;
+}
+
+.gitPatchView :global(.diff-container) {
+    min-height: 0;
+}
+
+.diffStatus,
+.diffStatusDanger {
+    display: inline-grid;
+    width: 22px;
+    height: 22px;
+    color: #087443;
+    background: #dff7eb;
+    border: 1px solid #a9e5c8;
+    border-radius: 4px;
+    place-items: center;
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.diffStatusDanger {
+    color: #b42318;
+    background: #fee4e2;
+    border-color: #fecdca;
 }
 
 .emptyDiff {

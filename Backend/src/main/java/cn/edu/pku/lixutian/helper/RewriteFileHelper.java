@@ -20,11 +20,18 @@ import java.util.Set;
 public class RewriteFileHelper {
 
     public static boolean isNewFile(String fullName) {
+        return !Files.exists(resolveJavaFilePath(fullName));
+    }
+
+    public static Path resolveJavaFilePath(String fullName) {
         String absoluteSrcPath = ProjectState.getInstance().getSrcPath();
         String relativePath = fullName.replace('.', File.separatorChar) + ".java";
-        Path filePath = Paths.get(absoluteSrcPath, relativePath);
-
-        return !Files.exists(filePath);
+        Path sourceRoot = Paths.get(absoluteSrcPath).normalize();
+        Path filePath = sourceRoot.resolve(relativePath).normalize();
+        if (!filePath.startsWith(sourceRoot)) {
+            throw new IllegalArgumentException("Invalid Java class name: " + fullName);
+        }
+        return filePath;
     }
 
     public static void rewriteFile(String fullName, String content) throws IOException {
@@ -32,9 +39,15 @@ public class RewriteFileHelper {
     }
 
     public static void rewriteFile(String fullName, String content, List<String> generatedImportLines) throws IOException {
-        String absoluteSrcPath = ProjectState.getInstance().getSrcPath();
-        String relativePath = fullName.replace('.', File.separatorChar) + ".java";
-        Path filePath = Paths.get(absoluteSrcPath, relativePath);
+        rewriteJavaFileContent(fullName, buildJavaFileContent(fullName, content, generatedImportLines));
+    }
+
+    public static String buildJavaFileContent(
+            String fullName,
+            String content,
+            List<String> generatedImportLines
+    ) throws IOException {
+        Path filePath = resolveJavaFilePath(fullName);
 
         String packageLine = "";
         List<String> importLines = new ArrayList<>();
@@ -79,10 +92,35 @@ public class RewriteFileHelper {
         }
         sb.append(javaBody).append("\n");
 
-        // === 覆盖写入文件 ===
+        return sb.toString();
+    }
+
+    public static void rewriteJavaFileContent(String fullName, String content) throws IOException {
+        Path filePath = resolveJavaFilePath(fullName);
         Files.createDirectories(filePath.getParent());
-        Files.writeString(filePath, sb.toString(), StandardCharsets.UTF_8,
+        Files.writeString(filePath, content, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    public static List<String> extractJavaImportLines(String content) {
+        if (content == null || content.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            CompilationUnit cu = StaticJavaParser.parse(content);
+            return cu.getImports().stream()
+                    .map(importDeclaration -> importDeclaration.toString().trim())
+                    .toList();
+        } catch (Exception ignored) {
+            List<String> imports = new ArrayList<>();
+            for (String line : content.split("\\R")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("import ") && trimmed.endsWith(";")) {
+                    imports.add(trimmed);
+                }
+            }
+            return imports;
+        }
     }
 
     public static String stripJavaPackageAndImports(String content) {

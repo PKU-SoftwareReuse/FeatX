@@ -1,8 +1,8 @@
 // DebloatingPage.jsx
 
 import styles from './DebloatingPage.module.css';
-import React, {useEffect, useMemo, useRef, useState} from "react";
-import {AutoComplete, Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select, message, Progress} from "antd";
+import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {Alert, AutoComplete, Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Segmented, Select, message, Progress} from "antd";
 import {
     CloseOutlined,
     DeleteTwoTone,
@@ -12,7 +12,8 @@ import {
     SearchOutlined,
     SwapOutlined,
     ApartmentOutlined,
-    DiffOutlined
+    DiffOutlined,
+    SaveOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
 
@@ -25,6 +26,7 @@ import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
+const GitDiffEditor = React.lazy(() => import("./GitDiffEditor/GitDiffEditor"));
 
 const DEBLOATING_COPY = {
     zh: {
@@ -55,6 +57,17 @@ const DEBLOATING_COPY = {
         fetchingCode: "正在获取代码详情。",
         noRepositoryChanges: "当前仓库没有未提交的 Git 变更。",
         failedFetchRepositoryDiff: "获取仓库 Git Diff 失败。",
+        candidateDiff: "候选代码 Git Diff",
+        failedFetchCandidateDiff: "获取候选代码 Git Diff 失败。",
+        saveCandidate: "保存编辑",
+        savingCandidate: "正在保存……",
+        candidateSaved: "候选代码已保存。",
+        failedSaveCandidate: "保存候选代码失败。",
+        saveBeforeApply: "请先保存编辑，再确认应用。",
+        saveBeforeClose: "当前编辑尚未保存。",
+        gitGeneratedDiff: "Git 生成的差异",
+        editorView: "编辑器",
+        patchView: "Git Patch",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
         confirmAllChanges: "确认所有代码变更",
         reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
@@ -111,6 +124,17 @@ const DEBLOATING_COPY = {
         fetchingCode: "Fetching code details.",
         noRepositoryChanges: "The repository has no uncommitted Git changes.",
         failedFetchRepositoryDiff: "Failed to fetch repository Git diff.",
+        candidateDiff: "Candidate Git Diff",
+        failedFetchCandidateDiff: "Failed to fetch candidate Git diff.",
+        saveCandidate: "Save edits",
+        savingCandidate: "Saving...",
+        candidateSaved: "Candidate code saved.",
+        failedSaveCandidate: "Failed to save candidate code.",
+        saveBeforeApply: "Save your edits before applying the change.",
+        saveBeforeClose: "The current edits have not been saved.",
+        gitGeneratedDiff: "Git-generated diff",
+        editorView: "Editor",
+        patchView: "Git Patch",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
         confirmAllChanges: "Confirm All Code Diff",
         reviewAllChanges: "Have you read all the diff(the node marked with red)?",
@@ -444,42 +468,67 @@ const DebloatingPage = () => {
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
     const [isRepositoryDiff, setIsRepositoryDiff] = useState(false);
     const [repositoryDiffError, setRepositoryDiffError] = useState(false);
+    const [isCandidateDiff, setIsCandidateDiff] = useState(false);
+    const [candidateFile, setCandidateFile] = useState(null);
+    const [candidateDraft, setCandidateDraft] = useState('');
+    const [candidateDirty, setCandidateDirty] = useState(false);
+    const [savingCandidate, setSavingCandidate] = useState(false);
+    const [candidateView, setCandidateView] = useState('editor');
+
+    const closeDiffDrawer = useCallback(() => {
+        if (isCandidateDiff && candidateDirty) {
+            message.warning(copy.saveBeforeClose);
+            return;
+        }
+        setDiffDrawerOpen(false);
+    }, [candidateDirty, copy.saveBeforeClose, isCandidateDiff]);
 
     useEffect(() => {
         if (!diffDrawerOpen) return undefined;
 
         const handleEscape = (event) => {
             if (event.key === 'Escape') {
-                setDiffDrawerOpen(false);
+                closeDiffDrawer();
             }
         };
 
         window.addEventListener('keydown', handleEscape);
         return () => window.removeEventListener('keydown', handleEscape);
-    }, [diffDrawerOpen]);
+    }, [closeDiffDrawer, diffDrawerOpen]);
 
     const getCodeDiff = (classNodeId) => {
+        if (isCandidateDiff && candidateDirty) {
+            message.warning(copy.saveBeforeClose);
+            return;
+        }
         setIsRepositoryDiff(false);
+        setIsCandidateDiff(false);
         setRepositoryDiffError(false);
+        setCandidateFile(null);
+        setCandidateDraft('');
+        setCandidateDirty(false);
+        setCandidateView('editor');
         setSelectedCodeNodeId(String(classNodeId));
         setDiffDrawerOpen(true);
         setLoadingCode(true)
 
-        // 检查当前选中的feature是否是新生成的feature
-        const isNewFeature = selectedFeatureItem && selectedFeatureItem.isNewGenerated;
+        const candidateReady = confirmEnabled
+            && (selectedType === "delete" || selectedType === "edit" || selectedType === "add");
 
-        if (isNewFeature) {
-            // 如果是新生成的feature，总是使用newFeatureCode接口
-            console.log('Fetching new feature code for classId:', classNodeId);
-            API.getNewFeatureCode(classNodeId).then((data) => {
-                console.log('Received new feature code:', data);
-                setCodeDiff(data);
-                setLoadingCode(false);
-            }).catch(error => {
-                console.error('Error fetching new feature code:', error);
-                setLoadingCode(false);
-                message.error(errorMessage(error, copy.failedFetchGeneratedCodeDiff))
-            });
+        if (candidateReady) {
+            API.getCandidateDiff(classNodeId, selectedType)
+                .then((data) => {
+                    setCandidateFile(data);
+                    setCandidateDraft(data.modifiedContent || '');
+                    setCodeDiff(data.diff || '');
+                    setIsCandidateDiff(true);
+                    setLoadingCode(false);
+                })
+                .catch((error) => {
+                    console.error('Error fetching candidate Git diff:', error);
+                    setLoadingCode(false);
+                    message.error(errorMessage(error, copy.failedFetchCandidateDiff));
+                });
         } else if (selectedType == "delete") {
             API.getDeleteDiffByClass(classNodeId).then((data) => {
                 setCodeDiff(data)
@@ -491,30 +540,15 @@ const DebloatingPage = () => {
                 // getCodeDiff(classNodeId)
             })
         } else if (selectedType == "edit" || selectedType === "add") {
-            if (!confirmEnabled) {
-                // 修改前显示Context
-                API.getContextByClass(classNodeId).then((data) => {
-                    setCodeDiff(data)
-                    setLoadingCode(false);
-                }).catch(error => {
-                    console.error('Error fetching code diff:', error)
-                    setLoadingCode(false);
-                    message.error(errorMessage(error, copy.failedFetchCodeContext))
-                    // getCodeDiff(classNodeId)
-                })
-            } else {
-                // 修改后显示 CodeDiff
-                API.getNewDiffByClass(classNodeId).then((data) => {
-                    setCodeDiff(data)
-                    setLoadingCode(false);
-                }).catch(error => {
-                    console.error('Error fetching code diff:', error)
-                    setLoadingCode(false);
-                    message.error(errorMessage(error, copy.failedFetchGeneratedCodeDiff))
-                    // getCodeDiff(classNodeId)
-                })
-            }
-
+            // Before code generation this remains the legacy, concatenated read-only context.
+            API.getContextByClass(classNodeId).then((data) => {
+                setCodeDiff(data)
+                setLoadingCode(false);
+            }).catch(error => {
+                console.error('Error fetching code diff:', error)
+                setLoadingCode(false);
+                message.error(errorMessage(error, copy.failedFetchCodeContext))
+            })
         } else if (selectedType == "select") {
             // 修改前显示Context
             API.getContextByClass(classNodeId).then((data) => {
@@ -535,7 +569,14 @@ const DebloatingPage = () => {
     }
 
     const getRepositoryDiff = () => {
+        if (isCandidateDiff && candidateDirty) {
+            message.warning(copy.saveBeforeClose);
+            return;
+        }
         setIsRepositoryDiff(true);
+        setIsCandidateDiff(false);
+        setCandidateFile(null);
+        setCandidateDirty(false);
         setRepositoryDiffError(false);
         setSelectedCodeNodeId('Git');
         setDiffDrawerOpen(true);
@@ -551,6 +592,35 @@ const DebloatingPage = () => {
                 setRepositoryDiffError(true);
                 setLoadingCode(false);
                 message.error(errorMessage(error, copy.failedFetchRepositoryDiff));
+            });
+    };
+
+    const saveCandidateDiff = (editorContent) => {
+        if (!candidateFile || savingCandidate) return;
+
+        const contentToSave = typeof editorContent === 'string' ? editorContent : candidateDraft;
+        if (contentToSave === (candidateFile.modifiedContent || '')) return;
+        setCandidateDraft(contentToSave);
+        setSavingCandidate(true);
+        API.updateCandidateDiff(candidateFile.key, selectedType, contentToSave)
+            .then((data) => {
+                setCandidateFile(data);
+                setCandidateDraft((currentDraft) => {
+                    const savedContent = data.modifiedContent || '';
+                    if (currentDraft === contentToSave) {
+                        setCandidateDirty(false);
+                        return savedContent;
+                    }
+                    setCandidateDirty(currentDraft !== savedContent);
+                    return currentDraft;
+                });
+                setCodeDiff(data.diff || '');
+                setSavingCandidate(false);
+                message.success(copy.candidateSaved);
+            })
+            .catch((error) => {
+                setSavingCandidate(false);
+                message.error(errorMessage(error, copy.failedSaveCandidate));
             });
     };
 
@@ -1200,6 +1270,7 @@ const DebloatingPage = () => {
                         handleSelect(res[0].featureList[0])
                     }
                     setLoadingConfirm(false);
+                    getRepositoryDiff();
                 })
                 .catch((error) => {
                     console.error('Error Confirm Delete Feature:', error)
@@ -1232,6 +1303,7 @@ const DebloatingPage = () => {
                         console.warn("未找到 featureId:", featureId);
                     }
                     setLoadingConfirm(false);
+                    getRepositoryDiff();
                 })
                 .catch((error) => {
                     console.error('Error Confirm Modify Feature:', error)
@@ -1264,6 +1336,7 @@ const DebloatingPage = () => {
                         console.warn("未找到 featureId:", featureId);
                     }
                     setLoadingConfirm(false);
+                    getRepositoryDiff();
                 })
                 .catch((error) => {
                     console.error('Error Confirm Add Feature:', error)
@@ -1297,7 +1370,7 @@ const DebloatingPage = () => {
                             [styles.workspaceWithDrawer]: diffDrawerOpen,
                         })}
                         onClick={() => {
-                            if (diffDrawerOpen) setDiffDrawerOpen(false);
+                            if (diffDrawerOpen) closeDiffDrawer();
                         }}
                     >
                         <Splitter className={styles.background_area}>
@@ -1526,20 +1599,83 @@ const DebloatingPage = () => {
                     >
                         <header className={styles.diffDrawerHeader}>
                             <div className={styles.diffDrawerTitle}>
-                                <h2>{isRepositoryDiff ? copy.repositoryDiff : copy.changesPanel}</h2>
-                                {selectedCodeNodeId && <p>{selectedCodeNodeId}</p>}
+                                <h2>{isRepositoryDiff
+                                    ? copy.repositoryDiff
+                                    : isCandidateDiff ? copy.candidateDiff : copy.changesPanel}</h2>
+                                {(candidateFile?.path || selectedCodeNodeId) && (
+                                    <p>{candidateFile?.path || selectedCodeNodeId}</p>
+                                )}
                             </div>
-                            <Button
-                                type="text"
-                                icon={<CloseOutlined/>}
-                                aria-label={copy.closeChangesPanel}
-                                className={styles.diffDrawerClose}
-                                onClick={() => setDiffDrawerOpen(false)}
-                            />
+                            <div className={styles.diffDrawerHeaderActions}>
+                                {isCandidateDiff && (
+                                    <Tooltip title={copy.saveCandidate}>
+                                        <Button
+                                            type="primary"
+                                            icon={<SaveOutlined/>}
+                                            loading={savingCandidate}
+                                            disabled={!candidateDirty}
+                                            onClick={() => saveCandidateDiff()}
+                                        >
+                                            {savingCandidate ? copy.savingCandidate : copy.saveCandidate}
+                                        </Button>
+                                    </Tooltip>
+                                )}
+                                <Button
+                                    type="text"
+                                    icon={<CloseOutlined/>}
+                                    aria-label={copy.closeChangesPanel}
+                                    className={styles.diffDrawerClose}
+                                    onClick={closeDiffDrawer}
+                                />
+                            </div>
                         </header>
-                        <div className={styles.diffDrawerBody}>
+                        <div className={classNames(styles.diffDrawerBody, {
+                            [styles.diffDrawerBodyEditor]: isCandidateDiff,
+                        })}>
                             <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
-                                {isRepositoryDiff && repositoryDiffError ? (
+                                {isCandidateDiff && candidateFile ? (
+                                    <div className={styles.candidateDiffWorkspace}>
+                                        <div className={styles.gitDiffMeta}>
+                                            <DiffOutlined/>
+                                            <span>{copy.gitGeneratedDiff}</span>
+                                            {candidateFile.newFile && <span className={styles.diffStatus}>A</span>}
+                                            {candidateFile.deleted && <span className={styles.diffStatusDanger}>D</span>}
+                                            <Segmented
+                                                className={styles.diffViewSwitch}
+                                                size="small"
+                                                value={candidateView}
+                                                onChange={setCandidateView}
+                                                options={[
+                                                    {label: copy.editorView, value: 'editor'},
+                                                    {label: copy.patchView, value: 'patch'},
+                                                ]}
+                                            />
+                                        </div>
+                                        {candidateFile.warning && (
+                                            <Alert type="warning" showIcon message={candidateFile.warning}/>
+                                        )}
+                                        <div className={classNames(styles.candidateEditorView, {
+                                            [styles.candidateViewHidden]: candidateView !== 'editor',
+                                        })}>
+                                            <React.Suspense fallback={<div className={styles.emptyDiff}>{copy.fetchingCode}</div>}>
+                                                <GitDiffEditor
+                                                    file={candidateFile}
+                                                    value={candidateDraft}
+                                                    onChange={(value) => {
+                                                        setCandidateDraft(value);
+                                                        setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
+                                                    }}
+                                                    onSave={saveCandidateDiff}
+                                                />
+                                            </React.Suspense>
+                                        </div>
+                                        <div className={classNames(styles.gitPatchView, {
+                                            [styles.candidateViewHidden]: candidateView !== 'patch',
+                                        })}>
+                                            <CodeDiffComponent diffText={codeDiff} isPlainCode={false}/>
+                                        </div>
+                                    </div>
+                                ) : isRepositoryDiff && repositoryDiffError ? (
                                     <div className={styles.emptyDiff}>{copy.failedFetchRepositoryDiff}</div>
                                 ) : isRepositoryDiff && !codeDiff.trim() ? (
                                     <div className={styles.emptyDiff}>{copy.noRepositoryChanges}</div>
@@ -1551,7 +1687,9 @@ const DebloatingPage = () => {
                                 )}
                                 {!isRepositoryDiff && (
                                     <Tooltip
-                                        title={!confirmEnabled ? copy.noSubmittedChanges : ""}
+                                        title={candidateDirty
+                                            ? copy.saveBeforeApply
+                                            : !confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
                                         <Popconfirm title={copy.confirmAllChanges}
                                                     description={copy.reviewAllChanges}
@@ -1562,8 +1700,7 @@ const DebloatingPage = () => {
                                             <div className={styles.centerButtonWrapper}>
                                                 <Button
                                                     type="primary"
-                                                    // onClick={confirmDiff}
-                                                    disabled={!confirmEnabled}
+                                                    disabled={!confirmEnabled || candidateDirty || savingCandidate}
                                                 >
                                                     {copy.applyChanges}
                                                 </Button>

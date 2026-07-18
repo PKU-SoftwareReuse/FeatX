@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.service.code.AddAgentService;
+import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import cn.edu.pku.lixutian.service.code.ModifyAgentService;
@@ -19,6 +20,7 @@ import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.ContextHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.FocusGraphContextService;
 import cn.edu.pku.lixutian.service.OperationProgressService;
 import cn.edu.pku.lixutian.service.llm.LlmClient;
@@ -34,6 +36,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @RestController
@@ -61,9 +64,13 @@ public class LlmController {
     @Autowired
     private LlmClient llmClient;
 
+    @Autowired
+    private CandidateCodeService candidateCodeService;
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public void modifyFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+        resetCandidateState();
         if (ProjectState.getInstance().isPython()) {
             modifyPythonFeature(request);
             return;
@@ -176,6 +183,7 @@ public class LlmController {
     }
 
     public void addFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+        resetCandidateState();
         if (ProjectState.getInstance().isPython()) {
             addPythonFeature(request);
             return;
@@ -269,6 +277,7 @@ public class LlmController {
     }
 
     public void deleteFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+        resetCandidateState();
         if (!ProjectState.getInstance().isPython()) {
             lastFocusGraphContext = null;
             mode = "delete";
@@ -527,6 +536,11 @@ public class LlmController {
             fileList.append(projectFile).append("\n");
         }
         return fileList.toString();
+    }
+
+    private void resetCandidateState() {
+        candidateCodeService.clear();
+        AgentService.modificationMap = Collections.emptyMap();
     }
 
 }

@@ -4,7 +4,6 @@ import time
 import json
 import random
 import sys
-import subprocess
 import tiktoken
 from pydantic import BaseModel, ValidationError
 from dataclasses import dataclass, field
@@ -18,6 +17,10 @@ import leidenalg as la
 from collections import defaultdict
 from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score, silhouette_score
 from typing import List, Dict, Optional, Iterable, Any, Tuple
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
@@ -1664,25 +1667,58 @@ def features_to_csv(features, method_clusters, filename):
 func_adj_matrix = None
 
 
-def repo_summary(project_root: str, output_dir: str):
-    # Java Import Analysis
+def _repo_id_from_project_root(project_root: str) -> str:
+    """Resolve the FeatX repository id for direct repo_summary callers."""
+    configured_root = os.getenv("LOTM_REPO_PATH")
+    if configured_root:
+        try:
+            relative = Path(project_root).resolve().relative_to(Path(configured_root).resolve())
+            if relative.parts:
+                return relative.parts[0]
+        except ValueError:
+            pass
+    raise RuntimeError(
+        "Java import analysis requires a repository id. Pass repo_id to repo_summary "
+        "or configure LOTM_REPO_PATH so it can be inferred from project_root."
+    )
 
-    # file_analyzer = JavaImportAnalyzer()
-    # file_analyzer.analyze_project(project_root, output_dir)
-    jar_path = os.path.join(BASE_DIR, "..", "jarTools","ImportAnalyzer-1.0-SNAPSHOT.jar")
-    jar_path = os.path.abspath(jar_path)
-    cmd = ['java', '-jar', jar_path] + [project_root, output_dir]
+
+def _request_java_import_matrix(repo_id: str, output_dir: str) -> None:
+    """Ask the Spring Boot Java service for the import matrix."""
+    backend_url = os.getenv("FEATX_BACKEND_URL")
+    if not backend_url:
+        backend_port = os.getenv("SERVER_PORT", "8080")
+        backend_url = f"http://127.0.0.1:{backend_port}"
+    endpoint = (
+        backend_url.rstrip("/")
+        + "/analysis/java/import-matrix?repoId="
+        + quote(str(repo_id), safe="")
+    )
+    timeout = float(os.getenv("FEATX_BACKEND_TIMEOUT_SECONDS", "120"))
+    request = Request(endpoint, headers={"Accept": "text/csv"}, method="GET")
     try:
-        # 执行命令并捕获输出
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"Error running JAR: {e}")
-        print(f"STDERR: {e.stderr}")
+        with urlopen(request, timeout=timeout) as response:
+            matrix = response.read()
+    except HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"Spring Boot Java import analysis returned HTTP {error.code}: {details}"
+        ) from error
+    except URLError as error:
+        raise RuntimeError(
+            f"Unable to reach Spring Boot Java import analysis at {endpoint}: {error.reason}"
+        ) from error
+
+    if not matrix.strip():
+        raise RuntimeError("Spring Boot Java import analysis returned an empty matrix.")
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    (output_path / "file_adj_matrix.csv").write_bytes(matrix)
+
+
+def repo_summary(project_root: str, output_dir: str, repo_id: Optional[str] = None):
+    # Java Import Analysis
+    _request_java_import_matrix(repo_id or _repo_id_from_project_root(project_root), output_dir)
 
     # Java Method Analysis
     method_analyzer = JavaMethodAnalyzer()
@@ -1824,7 +1860,8 @@ def main(project_id):
     if _has_source_files(java_root, ".java"):
         repo_summary(
             project_root=java_root,
-            output_dir=output_dir
+            output_dir=output_dir,
+            repo_id=str(project_id)
         )
         return
 

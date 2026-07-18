@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@csstools/normalize.css": "^12.1.1",
+    "@monaco-editor/react": "^4.7.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.2.0",
@@ -17,6 +18,7 @@
     "graphology-types": "^0.24.8",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.22",
+    "monaco-editor": "^0.52.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",

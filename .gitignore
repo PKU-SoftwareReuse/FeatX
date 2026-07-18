@@ -20,3 +20,6 @@ out/
 /models/
 
 /Py
+
+# Runtime repositories created/imported by FeatX.
+/repos/
