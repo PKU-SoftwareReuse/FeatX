@@ -140,13 +140,12 @@
     margin: 0 auto;
     min-height: 0;
     overflow: hidden;
-    transition: width 240ms ease;
+    transition: width 240ms ease, margin 240ms ease;
 }
 
 .workspaceWithDrawer {
-    width: calc(var(--workspace-container-width) - var(--diff-drawer-width));
-    margin-right: 0;
-    margin-left: var(--workspace-outer-gap);
+    width: calc(100vw - var(--diff-drawer-width));
+    margin: 0;
 }
 
 .background_area {
@@ -295,7 +294,7 @@
 .diffDrawer {
     position: fixed;
     top: 0;
-    right: var(--workspace-outer-gap);
+    right: 0;
     z-index: 1000;
     box-sizing: border-box;
     display: flex;

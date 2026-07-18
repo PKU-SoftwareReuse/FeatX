@@ -1526,10 +1526,9 @@ const DebloatingPage = () => {
         && focusGraphStages.length > 0;
 
     const workspaceContainerWidth = getWorkspaceContainerWidth(viewportWidth);
-    const workspaceOuterGap = Math.max(0, (viewportWidth - workspaceContainerWidth) / 2);
     const workspaceWidthWithDrawer = viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
         ? viewportWidth
-        : Math.max(0, workspaceContainerWidth - diffDrawerWidth);
+        : Math.max(0, viewportWidth - diffDrawerWidth);
     const featurePanelCondensed = diffDrawerOpen
         && viewportWidth > DIFF_DRAWER_OVERLAY_BREAKPOINT;
     const featurePanelDrawerSize = Math.round(Math.max(
@@ -1558,7 +1557,6 @@ const DebloatingPage = () => {
                     style={{
                         "--diff-drawer-width": `${diffDrawerWidth}px`,
                         "--workspace-container-width": `${workspaceContainerWidth}px`,
-                        "--workspace-outer-gap": `${workspaceOuterGap}px`,
                     }}
                 >
                     <main
