@@ -9,15 +9,24 @@ import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.ProcessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +54,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private CodeMapService codeMapService;
+
+    @Autowired
+    private ProjectController projectController;
 
     private ProjectInfo project;
 
@@ -115,5 +127,44 @@ class ProjectControllerTest {
                 .andExpect(status().isOk());
 
         verify(processService, never()).process();
+    }
+
+    @Test
+    void featxBranchCreationCannotEscapeIntoParentRepository(@TempDir Path parentRepo) throws Exception {
+        runGit(parentRepo, "init", "-b", "main");
+        Path importedProject = Files.createDirectory(parentRepo.resolve("imported-project"));
+
+        Method createFeatxBranch = ProjectController.class.getDeclaredMethod(
+                "createFeatxBranch", Path.class, String.class
+        );
+        createFeatxBranch.setAccessible(true);
+
+        InvocationTargetException exception = assertThrows(
+                InvocationTargetException.class,
+                () -> createFeatxBranch.invoke(projectController, importedProject, "main")
+        );
+        assertInstanceOf(org.springframework.web.server.ResponseStatusException.class, exception.getCause());
+        assertEquals("main", gitOutput(parentRepo, "branch", "--show-current").trim());
+    }
+
+    private void runGit(Path workingDirectory, String... arguments) throws IOException, InterruptedException {
+        assertEquals(0, gitProcess(workingDirectory, arguments).waitFor());
+    }
+
+    private String gitOutput(Path workingDirectory, String... arguments) throws IOException, InterruptedException {
+        Process process = gitProcess(workingDirectory, arguments);
+        String output = new String(process.getInputStream().readAllBytes());
+        assertEquals(0, process.waitFor(), output);
+        return output;
+    }
+
+    private Process gitProcess(Path workingDirectory, String... arguments) throws IOException {
+        String[] command = new String[arguments.length + 1];
+        command[0] = "git";
+        System.arraycopy(arguments, 0, command, 1, arguments.length);
+        return new ProcessBuilder(command)
+                .directory(workingDirectory.toFile())
+                .redirectErrorStream(true)
+                .start();
     }
 }

@@ -2,7 +2,7 @@
 
 import styles from './DebloatingPage.module.css';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Segmented, Select, message, Progress} from "antd";
+import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select, message, Progress} from "antd";
 import {
     CloseOutlined,
     DeleteTwoTone,
@@ -40,7 +40,6 @@ const DIFF_DRAWER_DEFAULT_RATIO = 0.42;
 const DIFF_DRAWER_MIN_WIDTH = 520;
 const DIFF_DRAWER_MAX_WIDTH = 980;
 const DIFF_DRAWER_OVERLAY_BREAKPOINT = 960;
-const DIFF_SIDE_BY_SIDE_MIN_WIDTH = 840;
 const FEATURE_PANEL_MINIMAL_WIDTH = 148;
 const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
@@ -119,8 +118,6 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "请先保存编辑，再确认应用。",
         saveBeforeClose: "当前编辑尚未保存。",
         gitGeneratedDiff: "Git 生成的差异",
-        editorView: "编辑器",
-        patchView: "Git Patch",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
         confirmAllChanges: "确认所有代码变更",
         reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
@@ -187,8 +184,6 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "Save your edits before applying the change.",
         saveBeforeClose: "The current edits have not been saved.",
         gitGeneratedDiff: "Git-generated diff",
-        editorView: "Editor",
-        patchView: "Git Patch",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
         confirmAllChanges: "Confirm All Code Diff",
         reviewAllChanges: "Have you read all the diff(the node marked with red)?",
@@ -592,7 +587,6 @@ const DebloatingPage = () => {
     const [candidateDraft, setCandidateDraft] = useState('');
     const [candidateDirty, setCandidateDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
-    const [candidateView, setCandidateView] = useState('editor');
 
     useEffect(() => {
         const handleWindowResize = () => {
@@ -685,7 +679,6 @@ const DebloatingPage = () => {
         setCandidateFile(null);
         setCandidateDraft('');
         setCandidateDirty(false);
-        setCandidateView('editor');
         setSelectedCodeNodeId(String(classNodeId));
         setDiffDrawerOpen(true);
         setLoadingCode(true)
@@ -1881,23 +1874,11 @@ const DebloatingPage = () => {
                                             <span>{copy.gitGeneratedDiff}</span>
                                             {candidateFile.newFile && <span className={styles.diffStatus}>A</span>}
                                             {candidateFile.deleted && <span className={styles.diffStatusDanger}>D</span>}
-                                            <Segmented
-                                                className={styles.diffViewSwitch}
-                                                size="small"
-                                                value={candidateView}
-                                                onChange={setCandidateView}
-                                                options={[
-                                                    {label: copy.editorView, value: 'editor'},
-                                                    {label: copy.patchView, value: 'patch'},
-                                                ]}
-                                            />
                                         </div>
                                         {candidateFile.warning && (
                                             <Alert type="warning" showIcon message={candidateFile.warning}/>
                                         )}
-                                        <div className={classNames(styles.candidateEditorView, {
-                                            [styles.candidateViewHidden]: candidateView !== 'editor',
-                                        })}>
+                                        <div className={styles.candidateEditorView}>
                                             <React.Suspense fallback={<div className={styles.emptyDiff}>{copy.fetchingCode}</div>}>
                                                 <GitDiffEditor
                                                     file={candidateFile}
@@ -1907,18 +1888,8 @@ const DebloatingPage = () => {
                                                         setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
                                                     }}
                                                     onSave={saveCandidateDiff}
-                                                    renderSideBySide={diffDrawerWidth >= DIFF_SIDE_BY_SIDE_MIN_WIDTH}
                                                 />
                                             </React.Suspense>
-                                        </div>
-                                        <div className={classNames(styles.gitPatchView, {
-                                            [styles.candidateViewHidden]: candidateView !== 'patch',
-                                        })}>
-                                            <CodeDiffComponent
-                                                diffText={codeDiff}
-                                                isPlainCode={false}
-                                                showFileHeader={false}
-                                            />
                                         </div>
                                     </div>
                                 ) : isRepositoryDiff && repositoryDiffError ? (

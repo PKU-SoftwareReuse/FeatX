@@ -466,33 +466,10 @@
     font-size: 11px;
 }
 
-.diffViewSwitch {
-    margin-left: auto;
-}
-
-.candidateEditorView,
-.gitPatchView {
+.candidateEditorView {
     min-height: 0;
     flex: 1;
-}
-
-.candidateEditorView {
     overflow: hidden;
-}
-
-.gitPatchView {
-    padding: 0;
-    overflow: hidden;
-    background: #fff;
-    border: 0;
-}
-
-.candidateViewHidden {
-    display: none;
-}
-
-.gitPatchView :global(.diff-container) {
-    min-height: 0;
 }
 
 .diffStatus,

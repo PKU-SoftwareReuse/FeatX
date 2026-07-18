@@ -6,7 +6,7 @@ import styles from "./GitDiffEditor.module.css";
 
 loader.config({monaco});
 
-const GitDiffEditor = ({file, value, onChange, onSave, renderSideBySide = true, readOnly = false}) => {
+const GitDiffEditor = ({file, value, onChange, onSave, readOnly = false}) => {
     const changeSubscriptionRef = useRef(null);
     const onChangeRef = useRef(onChange);
     const onSaveRef = useRef(onSave);
@@ -29,17 +29,22 @@ const GitDiffEditor = ({file, value, onChange, onSave, renderSideBySide = true, 
         originalEditor.updateOptions({
             readOnly: true,
             domReadOnly: true,
-            folding: !readOnly,
-            glyphMargin: !readOnly,
-            lineDecorationsWidth: readOnly ? 0 : 10,
-            lineNumbers: readOnly ? "off" : "on",
-            lineNumbersMinChars: readOnly ? 0 : 5,
+            folding: false,
+            glyphMargin: false,
+            lineDecorationsWidth: 0,
+            lineNumbers: "off",
+            lineNumbersMinChars: 0,
         });
         const originalEditorNode = originalEditor.getDomNode();
         if (originalEditorNode) {
-            originalEditorNode.style.visibility = readOnly ? "hidden" : "";
+            originalEditorNode.style.visibility = "hidden";
         }
-        modifiedEditor.updateOptions({readOnly, domReadOnly: readOnly});
+        modifiedEditor.updateOptions({
+            readOnly,
+            domReadOnly: readOnly,
+            lineNumbers: "on",
+            lineNumbersMinChars: 4,
+        });
         if (!readOnly) {
             changeSubscriptionRef.current = modifiedEditor.onDidChangeModelContent(() => {
                 onChangeRef.current?.(modifiedEditor.getValue());
@@ -62,7 +67,7 @@ const GitDiffEditor = ({file, value, onChange, onSave, renderSideBySide = true, 
                 loading={<div className={styles.loading}>Loading editor...</div>}
                 options={{
                     automaticLayout: true,
-                    enableSplitViewResizing: true,
+                    enableSplitViewResizing: false,
                     fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
                     fontSize: 12,
                     glyphMargin: true,
@@ -74,9 +79,7 @@ const GitDiffEditor = ({file, value, onChange, onSave, renderSideBySide = true, 
                     renderMarginRevertIcon: !readOnly,
                     renderIndicators: true,
                     renderOverviewRuler: true,
-                    renderSideBySide,
-                    renderSideBySideInlineBreakpoint: 800,
-                    useInlineViewWhenSpaceIsLimited: true,
+                    renderSideBySide: false,
                     scrollBeyondLastLine: false,
                     smoothScrolling: true,
                     wordWrap: "off",

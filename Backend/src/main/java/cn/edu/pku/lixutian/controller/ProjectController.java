@@ -305,8 +305,32 @@ public class ProjectController {
     }
 
     private void createFeatxBranch(Path repoPath, String originalBranch) throws IOException, InterruptedException {
+        assertStandaloneGitRepository(repoPath);
         String branch = "featx-dev/" + normalizeBranchName(originalBranch);
         runCommand(repoPath, List.of("git", "checkout", "-B", branch));
+    }
+
+    private void assertStandaloneGitRepository(Path repoPath) throws IOException, InterruptedException {
+        Path expectedRoot = repoPath.toAbsolutePath().normalize();
+        Path gitMetadata = expectedRoot.resolve(".git");
+        if (!Files.isDirectory(gitMetadata) && !Files.isRegularFile(gitMetadata)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The imported project is not backed by its own Git repository."
+            );
+        }
+
+        String topLevelOutput = runCommandOutput(
+                expectedRoot,
+                List.of("git", "rev-parse", "--show-toplevel")
+        ).trim();
+        Path actualRoot = Path.of(topLevelOutput).toRealPath();
+        if (!expectedRoot.toRealPath().equals(actualRoot)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Git repository root does not match the imported project directory."
+            );
+        }
     }
 
     private String detectOriginalBranch(Path repoPath) {
@@ -617,6 +641,7 @@ public class ProjectController {
     private String runCommandOutput(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(workingDirectory.toFile());
+        applyGitRepositoryBoundary(processBuilder, workingDirectory, command);
         applyGitProxy(processBuilder);
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
@@ -636,6 +661,20 @@ public class ProjectController {
                     "Command failed: " + String.join(" ", command) + "\n" + output);
         }
         return output;
+    }
+
+    private void applyGitRepositoryBoundary(
+            ProcessBuilder processBuilder,
+            Path workingDirectory,
+            List<String> command
+    ) {
+        if (command.isEmpty() || !Objects.equals(Path.of(command.get(0)).getFileName().toString(), "git")) {
+            return;
+        }
+        Path boundary = workingDirectory.toAbsolutePath().normalize().getParent();
+        if (boundary != null) {
+            processBuilder.environment().put("GIT_CEILING_DIRECTORIES", boundary.toString());
+        }
     }
 
     private void applyGitProxy(ProcessBuilder processBuilder) {

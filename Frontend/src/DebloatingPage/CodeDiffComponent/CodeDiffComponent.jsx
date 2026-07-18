@@ -155,7 +155,6 @@ const CodeDiffComponent = ({diffText, isPlainCode = false, showFileHeader = true
                         file={selectedFile}
                         value={selectedFile.modifiedContent}
                         readOnly
-                        renderSideBySide={false}
                     />
                 </React.Suspense>
             </div>
