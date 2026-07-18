@@ -6,7 +6,7 @@ import styles from "./GitDiffEditor.module.css";
 
 loader.config({monaco});
 
-const GitDiffEditor = ({file, value, onChange, onSave}) => {
+const GitDiffEditor = ({file, value, onChange, onSave, renderSideBySide = true, readOnly = false}) => {
     const changeSubscriptionRef = useRef(null);
     const onChangeRef = useRef(onChange);
     const onSaveRef = useRef(onSave);
@@ -26,14 +26,28 @@ const GitDiffEditor = ({file, value, onChange, onSave}) => {
         changeSubscriptionRef.current?.dispose();
         const originalEditor = editor.getOriginalEditor();
         const modifiedEditor = editor.getModifiedEditor();
-        originalEditor.updateOptions({readOnly: true, domReadOnly: true});
-        modifiedEditor.updateOptions({readOnly: false, domReadOnly: false});
-        changeSubscriptionRef.current = modifiedEditor.onDidChangeModelContent(() => {
-            onChangeRef.current?.(modifiedEditor.getValue());
+        originalEditor.updateOptions({
+            readOnly: true,
+            domReadOnly: true,
+            folding: !readOnly,
+            glyphMargin: !readOnly,
+            lineDecorationsWidth: readOnly ? 0 : 10,
+            lineNumbers: readOnly ? "off" : "on",
+            lineNumbersMinChars: readOnly ? 0 : 5,
         });
-        modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-            onSaveRef.current?.(modifiedEditor.getValue());
-        });
+        const originalEditorNode = originalEditor.getDomNode();
+        if (originalEditorNode) {
+            originalEditorNode.style.visibility = readOnly ? "hidden" : "";
+        }
+        modifiedEditor.updateOptions({readOnly, domReadOnly: readOnly});
+        if (!readOnly) {
+            changeSubscriptionRef.current = modifiedEditor.onDidChangeModelContent(() => {
+                onChangeRef.current?.(modifiedEditor.getValue());
+            });
+            modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+                onSaveRef.current?.(modifiedEditor.getValue());
+            });
+        }
     };
 
     return (
@@ -50,14 +64,19 @@ const GitDiffEditor = ({file, value, onChange, onSave}) => {
                     automaticLayout: true,
                     enableSplitViewResizing: true,
                     fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
-                    fontSize: 13,
+                    fontSize: 12,
                     glyphMargin: true,
                     lineNumbers: "on",
                     minimap: {enabled: false},
                     originalEditable: false,
+                    readOnly,
+                    domReadOnly: readOnly,
+                    renderMarginRevertIcon: !readOnly,
                     renderIndicators: true,
                     renderOverviewRuler: true,
-                    renderSideBySide: true,
+                    renderSideBySide,
+                    renderSideBySideInlineBreakpoint: 800,
+                    useInlineViewWhenSpaceIsLimited: true,
                     scrollBeyondLastLine: false,
                     smoothScrolling: true,
                     wordWrap: "off",

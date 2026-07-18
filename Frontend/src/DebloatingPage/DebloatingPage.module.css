@@ -19,7 +19,7 @@
     align-items: center;   /* 垂直居中 */
     position: relative;    /* 为右侧图标定位做准备 */
     justify-content: center; /* 文字居中 */
-    font-size: 26px;
+    font-size: 22px;
 }
 
 .panelActions {
@@ -30,13 +30,20 @@
     gap: 4px;
 }
 
+.graphPanelCardCompact .card_title {
+    box-sizing: border-box;
+    padding-right: 108px;
+    justify-content: flex-start;
+    font-size: 18px;
+}
+
 .modelControl {
     display: flex;
     max-width: 100%;
     align-items: center;
     gap: 6px;
     min-width: 0;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 400;
     white-space: nowrap;
 }
@@ -79,19 +86,11 @@
 }
 
 .featurePanelCardCompressed .card_title {
-    font-size: 20px;
+    font-size: 16px;
 }
 
-.featurePanelCardCompressed .modelControl {
-    gap: 0;
-}
-
-.featurePanelCardCompressed .modelLabel {
+.featurePanelCardCompressed :global(.ant-card-extra) {
     display: none;
-}
-
-.featurePanelCardCompressed .modelSelect {
-    width: 96px;
 }
 
 .main_area {
@@ -104,13 +103,23 @@
 }
 
 .debloatingPage {
-    --diff-drawer-width: clamp(720px, 62vw, 980px);
-
     height: 100vh;
     height: 100dvh;
     min-height: 0;
     overflow: hidden;
     background: #f0f2f5;
+    font-size: 13px;
+}
+
+.debloatingPage :global(.ant-alert),
+.debloatingPage :global(.ant-btn),
+.debloatingPage :global(.ant-card),
+.debloatingPage :global(.ant-collapse),
+.debloatingPage :global(.ant-input),
+.debloatingPage :global(.ant-list),
+.debloatingPage :global(.ant-segmented),
+.debloatingPage :global(.ant-select) {
+    font-size: 13px;
 }
 
 .pageSpin {
@@ -126,15 +135,18 @@
 }
 
 .workspace {
-    width: 100%;
+    width: var(--workspace-container-width);
     height: 100%;
+    margin: 0 auto;
     min-height: 0;
     overflow: hidden;
     transition: width 240ms ease;
 }
 
 .workspaceWithDrawer {
-    width: calc(100% - var(--diff-drawer-width));
+    width: calc(var(--workspace-container-width) - var(--diff-drawer-width));
+    margin-right: 0;
+    margin-left: var(--workspace-outer-gap);
 }
 
 .background_area {
@@ -147,6 +159,11 @@
 .background_area > .main_area {
     padding: 16px;
     overflow: hidden;
+}
+
+.background_area > .featurePanelAreaMinimal {
+    padding-right: 8px;
+    padding-left: 8px;
 }
 
 .panelShell {
@@ -205,7 +222,7 @@
 .featureSearchOptionTitle {
     overflow-wrap: anywhere;
     color: #202938;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.4;
     white-space: normal;
 }
@@ -213,7 +230,7 @@
 .featureSearchOptionModule {
     overflow: hidden;
     color: #667085;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -255,8 +272,8 @@
 .featureListProgressMessage {
     margin-bottom: 8px;
     color: #1f2d3d;
-    font-size: 13px;
-    line-height: 18px;
+    font-size: 12px;
+    line-height: 17px;
 }
 
 .panelSpin > :global(.ant-spin-container) {
@@ -278,7 +295,7 @@
 .diffDrawer {
     position: fixed;
     top: 0;
-    right: 0;
+    right: var(--workspace-outer-gap);
     z-index: 1000;
     box-sizing: border-box;
     display: flex;
@@ -302,6 +319,49 @@
     transition: transform 220ms ease;
 }
 
+.diffDrawerResizeHandle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -7px;
+    z-index: 2;
+    width: 14px;
+    padding: 0;
+    touch-action: none;
+    cursor: col-resize;
+    background: transparent;
+    border: 0;
+    outline: none;
+}
+
+.diffDrawerResizeHandle::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 6px;
+    width: 2px;
+    content: "";
+    background: #1677ff;
+    opacity: 0;
+    transition: opacity 160ms ease;
+}
+
+.diffDrawerResizeHandle:hover::after,
+.diffDrawerResizeHandle:focus-visible::after,
+.diffDrawerResizing .diffDrawerResizeHandle::after {
+    opacity: 1;
+}
+
+.diffDrawerResizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+.diffDrawerResizing .workspace,
+.diffDrawerResizing .diffDrawer {
+    transition: none;
+}
+
 .diffDrawerHeader {
     display: flex;
     padding: 18px 20px 14px;
@@ -318,7 +378,7 @@
 .diffDrawerTitle h2 {
     margin: 0;
     overflow-wrap: anywhere;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 700;
     line-height: 1.35;
 }
@@ -328,7 +388,7 @@
     overflow-wrap: anywhere;
     color: #667085;
     font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 11px;
     line-height: 1.5;
 }
 
@@ -348,17 +408,25 @@
 }
 
 .diffDrawerBody {
+    display: flex;
     min-height: 0;
     padding: 18px 20px 22px;
     overflow: auto;
     flex: 1;
+    flex-direction: column;
 }
 
 .diffDrawerBody :global(.diff-container) {
-    height: auto;
-    min-height: 300px;
-    max-height: none;
-    overflow: visible;
+    height: 100%;
+    min-height: 420px;
+    overflow: hidden;
+}
+
+.diffDrawerBody > :global(.ant-spin-nested-loading),
+.diffDrawerBody > :global(.ant-spin-nested-loading) > :global(.ant-spin-container) {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
 }
 
 .diffDrawerBodyEditor {
@@ -395,7 +463,7 @@
     color: #475467;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 11px;
 }
 
 .diffViewSwitch {
@@ -413,10 +481,10 @@
 }
 
 .gitPatchView {
-    padding: 10px;
-    overflow: auto;
-    background: #f8fafc;
-    border: 1px solid #d8dee9;
+    padding: 0;
+    overflow: hidden;
+    background: #fff;
+    border: 0;
 }
 
 .candidateViewHidden {
@@ -438,7 +506,7 @@
     border-radius: 4px;
     place-items: center;
     font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -496,7 +564,7 @@
 
 .moduleTitle {
     font-weight: bold;
-    font-size: 15px;
+    font-size: 13px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -519,7 +587,20 @@
     flex: 1;
 }
 
+.featureNumber,
+.moduleNumber {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.featureEditor {
+    display: grid;
+    min-width: 0;
+    gap: 8px;
+}
+
 .featureDescription {
+    font-size: 13px;
     line-height: 1.5715;
     overflow-wrap: anywhere;
 }
@@ -539,13 +620,124 @@
     flex-direction: row;
 }
 
+.featurePanelCardCompressed :global(.ant-card-head) {
+    min-height: 56px;
+    padding: 0 12px;
+}
+
+.featurePanelCardCompressed :global(.ant-card-body) {
+    padding: 12px !important;
+}
+
+.featurePanelCardMinimal .card_title {
+    font-size: 18px;
+}
+
+.featurePanelCardMinimal .featureSearch {
+    display: none;
+}
+
+.featurePanelCardMinimal .featurePanelBody {
+    gap: 0;
+}
+
+.featurePanelCardMinimal .moduleCollapse :global(.ant-collapse-content-box) {
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+}
+
+.moduleHeading {
+    min-width: 0;
+    overflow: hidden;
+    flex: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.featurePanelCardMinimal .moduleDescription {
+    display: none;
+}
+
+.featurePanelCardMinimal .moduleTitle {
+    min-width: 0;
+    gap: 2px;
+}
+
+.featurePanelCardMinimal .iconContainer {
+    margin-left: 0;
+}
+
+.featureItemCondensed {
+    box-sizing: border-box;
+    min-height: 72px;
+    overflow: hidden;
+}
+
+.featureItemCondensed .featureContent {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.featureItemCondensed .featureDescription {
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: var(--feature-line-clamp, 3);
+}
+
+.featureItemMinimal {
+    display: grid !important;
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+    grid-template-columns: minmax(38px, 1fr) 56px;
+    align-content: start;
+    align-items: start !important;
+    gap: 2px;
+}
+
+.featureItemMinimal .featureContent {
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+}
+
+.featureActionsMinimal {
+    width: 56px;
+    min-width: 56px;
+    margin-left: 0;
+    align-items: center;
+    justify-content: flex-end;
+    flex-direction: row;
+}
+
+.featureActionsMinimal :global(.ant-btn) {
+    width: 28px;
+    min-width: 28px;
+    height: 30px;
+    padding: 3px;
+}
+
 .moduleCollapse {
     background: #fff;
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 960px) {
+    .workspace,
     .workspaceWithDrawer {
         width: 100%;
+        margin-right: 0;
+        margin-left: 0;
+    }
+
+    .diffDrawer {
+        right: 0;
+        width: 100vw;
+    }
+
+    .diffDrawerResizeHandle {
+        display: none;
     }
 }
 
@@ -559,6 +751,7 @@
     .workspace,
     .diffDrawer,
     .diffDrawerOpen,
+    .diffDrawerResizeHandle::after,
     .modelSelect {
         transition: none;
     }

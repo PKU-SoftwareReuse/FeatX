@@ -2,7 +2,7 @@
 
 import styles from './DebloatingPage.module.css';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Alert, AutoComplete, Splitter, Collapse, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Segmented, Select, message, Progress} from "antd";
+import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Segmented, Select, message, Progress} from "antd";
 import {
     CloseOutlined,
     DeleteTwoTone,
@@ -28,6 +28,58 @@ const {Panel} = Collapse;
 const {TextArea} = Input;
 const GitDiffEditor = React.lazy(() => import("./GitDiffEditor/GitDiffEditor"));
 
+const DEBLOATING_THEME = {
+    token: {
+        fontSize: 13,
+        fontSizeSM: 12,
+        fontSizeLG: 14,
+    },
+};
+
+const DIFF_DRAWER_DEFAULT_RATIO = 0.42;
+const DIFF_DRAWER_MIN_WIDTH = 520;
+const DIFF_DRAWER_MAX_WIDTH = 980;
+const DIFF_DRAWER_OVERLAY_BREAKPOINT = 960;
+const DIFF_SIDE_BY_SIDE_MIN_WIDTH = 840;
+const FEATURE_PANEL_MINIMAL_WIDTH = 148;
+const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
+const GRAPH_PANEL_TARGET_WIDTH = 440;
+const WORKSPACE_MAX_WIDTH = 1600;
+
+const getWorkspaceSideGap = (viewportWidth) => (
+    viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
+        ? 0
+        : Math.round(Math.min(56, Math.max(24, viewportWidth * 0.03)))
+);
+
+const getWorkspaceContainerWidth = (viewportWidth) => Math.min(
+    WORKSPACE_MAX_WIDTH,
+    viewportWidth - getWorkspaceSideGap(viewportWidth) * 2
+);
+
+const getDiffDrawerWidthBounds = () => {
+    const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
+    if (viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT) {
+        return {min: viewportWidth, max: viewportWidth};
+    }
+
+    const max = Math.max(0, Math.min(
+        DIFF_DRAWER_MAX_WIDTH,
+        getWorkspaceContainerWidth(viewportWidth) - 420
+    ));
+    return {min: Math.min(DIFF_DRAWER_MIN_WIDTH, max), max};
+};
+
+const clampDiffDrawerWidth = (width) => {
+    const {min, max} = getDiffDrawerWidthBounds();
+    return Math.round(Math.min(max, Math.max(min, width)));
+};
+
+const getDefaultDiffDrawerWidth = () => {
+    const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
+    return clampDiffDrawerWidth(viewportWidth * DIFF_DRAWER_DEFAULT_RATIO);
+};
+
 const DEBLOATING_COPY = {
     zh: {
         noAction: "当前没有可执行的操作",
@@ -51,6 +103,7 @@ const DEBLOATING_COPY = {
         graphPanel: "相关代码图谱",
         fetchingGraph: "正在获取相关代码图谱。",
         changesPanel: "代码变更",
+        resizeChangesPanel: "调整代码变更面板宽度，双击恢复默认宽度",
         viewRepositoryDiff: "查看仓库 Git Diff",
         repositoryDiff: "仓库 Git Diff",
         closeChangesPanel: "关闭代码变更",
@@ -118,6 +171,7 @@ const DEBLOATING_COPY = {
         graphPanel: "CodeMap Panel",
         fetchingGraph: "fetching codeMap.",
         changesPanel: "Diff Panel",
+        resizeChangesPanel: "Resize the diff panel; double-click to reset",
         viewRepositoryDiff: "View repository Git diff",
         repositoryDiff: "Repository Git Diff",
         closeChangesPanel: "Close Diff Panel",
@@ -193,14 +247,50 @@ const FeatureListItem = ({
     submitEdit,
     handleDelete,
     handleEdit,
+    compressed,
+    minimal,
 }) => {
     const descriptionRef = useRef(null);
+    const featureContentRef = useRef(null);
     const [singleLine, setSingleLine] = useState(false);
+    const [preservedHeight, setPreservedHeight] = useState(null);
+    const [preservedLineCount, setPreservedLineCount] = useState(1);
     const isSelected = selectedFeatureItem != null
         && item.featureId === selectedFeatureItem.featureId;
     const isEditing = (selectedType === "edit" || selectedType === "add") && isSelected;
 
     useEffect(() => {
+        if (compressed || !featureContentRef.current) return undefined;
+
+        const itemElement = featureContentRef.current.closest("[data-feature-id]");
+        if (!itemElement) return undefined;
+
+        const measureHeight = () => {
+            const height = Math.ceil(itemElement.getBoundingClientRect().height);
+            if (height > 0) {
+                setPreservedHeight((current) => current === height ? current : height);
+            }
+        };
+
+        const frameId = window.requestAnimationFrame(measureHeight);
+        if (typeof ResizeObserver === "undefined") {
+            window.addEventListener("resize", measureHeight);
+            return () => {
+                window.cancelAnimationFrame(frameId);
+                window.removeEventListener("resize", measureHeight);
+            };
+        }
+
+        const observer = new ResizeObserver(measureHeight);
+        observer.observe(itemElement);
+        return () => {
+            window.cancelAnimationFrame(frameId);
+            observer.disconnect();
+        };
+    }, [compressed, description, isEditing, itemNumber]);
+
+    useEffect(() => {
+        if (compressed) return undefined;
         if (isEditing || !descriptionRef.current) {
             setSingleLine(false);
             return undefined;
@@ -212,7 +302,12 @@ const FeatureListItem = ({
             const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight);
             const fontSize = Number.parseFloat(computedStyle.fontSize) || 14;
             const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.2;
-            setSingleLine(descriptionElement.getBoundingClientRect().height <= lineHeight * 1.4);
+            const lineCount = Math.max(
+                1,
+                Math.round(descriptionElement.getBoundingClientRect().height / lineHeight)
+            );
+            setSingleLine(lineCount === 1);
+            setPreservedLineCount((current) => current === lineCount ? current : lineCount);
         };
 
         const frameId = window.requestAnimationFrame(measureLineCount);
@@ -230,7 +325,7 @@ const FeatureListItem = ({
             window.cancelAnimationFrame(frameId);
             observer.disconnect();
         };
-    }, [description, isEditing, itemNumber]);
+    }, [compressed, description, isEditing, itemNumber]);
 
     return (
         <List.Item
@@ -240,13 +335,28 @@ const FeatureListItem = ({
             className={classNames({
                 [styles.item]: true,
                 [styles.selectedItem]: isSelected,
+                [styles.featureItemCondensed]: compressed,
+                [styles.featureItemMinimal]: minimal,
             })}
+            style={compressed && preservedHeight ? {
+                height: `${preservedHeight}px`,
+                minHeight: `${preservedHeight}px`,
+                maxHeight: `${preservedHeight}px`,
+                "--feature-line-clamp": preservedLineCount,
+            } : undefined}
         >
-            <div className={styles.featureContent}>
-                {isEditing ? (
+            <div ref={featureContentRef} className={styles.featureContent}>
+                {minimal ? (
+                    <span className={styles.featureNumber}>{itemNumber}</span>
+                ) : compressed ? (
+                    <div className={styles.featureDescription}>
+                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
+                        <span>{description}</span>
+                    </div>
+                ) : isEditing ? (
                     <Tooltip title={!submitEnabled ? copy.pendingChanges : ""}>
-                        <div>
-                            <span>{itemNumber} </span>
+                        <div className={styles.featureEditor}>
+                            <span className={styles.featureNumber}>{itemNumber}</span>
                             <TextArea
                                 value={editedText}
                                 onChange={(event) => setEditedText(event.target.value)}
@@ -266,12 +376,14 @@ const FeatureListItem = ({
                     </Tooltip>
                 ) : (
                     <div ref={descriptionRef} className={styles.featureDescription}>
-                        {itemNumber} {description}
+                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
+                        <span>{description}</span>
                     </div>
                 )}
             </div>
             <div className={classNames(styles.featureActions, {
                 [styles.featureActionsSingleLine]: singleLine,
+                [styles.featureActionsMinimal]: minimal,
             })}>
                 <Button
                     type="text"
@@ -465,6 +577,13 @@ const DebloatingPage = () => {
 
     const [codeDiff, setCodeDiff] = useState('');
     const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+    const [diffDrawerWidth, setDiffDrawerWidth] = useState(getDefaultDiffDrawerWidth);
+    const [diffDrawerResizing, setDiffDrawerResizing] = useState(false);
+    const [viewportWidth, setViewportWidth] = useState(() => (
+        typeof window === "undefined" ? 1440 : window.innerWidth
+    ));
+    const [featurePanelSize, setFeaturePanelSize] = useState("45%");
+    const drawerResizeRef = useRef(null);
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
     const [isRepositoryDiff, setIsRepositoryDiff] = useState(false);
     const [repositoryDiffError, setRepositoryDiffError] = useState(false);
@@ -474,6 +593,65 @@ const DebloatingPage = () => {
     const [candidateDirty, setCandidateDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
     const [candidateView, setCandidateView] = useState('editor');
+
+    useEffect(() => {
+        const handleWindowResize = () => {
+            setViewportWidth(window.innerWidth);
+            setDiffDrawerWidth((width) => clampDiffDrawerWidth(width));
+        };
+        window.addEventListener('resize', handleWindowResize);
+        return () => window.removeEventListener('resize', handleWindowResize);
+    }, []);
+
+    const startDrawerResize = useCallback((event) => {
+        if (event.button !== 0 || window.innerWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.focus();
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        drawerResizeRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: diffDrawerWidth,
+        };
+        setDiffDrawerResizing(true);
+    }, [diffDrawerWidth]);
+
+    const resizeDrawer = useCallback((event) => {
+        const resize = drawerResizeRef.current;
+        if (!resize || resize.pointerId !== event.pointerId) return;
+        setDiffDrawerWidth(clampDiffDrawerWidth(
+            resize.startWidth + resize.startX - event.clientX
+        ));
+    }, []);
+
+    const stopDrawerResize = useCallback((event) => {
+        const resize = drawerResizeRef.current;
+        if (!resize || (event.pointerId != null && resize.pointerId !== event.pointerId)) return;
+        drawerResizeRef.current = null;
+        setDiffDrawerResizing(false);
+        if (event.currentTarget?.hasPointerCapture?.(resize.pointerId)) {
+            event.currentTarget.releasePointerCapture(resize.pointerId);
+        }
+    }, []);
+
+    const resizeDrawerWithKeyboard = useCallback((event) => {
+        if (window.innerWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT) return;
+        const step = event.shiftKey ? 64 : 16;
+        let nextWidth = null;
+        if (event.key === 'ArrowLeft') nextWidth = diffDrawerWidth + step;
+        if (event.key === 'ArrowRight') nextWidth = diffDrawerWidth - step;
+        if (event.key === 'Home') nextWidth = getDiffDrawerWidthBounds().min;
+        if (event.key === 'End') nextWidth = getDiffDrawerWidthBounds().max;
+        if (nextWidth == null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDiffDrawerWidth(clampDiffDrawerWidth(nextWidth));
+    }, [diffDrawerWidth]);
+
+    const resetDrawerWidth = useCallback(() => {
+        setDiffDrawerWidth(getDefaultDiffDrawerWidth());
+    }, []);
 
     const closeDiffDrawer = useCallback(() => {
         if (isCandidateDiff && candidateDirty) {
@@ -1354,9 +1532,25 @@ const DebloatingPage = () => {
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
 
+    const workspaceContainerWidth = getWorkspaceContainerWidth(viewportWidth);
+    const workspaceOuterGap = Math.max(0, (viewportWidth - workspaceContainerWidth) / 2);
+    const workspaceWidthWithDrawer = viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
+        ? viewportWidth
+        : Math.max(0, workspaceContainerWidth - diffDrawerWidth);
+    const featurePanelCondensed = diffDrawerOpen
+        && viewportWidth > DIFF_DRAWER_OVERLAY_BREAKPOINT;
+    const featurePanelDrawerSize = Math.round(Math.max(
+        FEATURE_PANEL_MINIMAL_WIDTH,
+        Math.min(380, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
+    ));
+    const featurePanelMinimal = featurePanelCondensed
+        && featurePanelDrawerSize < FEATURE_PANEL_DESCRIPTION_MIN_WIDTH;
+    const graphPanelCompact = featurePanelCondensed
+        && workspaceWidthWithDrawer - featurePanelDrawerSize < 480;
+
 
     return (
-        <>
+        <ConfigProvider theme={DEBLOATING_THEME}>
             {contextHolder}
             <Spin
                 wrapperClassName={styles.pageSpin}
@@ -1364,30 +1558,49 @@ const DebloatingPage = () => {
                 tip={copy.applyingChanges}
                 size={"large"}
             >
-                <div className={styles.debloatingPage}>
+                <div
+                    className={classNames(styles.debloatingPage, {
+                        [styles.diffDrawerResizing]: diffDrawerResizing,
+                    })}
+                    style={{
+                        "--diff-drawer-width": `${diffDrawerWidth}px`,
+                        "--workspace-container-width": `${workspaceContainerWidth}px`,
+                        "--workspace-outer-gap": `${workspaceOuterGap}px`,
+                    }}
+                >
                     <main
                         className={classNames(styles.workspace, {
                             [styles.workspaceWithDrawer]: diffDrawerOpen,
                         })}
-                        onClick={() => {
-                            if (diffDrawerOpen) closeDiffDrawer();
-                        }}
                     >
-                        <Splitter className={styles.background_area}>
+                        <Splitter
+                            className={styles.background_area}
+                            onResize={(sizes) => {
+                                if (!diffDrawerOpen && Number.isFinite(sizes[0])) {
+                                    setFeaturePanelSize(sizes[0]);
+                                }
+                            }}
+                        >
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel
-                        defaultSize="45%"
-                        min="20%"
-                        max="60%"
-                        className={styles.main_area}
+                        size={featurePanelCondensed ? featurePanelDrawerSize : featurePanelSize}
+                        min={featurePanelCondensed ? featurePanelDrawerSize : "20%"}
+                        max={featurePanelCondensed ? featurePanelDrawerSize : "60%"}
+                        resizable={!featurePanelCondensed}
+                        className={classNames(styles.main_area, {
+                            [styles.featurePanelAreaMinimal]: featurePanelMinimal,
+                        })}
                     >
                         <Card
                             className={classNames(styles.panelCard, styles.featurePanelCard, {
-                                [styles.featurePanelCardCompressed]: diffDrawerOpen,
+                                [styles.featurePanelCardCompressed]: featurePanelCondensed,
+                                [styles.featurePanelCardMinimal]: featurePanelMinimal,
                             })}
                             title={
                                 <div className={styles.card_title} title={copy.featurePanel}>
-                                    {copy.featurePanel}
+                                    {featurePanelMinimal
+                                        ? (language === "zh" ? "功" : "F")
+                                        : copy.featurePanel}
                                 </div>
                             }
                             extra={
@@ -1448,7 +1661,12 @@ const DebloatingPage = () => {
                                             <Panel
                                                 header={
                                                     <div className={styles.moduleTitle}>
-                                                        <div>{`${moduleIndex + 1}. ${getModuleDescription(module, language)}`}</div>
+                                                        <div className={styles.moduleHeading}>
+                                                            <span className={styles.moduleNumber}>{moduleIndex + 1}.</span>{" "}
+                                                            <span className={styles.moduleDescription}>
+                                                                {getModuleDescription(module, language)}
+                                                            </span>
+                                                        </div>
                                                         <div className={styles.iconContainer}>
                                                             <Button
                                                                 type="text"
@@ -1491,6 +1709,8 @@ const DebloatingPage = () => {
                                                                 submitEdit={submitEdit}
                                                                 handleDelete={handleDelete}
                                                                 handleEdit={handleEdit}
+                                                                compressed={featurePanelCondensed}
+                                                                minimal={featurePanelMinimal}
                                                             />
                                                         );
                                                     }}
@@ -1506,10 +1726,12 @@ const DebloatingPage = () => {
 
 
                     {/*中间功能去臃肿详情*/}
-                    <Splitter.Panel min="55%" className={styles.main_area}>
+                    <Splitter.Panel min={featurePanelCondensed ? 0 : "55%"} className={styles.main_area}>
                         <div className={styles.panelShell}>
                             <Card
-                                className={styles.panelCard}
+                                className={classNames(styles.panelCard, {
+                                    [styles.graphPanelCardCompact]: graphPanelCompact,
+                                })}
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
@@ -1580,6 +1802,7 @@ const DebloatingPage = () => {
                                             ref={featureGraphRef}
                                             graphData={graphData}
                                             onNodeClick={getCodeDiff}
+                                            nodeFontSize={17}
                                         />
                                     </Spin>
                                 </div>
@@ -1597,6 +1820,24 @@ const DebloatingPage = () => {
                         aria-hidden={!diffDrawerOpen}
                         aria-label={copy.changesPanel}
                     >
+                        <div
+                            className={styles.diffDrawerResizeHandle}
+                            role="separator"
+                            aria-label={copy.resizeChangesPanel}
+                            aria-orientation="vertical"
+                            aria-valuemin={getDiffDrawerWidthBounds().min}
+                            aria-valuemax={getDiffDrawerWidthBounds().max}
+                            aria-valuenow={diffDrawerWidth}
+                            tabIndex={diffDrawerOpen ? 0 : -1}
+                            title={copy.resizeChangesPanel}
+                            onPointerDown={startDrawerResize}
+                            onPointerMove={resizeDrawer}
+                            onPointerUp={stopDrawerResize}
+                            onPointerCancel={stopDrawerResize}
+                            onLostPointerCapture={stopDrawerResize}
+                            onKeyDown={resizeDrawerWithKeyboard}
+                            onDoubleClick={resetDrawerWidth}
+                        />
                         <header className={styles.diffDrawerHeader}>
                             <div className={styles.diffDrawerTitle}>
                                 <h2>{isRepositoryDiff
@@ -1666,13 +1907,18 @@ const DebloatingPage = () => {
                                                         setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
                                                     }}
                                                     onSave={saveCandidateDiff}
+                                                    renderSideBySide={diffDrawerWidth >= DIFF_SIDE_BY_SIDE_MIN_WIDTH}
                                                 />
                                             </React.Suspense>
                                         </div>
                                         <div className={classNames(styles.gitPatchView, {
                                             [styles.candidateViewHidden]: candidateView !== 'patch',
                                         })}>
-                                            <CodeDiffComponent diffText={codeDiff} isPlainCode={false}/>
+                                            <CodeDiffComponent
+                                                diffText={codeDiff}
+                                                isPlainCode={false}
+                                                showFileHeader={false}
+                                            />
                                         </div>
                                     </div>
                                 ) : isRepositoryDiff && repositoryDiffError ? (
@@ -1718,7 +1964,7 @@ const DebloatingPage = () => {
                 onClose={() => setFocusGraphModalOpen(false)}
                 stages={focusGraphStages}
             />
-        </>
+        </ConfigProvider>
 
     )
 }

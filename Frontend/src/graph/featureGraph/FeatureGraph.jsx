@@ -4,7 +4,7 @@ import styles from './FeatureGraph.module.css';
 import {DataSet, Network} from 'vis-network/standalone/esm/vis-network';
 import GraphOption from "../GraphOption";
 
-const FeatureGraph = forwardRef(({graphData, onNodeClick}, ref) => {
+const FeatureGraph = forwardRef(({graphData, onNodeClick, nodeFontSize}, ref) => {
     const containerRef = useRef(null);
     const networkRef = useRef(null);
     const dataRef = useRef(null); // 保存 DataSet
@@ -78,10 +78,22 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick}, ref) => {
             };
             dataRef.current = data; // 保存起来
 
+            const baseOptions = nodeFontSize
+                ? {
+                    ...GraphOption.options,
+                    nodes: {
+                        ...GraphOption.options.nodes,
+                        font: {
+                            ...GraphOption.options.nodes.font,
+                            size: nodeFontSize,
+                        },
+                    },
+                }
+                : GraphOption.options;
             const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
             const networkOptions = reduceMotion
-                ? {...GraphOption.options, physics: {enabled: false}}
-                : GraphOption.options;
+                ? {...baseOptions, physics: {enabled: false}}
+                : baseOptions;
             networkRef.current = new Network(containerRef.current, data, networkOptions);
 
             addClickHandler(networkRef, data);
@@ -99,7 +111,7 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick}, ref) => {
             networkRef.current?.destroy();
             networkRef.current = null;
         };
-    }, [graphData]);
+    }, [graphData, nodeFontSize]);
 
     return (
         <div

@@ -1,4 +1,19 @@
-/* 在你的 DebloatingPage.module.css 或全局 css 中添加 */
+.markdownContent {
+    font-size: 13px;
+}
+
+.markdownContent h1 {
+    font-size: 20px;
+}
+
+.markdownContent h2 {
+    font-size: 18px;
+}
+
+.markdownContent h3 {
+    font-size: 16px;
+}
+
 .markdownContent table {
     width: 100%;
     border-collapse: collapse;
@@ -21,7 +36,7 @@
     background: #f6f8fa;
     color: #24292f;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.45;
     white-space: pre;
 }
