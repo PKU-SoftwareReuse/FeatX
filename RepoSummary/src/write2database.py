@@ -1,11 +1,9 @@
-import os.path
-from dotenv import load_dotenv
-import sys
-import pandas as pd
-import mysql.connector
-
-from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
 import os
+
+import pandas as pd
+from dotenv import load_dotenv
+
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 load_dotenv()
@@ -66,6 +64,8 @@ def clear_project_data(cursor, project_id):
 
 
 def main(project_id):
+    import mysql.connector
+
     conn = mysql.connector.connect(
         host=os.getenv("DB_HOST"),
         port=int(os.getenv("DB_PORT")),
@@ -73,19 +73,25 @@ def main(project_id):
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_NAME")
     )
+    try:
+        write_project_summary(project_id, conn)
+    finally:
+        conn.close()
+
+
+def write_project_summary(project_id, conn):
     cursor = conn.cursor(dictionary=True)
-
-    # ✅ 新增：清空旧数据
-    clear_project_data(cursor, project_id)
-    conn.commit()  # 提交删除操作
-
-    save_features(project_id, cursor)
-    save_edges(project_id, cursor)
-    set_finish(project_id, cursor)
-
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        clear_project_data(cursor, project_id)
+        save_features(project_id, cursor)
+        save_edges(project_id, cursor)
+        set_finish(project_id, cursor)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
 
 
 def normalize_description(value, fallback):
@@ -99,39 +105,54 @@ def normalize_description(value, fallback):
     return description
 
 
-def get_or_create_module(cursor, repo_id, cluster_id, module_desc):
+def require_description(value, label):
+    description = normalize_description(value, "")
+    if not description:
+        raise RuntimeError(f"RepoSummary output is missing {label}")
+    return description
+
+
+def get_or_create_module(cursor, repo_id, cluster_id, module_desc, module_desc_cn):
     module_desc = normalize_description(module_desc, f"Module {cluster_id} feature group")
+    module_desc_cn = require_description(module_desc_cn, f"Chinese module description for cluster {cluster_id}")
     cursor.execute("""
         SELECT id FROM modules WHERE repo=%s AND cluster_id=%s
     """, (repo_id, cluster_id))
     result = cursor.fetchone()
     if result:
         cursor.execute("""
-            UPDATE modules SET module_desc=%s WHERE id=%s AND (module_desc IS NULL OR module_desc='')
-        """, (module_desc, result['id']))
+            UPDATE modules
+            SET module_desc=CASE WHEN module_desc IS NULL OR module_desc='' THEN %s ELSE module_desc END,
+                module_desc_cn=CASE WHEN module_desc_cn IS NULL OR module_desc_cn='' THEN %s ELSE module_desc_cn END
+            WHERE id=%s
+        """, (module_desc, module_desc_cn, result['id']))
         return result['id']
     cursor.execute("""
-        INSERT INTO modules (repo, cluster_id, module_desc)
-        VALUES (%s, %s, %s)
-    """, (repo_id, cluster_id, module_desc))
+        INSERT INTO modules (repo, cluster_id, module_desc, module_desc_cn)
+        VALUES (%s, %s, %s, %s)
+    """, (repo_id, cluster_id, module_desc, module_desc_cn))
     return cursor.lastrowid
 
 
-def get_or_create_feature(cursor, module_id, feature_id_val, feature_desc):
+def get_or_create_feature(cursor, module_id, feature_id_val, feature_desc, feature_desc_cn):
     feature_desc = normalize_description(feature_desc, f"Feature {feature_id_val}")
+    feature_desc_cn = require_description(feature_desc_cn, f"Chinese feature description for feature {feature_id_val}")
     cursor.execute("""
         SELECT id FROM features WHERE module=%s AND feature_id=%s
     """, (module_id, feature_id_val))
     result = cursor.fetchone()
     if result:
         cursor.execute("""
-            UPDATE features SET feature_desc=%s WHERE id=%s AND (feature_desc IS NULL OR feature_desc='')
-        """, (feature_desc, result['id']))
+            UPDATE features
+            SET feature_desc=CASE WHEN feature_desc IS NULL OR feature_desc='' THEN %s ELSE feature_desc END,
+                feature_desc_cn=CASE WHEN feature_desc_cn IS NULL OR feature_desc_cn='' THEN %s ELSE feature_desc_cn END
+            WHERE id=%s
+        """, (feature_desc, feature_desc_cn, result['id']))
         return result['id']
     cursor.execute("""
-        INSERT INTO features (module, feature_id, feature_desc)
-        VALUES (%s, %s, %s)
-    """, (module_id, feature_id_val, feature_desc))
+        INSERT INTO features (module, feature_id, feature_desc, feature_desc_cn)
+        VALUES (%s, %s, %s, %s)
+    """, (module_id, feature_id_val, feature_desc, feature_desc_cn))
     return cursor.lastrowid
 
 
@@ -151,15 +172,30 @@ def get_or_create_code_map(cursor, feature_id, method_name):
 
 def insert_row(row, cursor, repo_id):
     # 逐级查重或插入
-    module_id = get_or_create_module(cursor, repo_id, row['cluster_id'], row['module_desc'])
-    feature_id = get_or_create_feature(cursor, module_id, row['id'], row['desc'])
+    module_id = get_or_create_module(
+        cursor,
+        repo_id,
+        row['cluster_id'],
+        row['module_desc'],
+        row['module_desc_cn'],
+    )
+    feature_id = get_or_create_feature(
+        cursor,
+        module_id,
+        row['id'],
+        row['desc'],
+        row['desc_cn'],
+    )
     get_or_create_code_map(cursor, feature_id, row['method_name'])
 
 
 def save_features(project_id, cursor):
     file_path = os.path.join(BASE_DIR, "../output", project_id, "features.csv")
 
-    df = ensure_nonempty_csv(file_path, ["id", "cluster_id", "module_desc", "desc", "method_name"])
+    df = ensure_nonempty_csv(
+        file_path,
+        ["id", "cluster_id", "module_desc", "module_desc_cn", "desc", "desc_cn", "method_name"],
+    )
     for row in df.to_dict("records"):
         insert_row(row, cursor, project_id)
 
