@@ -78,6 +78,29 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void materializeJavaCandidateWritesOnlyTheConfirmedFile(@TempDir Path projectRoot) throws Exception {
+        Path firstFile = projectRoot.resolve("src/main/java/demo/First.java");
+        Path secondFile = projectRoot.resolve("src/main/java/demo/Second.java");
+        Files.createDirectories(firstFile.getParent());
+        Files.writeString(firstFile, "package demo;\n\nclass First {}\n");
+        Files.writeString(secondFile, "package demo;\n\nclass Second {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        GenerateImportLinesService importService = mock(GenerateImportLinesService.class);
+        when(importService.generate(anyString(), anyString(), anyString())).thenReturn(List.of());
+        CandidateCodeService service = new CandidateCodeService(importService);
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put("demo.First", "class First { int changed; }");
+        AgentService.modificationMap.put("demo.Second", "class Second { int untouched; }");
+        service.prepareJavaCandidate("demo.First", "edit", AgentService.modificationMap.get("demo.First"));
+
+        service.materializeCandidate("demo.First");
+
+        assertTrue(Files.readString(firstFile).contains("int changed"));
+        assertEquals("package demo;\n\nclass Second {}\n", Files.readString(secondFile));
+    }
+
+    @Test
     void pythonNewAndDeletedFileDiffsUseRepositoryPaths(@TempDir Path projectRoot) throws Exception {
         Files.writeString(projectRoot.resolve("removed.py"), "print('old')\n");
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "PYTHON");

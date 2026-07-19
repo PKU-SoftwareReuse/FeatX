@@ -2,7 +2,7 @@
 
 import styles from './DebloatingPage.module.css';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Popconfirm, Select, message, Progress} from "antd";
+import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
     CloseOutlined,
     DeleteTwoTone,
@@ -13,7 +13,10 @@ import {
     SwapOutlined,
     ApartmentOutlined,
     DiffOutlined,
-    SaveOutlined
+    SaveOutlined,
+    CheckOutlined,
+    CheckCircleOutlined,
+    UndoOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
 
@@ -45,6 +48,18 @@ const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
 const WORKSPACE_MAX_WIDTH = 1600;
 const DIFF_DRAWER_LAYOUT_SETTLE_MS = 360;
+
+const EMPTY_GIT_STATUS = {
+    branch: '',
+    commitScope: 'NONE',
+    stagedPaths: [],
+    unstagedPaths: [],
+    untrackedPaths: [],
+    candidatePaths: [],
+    pendingCandidatePaths: [],
+    committedCandidatePaths: [],
+    unstagedCandidatePaths: [],
+};
 
 const getWorkspaceSideGap = (viewportWidth) => (
     viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
@@ -85,7 +100,7 @@ const DEBLOATING_COPY = {
         noAction: "当前没有可执行的操作",
         switchTitle: "确认切换操作",
         switchDescription: "确定要放弃当前修改吗？",
-        discard: "放弃修改",
+        discard: "放弃全部未提交修改",
         cancel: "取消",
         newSubfeature: "新建子功能特征 ",
         completed: "操作已完成",
@@ -119,6 +134,26 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "请先保存编辑，再确认应用。",
         saveBeforeClose: "当前编辑尚未保存。",
         gitGeneratedDiff: "Git 生成的差异",
+        confirmFile: "确认此文件（暂存）",
+        stagingFile: "正在暂存……",
+        fileStaged: "此文件已暂存",
+        candidateStaged: "文件已写入项目并暂存。",
+        failedStageCandidate: "暂存候选文件失败。",
+        commitChanges: "提交已确认文件",
+        noStagedFiles: "请先在 Diff Panel 中确认至少一个文件。",
+        partialCommitTitle: "确认部分提交",
+        completeCommitTitle: "确认全部提交",
+        partialCommitDescription: "本次只提交已暂存文件；剩余候选文件继续保留，功能数据与静态分析将在全部候选文件提交后统一更新。",
+        completeCommitDescription: "所有候选文件均已确认；本次将提交剩余修改，并同步更新功能数据、CodeMap 和静态分析结果。",
+        partialCommitSuccess: "已完成部分提交，未确认文件仍保留在代码图谱中。",
+        completeCommitSuccess: "全部候选修改已提交。",
+        failedCommitChanges: "提交代码变更失败。",
+        discardAllChanges: "放弃全部未提交修改",
+        discardAllTitle: "放弃全部未提交修改？",
+        discardAllDescription: "将恢复暂存区和工作区到最近一次提交，并删除非忽略的未跟踪文件；已经完成的提交和预处理输出会保留。",
+        discardSuccess: "未提交修改已放弃，已有提交保持不变。",
+        failedDiscardChanges: "放弃未提交修改失败。",
+        committingChanges: "正在提交并更新项目数据……",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
         confirmAllChanges: "确认所有代码变更",
         reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
@@ -151,7 +186,7 @@ const DEBLOATING_COPY = {
         noAction: "Maybe Not Todo",
         switchTitle: "You are trying to do another thing",
         switchDescription: "Do you want to give up your modification?",
-        discard: "Yes, give up!",
+        discard: "Discard all uncommitted changes",
         cancel: "Cancel",
         newSubfeature: "new SubFeature Item ",
         completed: "This is a [Fake] success message",
@@ -185,6 +220,26 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "Save your edits before applying the change.",
         saveBeforeClose: "The current edits have not been saved.",
         gitGeneratedDiff: "Git-generated diff",
+        confirmFile: "Confirm file (stage)",
+        stagingFile: "Staging...",
+        fileStaged: "File staged",
+        candidateStaged: "The file was written to the project and staged.",
+        failedStageCandidate: "Failed to stage the candidate file.",
+        commitChanges: "Commit confirmed files",
+        noStagedFiles: "Confirm at least one file in the Diff Panel first.",
+        partialCommitTitle: "Confirm partial commit",
+        completeCommitTitle: "Confirm complete commit",
+        partialCommitDescription: "Only staged files will be committed. Remaining candidates stay available; feature data and static analysis are updated after every candidate is committed.",
+        completeCommitDescription: "All candidate files are confirmed. This commits the remaining changes and updates feature data, CodeMap, and static analysis.",
+        partialCommitSuccess: "Partial commit completed. Unconfirmed files remain in the code graph.",
+        completeCommitSuccess: "All candidate changes were committed.",
+        failedCommitChanges: "Failed to commit code changes.",
+        discardAllChanges: "Discard all uncommitted changes",
+        discardAllTitle: "Discard all uncommitted changes?",
+        discardAllDescription: "The index and worktree return to the latest commit, and non-ignored untracked files are removed. Existing commits and preprocessing output are preserved.",
+        discardSuccess: "Uncommitted changes were discarded; existing commits were preserved.",
+        failedDiscardChanges: "Failed to discard uncommitted changes.",
+        committingChanges: "Committing and updating project data...",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
         confirmAllChanges: "Confirm All Code Diff",
         reviewAllChanges: "Have you read all the diff(the node marked with red)?",
@@ -482,6 +537,7 @@ const DebloatingPage = () => {
         const fetchData = async () => {
             const project = await API.getCurrentProject().catch(() => null)
             setCurrentProject(project)
+            await refreshGitStatus()
             const res = await getFeatureData()
             if (res.length > 0 && res[0].featureList.length > 0) {
                 setActiveKey(res[0].moduleId)
@@ -534,6 +590,7 @@ const DebloatingPage = () => {
         setCandidateFile(null);
         setCandidateDraft('');
         setCandidateDirty(false);
+        setStagingCandidate(false);
         if (selectedType === 'delete') {
             API.getMinGraphData(featureId).then((data) => {
                 setGraphData(data)
@@ -589,6 +646,19 @@ const DebloatingPage = () => {
     const [candidateDraft, setCandidateDraft] = useState('');
     const [candidateDirty, setCandidateDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
+    const [stagingCandidate, setStagingCandidate] = useState(false);
+    const [gitStatus, setGitStatus] = useState(EMPTY_GIT_STATUS);
+    const [loadingConfirm, setLoadingConfirm] = useState(false);
+
+    const refreshGitStatus = () => API.getGitWorkspaceStatus()
+        .then((status) => {
+            setGitStatus(status || EMPTY_GIT_STATUS);
+            return status || EMPTY_GIT_STATUS;
+        })
+        .catch((error) => {
+            console.error('Error fetching Git workspace status:', error);
+            return EMPTY_GIT_STATUS;
+        });
 
     useEffect(() => {
         const handleWindowResize = () => {
@@ -812,6 +882,27 @@ const DebloatingPage = () => {
             });
     };
 
+    const stageCandidateDiff = () => {
+        if (!candidateFile || stagingCandidate) return;
+        if (candidateDirty) {
+            message.warning(copy.saveBeforeApply);
+            return;
+        }
+
+        setStagingCandidate(true);
+        API.stageCandidateFile(candidateFile.key)
+            .then((status) => {
+                setGitStatus(status || EMPTY_GIT_STATUS);
+                setStagingCandidate(false);
+                setCandidateFile((current) => current ? {...current, warning: null} : current);
+                message.success(copy.candidateStaged);
+            })
+            .catch((error) => {
+                setStagingCandidate(false);
+                message.error(errorMessage(error, copy.failedStageCandidate));
+            });
+    };
+
     const [modal, contextHolder] = Modal.useModal();
 
     const resetGraphDiffDrawer = () => {
@@ -825,20 +916,14 @@ const DebloatingPage = () => {
         setCandidateFile(null);
         setCandidateDraft('');
         setCandidateDirty(false);
+        setStagingCandidate(false);
     };
 
     const handleGraphBackgroundClick = (clearGraphSelection) => {
         if (isCandidateDiff && candidateDirty) {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: () => {
-                    clearGraphSelection();
-                    resetGraphDiffDrawer();
-                },
+            confirmDiscardAndRun(async (features) => {
+                clearGraphSelection();
+                restoreSelectedFeature(features, selectedFeatureItem?.featureId);
             });
             return false;
         }
@@ -854,18 +939,10 @@ const DebloatingPage = () => {
     }
 
     const handleSelect = (item, onSelected) => {
-        if (selectedType == "add" || selectedType == "edit") {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: async () => {
-                    await getFeatureData()
-                    goSelect(item)
-                    onSelected?.()
-                }
+        if (hasPendingFeatureOperation()) {
+            confirmDiscardAndRun(() => {
+                goSelect(item)
+                onSelected?.()
             });
         } else {
             goSelect(item)
@@ -888,17 +965,12 @@ const DebloatingPage = () => {
     }
 
     const handleDelete = (item) => {
-        if (selectedType == "add" || selectedType == "edit") {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: async () => {
-                    await getFeatureData()
-                    goDelete(item)
-                }
+        if (selectedType === "delete" && selectedFeatureItem?.featureId === item.featureId) {
+            return;
+        }
+        if (hasPendingFeatureOperation()) {
+            confirmDiscardAndRun(() => {
+                goDelete(item)
             });
         } else {
             goDelete(item)
@@ -924,17 +996,12 @@ const DebloatingPage = () => {
     }
 
     const handleEdit = (item) => {
-        if (selectedType == "add" || (selectedType == "edit" && selectedFeatureItem != null && selectedFeatureItem.featureId != item.featureId)) {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: async () => {
-                    await getFeatureData()
-                    goEdit(item)
-                }
+        if (selectedType === "edit" && selectedFeatureItem?.featureId === item.featureId) {
+            return;
+        }
+        if (hasPendingFeatureOperation()) {
+            confirmDiscardAndRun(() => {
+                goEdit(item)
             });
         } else {
             goEdit(item)
@@ -1060,21 +1127,9 @@ const DebloatingPage = () => {
     };
 
     const changeActiveKey = (newActiveKey) => {
-        if (selectedType == "edit" || selectedType == "add") {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: async () => {
-                    clearPostAgentTimers()
-                    clearFocusGraphStages()
-                    await getFeatureData()
-                    setSelectedType(null)
-                    setSelectedFeatureItem(null)
-                    setActiveKey(newActiveKey)
-                }
+        if (hasPendingFeatureOperation()) {
+            confirmDiscardAndRun(() => {
+                setActiveKey(newActiveKey)
             });
         } else {
             setActiveKey(newActiveKey)
@@ -1094,17 +1149,9 @@ const DebloatingPage = () => {
     }
 
     const handleAdd = (module) => {
-        if (selectedType == "edit" || (selectedType == "add" && activeKey != module.moduleId)) {
-            modal.confirm({
-                title: copy.switchTitle,
-                icon: <ExclamationCircleOutlined/>,
-                content: copy.switchDescription,
-                okText: copy.discard,
-                cancelText: copy.cancel,
-                onOk: async () => {
-                    await getFeatureData()
-                    goAdd(module)
-                }
+        if (hasPendingFeatureOperation() && !(selectedType === "add" && activeKey === module.moduleId)) {
+            confirmDiscardAndRun(() => {
+                goAdd(module)
             });
         } else if (selectedType == "add" && activeKey == module.moduleId) {
             return
@@ -1217,6 +1264,82 @@ const DebloatingPage = () => {
 
     const [confirmEnabled, setConfirmEnabled] = useState(false)
     const [submitEnabled, setSubmitEnabled] = useState(false)
+
+    const hasPendingFeatureOperation = () => (
+        selectedType === "delete" || selectedType === "edit" || selectedType === "add"
+    );
+
+    const discardPendingChanges = async () => {
+        setLoadingConfirm(true);
+        try {
+            const status = await API.discardFeatureChanges();
+            setGitStatus(status || EMPTY_GIT_STATUS);
+            clearPostAgentTimers();
+            clearFocusGraphStages();
+            resetGraphDiffDrawer();
+            setConfirmEnabled(false);
+            setSubmitEnabled(false);
+            setModeTrans(false);
+            setChatMode(false);
+            setOperationProgress(null);
+            setSelectedType(null);
+            setSelectedFeatureItem(null);
+            const features = await getFeatureData();
+            message.success(copy.discardSuccess);
+            return features;
+        } catch (error) {
+            message.error(errorMessage(error, copy.failedDiscardChanges));
+            throw error;
+        } finally {
+            setLoadingConfirm(false);
+        }
+    };
+
+    const restoreSelectedFeature = (features, preferredFeatureId) => {
+        const modules = Array.isArray(features) ? features : [];
+        const preferred = modules
+            .flatMap((module) => module.featureList || [])
+            .find((feature) => String(feature.featureId) === String(preferredFeatureId));
+        const fallbackModule = modules.find((module) => (module.featureList || []).length > 0);
+        const target = preferred || fallbackModule?.featureList?.[0];
+        if (target) {
+            const targetModule = modules.find((module) => (module.featureList || []).some(
+                (feature) => String(feature.featureId) === String(target.featureId)
+            ));
+            if (targetModule) setActiveKey(targetModule.moduleId);
+            goSelect(target);
+        } else {
+            setGraphData({nodes: [], edges: []});
+            setLoadingFeatureGraph(false);
+            setLoadingCode(false);
+        }
+    };
+
+    const confirmDiscardAndRun = (nextAction) => {
+        modal.confirm({
+            title: copy.discardAllTitle,
+            icon: <ExclamationCircleOutlined/>,
+            content: copy.discardAllDescription,
+            okText: copy.discard,
+            okButtonProps: {danger: true},
+            cancelText: copy.cancel,
+            onOk: async () => {
+                const features = await discardPendingChanges();
+                await nextAction?.(features);
+            },
+        });
+    };
+
+    const requestDiscardCurrentOperation = () => {
+        const preferredFeatureId = selectedFeatureItem?.featureId;
+        confirmDiscardAndRun((features) => restoreSelectedFeature(features, preferredFeatureId));
+    };
+
+    useEffect(() => {
+        if (confirmEnabled) {
+            refreshGitStatus();
+        }
+    }, [confirmEnabled]);
 
     const errorMessage = (error, fallback) => {
         const data = error?.response?.data;
@@ -1471,109 +1594,88 @@ const DebloatingPage = () => {
         }
     }
 
-    const [loadingConfirm, setLoadingConfirm] = useState(false);
+    const finishCompleteCommit = async (commitResult) => {
+        const previousFeatureId = selectedFeatureItem?.featureId;
+        const features = await getFeatureData();
+        const preferredFeatureId = selectedType === 'add'
+            ? commitResult.featureId
+            : selectedType === 'edit' ? previousFeatureId : null;
+        restoreSelectedFeature(features, preferredFeatureId);
+        setConfirmEnabled(false);
+        setOperationProgress(null);
+        resetGraphDiffDrawer();
+    };
 
-    const confirmDiff = () => {
-        if (selectedType == 'delete') {
-            setLoadingConfirm(true);
-            API.confirmDelete()
-                .then(async (data) => {
-                    // 等待刷新数据
-                    const res = await getFeatureData();
-                    console.log(activeKey);
-                    // 在新的数据里找到当前 activeKey 对应的模块
-                    const activeModule = res.find(m => m.moduleId == activeKey);
-                    console.log(activeModule);
-                    if (activeModule && activeModule.featureList.length > 0) {
-                        handleSelect(activeModule.featureList[0]);
-                    } else {
-                        setActiveKey(res[0].moduleId)
-                        handleSelect(res[0].featureList[0])
-                    }
-                    setLoadingConfirm(false);
-                    getRepositoryDiff();
-                })
-                .catch((error) => {
-                    console.error('Error Confirm Delete Feature:', error)
-                    setLoadingConfirm(false);
-                    message.error(errorMessage(error, copy.failedApplyDeleteDiff))
-                });
-        } else if (selectedType == 'edit') {
-            setLoadingConfirm(true);
-            API.confirmModify()
-                .then(async (data) => {
-                    // 等待刷新数据
-                    const res = await getFeatureData();
-                    // console.log(activeKey);
-                    // 在 res 中找到指定 featureId 的对象
-                    const featureId = selectedFeatureItem.featureId;
-                    let foundFeature = null;
+    const performFeatureCommit = async () => {
+        setLoadingConfirm(true);
+        try {
+            const result = await API.commitFeatureChanges(selectedType);
+            setGitStatus(result.status || EMPTY_GIT_STATUS);
+            resetGraphDiffDrawer();
+            if (result.commitScope === 'COMPLETE') {
+                await finishCompleteCommit(result);
+                message.success(copy.completeCommitSuccess);
+            } else {
+                if (selectedType === 'delete' && !isPythonProject) {
+                    getFeatureGraphData(selectedFeatureItem?.featureId, 'delete');
+                } else {
+                    getFeatureGraphData(0, 'new');
+                }
+                message.success(copy.partialCommitSuccess);
+            }
+        } catch (error) {
+            message.error(errorMessage(error, copy.failedCommitChanges));
+            throw error;
+        } finally {
+            setLoadingConfirm(false);
+        }
+    };
 
-                    for (const module of res) {
-                        const match = module.featureList.find(f => f.featureId === featureId);
-                        if (match) {
-                            foundFeature = match;
-                            break; // 找到就退出
-                        }
-                    }
-
-                    if (foundFeature) {
-                        // 传递整个对象给 handleSelect
-                        goSelect(foundFeature);
-                    } else {
-                        console.warn("未找到 featureId:", featureId);
-                    }
-                    setLoadingConfirm(false);
-                    getRepositoryDiff();
-                })
-                .catch((error) => {
-                    console.error('Error Confirm Modify Feature:', error)
-                    setLoadingConfirm(false);
-                    message.error(errorMessage(error, copy.failedApplyModifyDiff))
-                });
-        }else if (selectedType == 'add') {
-            setLoadingConfirm(true);
-            API.confirmAdd()
-                .then(async (data) => {
-                    // 等待刷新数据
-                    const res = await getFeatureData();
-                    // console.log(activeKey);
-                    // 在 res 中找到指定 featureId 的对象
-                    const featureId = data;
-                    let foundFeature = null;
-
-                    for (const module of res) {
-                        const match = module.featureList.find(f => f.featureId === featureId);
-                        if (match) {
-                            foundFeature = match;
-                            break; // 找到就退出
-                        }
-                    }
-
-                    if (foundFeature) {
-                        // 传递整个对象给 handleSelect
-                        goSelect(foundFeature);
-                    } else {
-                        console.warn("未找到 featureId:", featureId);
-                    }
-                    setLoadingConfirm(false);
-                    getRepositoryDiff();
-                })
-                .catch((error) => {
-                    console.error('Error Confirm Add Feature:', error)
-                    setLoadingConfirm(false);
-                    message.error(errorMessage(error, copy.failedApplyAddDiff))
-                });
-        }else{
-            alert(copy.completed)
+    const requestFeatureCommit = async () => {
+        if (candidateDirty || savingCandidate) {
+            message.warning(copy.saveBeforeApply);
+            return;
+        }
+        const status = await refreshGitStatus();
+        const stagedCount = status.stagedPaths?.length || 0;
+        if (!stagedCount) {
+            message.warning(copy.noStagedFiles);
+            return;
         }
 
-    }
+        const complete = status.commitScope === 'COMPLETE';
+        const remainingCount = status.unstagedCandidatePaths?.length || 0;
+        modal.confirm({
+            title: complete ? copy.completeCommitTitle : copy.partialCommitTitle,
+            icon: <ExclamationCircleOutlined/>,
+            content: (
+                <div className={styles.commitConfirmation}>
+                    <p>{complete ? copy.completeCommitDescription : copy.partialCommitDescription}</p>
+                    <p>
+                        {language === 'zh'
+                            ? `本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`
+                            : `This commit contains ${stagedCount} staged file${stagedCount === 1 ? '' : 's'}${remainingCount ? `; ${remainingCount} candidate file${remainingCount === 1 ? '' : 's'} remain unconfirmed` : ''}.`}
+                    </p>
+                </div>
+            ),
+            okText: copy.commitChanges,
+            cancelText: copy.cancel,
+            onOk: performFeatureCommit,
+        });
+    };
 
     const hasFocusGraphStages = isPythonProject
         && (selectedType === "edit" || selectedType === "add")
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
+    const stagedFileCount = gitStatus.stagedPaths?.length || 0;
+    const candidateIsStaged = Boolean(
+        candidateFile?.path && gitStatus.stagedPaths?.includes(candidateFile.path)
+    );
+    const showGitOperationActions = hasPendingFeatureOperation()
+        && (confirmEnabled
+            || stagedFileCount > 0
+            || (gitStatus.pendingCandidatePaths?.length || 0) > 0);
 
     const workspaceContainerWidth = getWorkspaceContainerWidth(viewportWidth);
     const workspaceWidthWithDrawer = viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
@@ -1598,7 +1700,7 @@ const DebloatingPage = () => {
             <Spin
                 wrapperClassName={styles.pageSpin}
                 spinning={loadingConfirm}
-                tip={copy.applyingChanges}
+                tip={copy.committingChanges}
                 size={"large"}
             >
                 <div
@@ -1773,6 +1875,7 @@ const DebloatingPage = () => {
                             <Card
                                 className={classNames(styles.panelCard, {
                                     [styles.graphPanelCardCompact]: graphPanelCompact,
+                                    [styles.graphPanelCardGitActions]: showGitOperationActions,
                                 })}
                                 title={
                                     <div className={styles.card_title}>
@@ -1780,6 +1883,40 @@ const DebloatingPage = () => {
                                             {chatMode ? copy.agentPanel : copy.graphPanel}
                                         </div>
                                         <div className={styles.panelActions}>
+                                            {showGitOperationActions && (
+                                                <>
+                                                    <Tooltip title={stagedFileCount ? copy.commitChanges : copy.noStagedFiles}>
+                                                        <Button
+                                                            type="primary"
+                                                            size="small"
+                                                            icon={<CheckCircleOutlined/>}
+                                                            disabled={!stagedFileCount || candidateDirty || savingCandidate || stagingCandidate}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                requestFeatureCommit();
+                                                            }}
+                                                            className={styles.gitCommitButton}
+                                                            aria-label={copy.commitChanges}
+                                                        >
+                                                            {stagedFileCount > 0 ? stagedFileCount : null}
+                                                        </Button>
+                                                    </Tooltip>
+                                                    <Tooltip title={copy.discardAllChanges}>
+                                                        <Button
+                                                            type="text"
+                                                            danger
+                                                            icon={<UndoOutlined/>}
+                                                            disabled={loadingConfirm}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                requestDiscardCurrentOperation();
+                                                            }}
+                                                            className={styles.icon}
+                                                            aria-label={copy.discardAllChanges}
+                                                        />
+                                                    </Tooltip>
+                                                </>
+                                            )}
                                             <Tooltip title={copy.viewRepositoryDiff}>
                                                 <Button
                                                     type="text"
@@ -1896,7 +2033,7 @@ const DebloatingPage = () => {
                                             type="primary"
                                             icon={<SaveOutlined/>}
                                             loading={savingCandidate}
-                                            disabled={!candidateDirty}
+                                            disabled={!candidateDirty || candidateIsStaged}
                                             onClick={() => saveCandidateDiff()}
                                         >
                                             {savingCandidate ? copy.savingCandidate : copy.saveCandidate}
@@ -1937,6 +2074,7 @@ const DebloatingPage = () => {
                                                         setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
                                                     }}
                                                     onSave={saveCandidateDiff}
+                                                    readOnly={candidateIsStaged}
                                                 />
                                             </React.Suspense>
                                         </div>
@@ -1951,27 +2089,28 @@ const DebloatingPage = () => {
                                         isPlainCode={false}
                                     />
                                 )}
-                                {!isRepositoryDiff && (
+                                {isCandidateDiff && candidateFile && (
                                     <Tooltip
                                         title={candidateDirty
                                             ? copy.saveBeforeApply
                                             : !confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
-                                        <Popconfirm title={copy.confirmAllChanges}
-                                                    description={copy.reviewAllChanges}
-                                                    onConfirm={confirmDiff}
-                                                    okText={copy.confirmApply}
-                                                    cancelText={copy.decline}
-                                        >
-                                            <div className={styles.centerButtonWrapper}>
-                                                <Button
-                                                    type="primary"
-                                                    disabled={!confirmEnabled || candidateDirty || savingCandidate}
-                                                >
-                                                    {copy.applyChanges}
-                                                </Button>
-                                            </div>
-                                        </Popconfirm>
+                                        <div className={styles.centerButtonWrapper}>
+                                            <Button
+                                                type="primary"
+                                                icon={<CheckOutlined/>}
+                                                loading={stagingCandidate}
+                                                disabled={!confirmEnabled
+                                                    || candidateDirty
+                                                    || savingCandidate
+                                                    || candidateIsStaged}
+                                                onClick={stageCandidateDiff}
+                                            >
+                                                {candidateIsStaged
+                                                    ? copy.fileStaged
+                                                    : stagingCandidate ? copy.stagingFile : copy.confirmFile}
+                                            </Button>
+                                        </div>
                                     </Tooltip>
                                 )}
                             </Spin>

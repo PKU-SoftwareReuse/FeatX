@@ -232,8 +232,9 @@ public class CodeMapService {
         }
 
         Set<FeatureGraphResult.Node> nodes = new LinkedHashSet<>();
-        if (AgentService.modificationMap != null) {
-            AgentService.modificationMap.keySet().forEach(filePath -> {
+        Map<String, String> pendingModifications = candidateCodeService.pendingModificationMap();
+        if (!pendingModifications.isEmpty()) {
+            pendingModifications.keySet().forEach(filePath -> {
                 FeatureGraphResult.Node node = new FeatureGraphResult.Node(filePath);
                 node.setType("Modify");
                 nodes.add(node);
@@ -258,9 +259,10 @@ public class CodeMapService {
             return result;
         }
 
-        Set<String> modifiedFiles = AgentService.modificationMap == null
+        Map<String, String> pendingModifications = candidateCodeService.pendingModificationMap();
+        Set<String> modifiedFiles = pendingModifications.isEmpty()
                 ? Collections.emptySet()
-                : AgentService.modificationMap.keySet().stream()
+                : pendingModifications.keySet().stream()
                 .map(CodeMapService::normalizePythonPath)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         if (modifiedFiles.isEmpty()) {

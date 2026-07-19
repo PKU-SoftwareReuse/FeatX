@@ -37,6 +37,27 @@
     font-size: 18px;
 }
 
+.graphPanelCardCompact.graphPanelCardGitActions .card_title {
+    padding-right: 180px;
+}
+
+.gitCommitButton {
+    min-width: 30px;
+    padding-inline: 7px;
+    border-radius: 5px;
+}
+
+.commitConfirmation p {
+    margin: 0 0 8px;
+    line-height: 1.6;
+}
+
+.commitConfirmation p:last-child {
+    margin-bottom: 0;
+    color: #475467;
+    font-size: 12px;
+}
+
 .modelControl {
     display: flex;
     max-width: 100%;

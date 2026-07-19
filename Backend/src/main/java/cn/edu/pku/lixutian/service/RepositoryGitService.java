@@ -1,0 +1,192 @@
+package cn.edu.pku.lixutian.service;
+
+import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
+import org.springframework.stereotype.Service;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+
+@Service
+public class RepositoryGitService {
+    private static final Set<String> GENERATED_DIRECTORIES = Set.of(
+            "preprocess1", "delombok", "preprocess2"
+    );
+
+    private final CandidateCodeService candidateCodeService;
+
+    public RepositoryGitService(CandidateCodeService candidateCodeService) {
+        this.candidateCodeService = candidateCodeService;
+    }
+
+    public synchronized GitWorkspaceStatusResult status() throws IOException, InterruptedException {
+        Path repository = repositoryRoot();
+        List<String> stagedPaths = listPaths(repository,
+                List.of("git", "diff", "--cached", "--name-only", "-z", "--"));
+        List<String> unstagedPaths = listPaths(repository,
+                List.of("git", "diff", "--name-only", "-z", "--"));
+        List<String> untrackedPaths = listPaths(repository,
+                List.of("git", "ls-files", "--others", "--exclude-standard", "-z"));
+
+        List<String> candidatePaths = candidateCodeService.allCandidateProjectPaths();
+        List<String> pendingCandidatePaths = candidateCodeService.pendingCandidateProjectPaths();
+        List<String> committedCandidatePaths = candidateCodeService.committedCandidateProjectPaths();
+        Set<String> stagedSet = new LinkedHashSet<>(stagedPaths);
+        List<String> unstagedCandidatePaths = pendingCandidatePaths.stream()
+                .filter(path -> !stagedSet.contains(path))
+                .toList();
+
+        GitWorkspaceStatusResult result = new GitWorkspaceStatusResult();
+        result.setBranch(runGit(repository, List.of("git", "branch", "--show-current"), 0).trim());
+        result.setStagedPaths(stagedPaths);
+        result.setUnstagedPaths(unstagedPaths);
+        result.setUntrackedPaths(untrackedPaths);
+        result.setCandidatePaths(candidatePaths);
+        result.setPendingCandidatePaths(pendingCandidatePaths);
+        result.setCommittedCandidatePaths(committedCandidatePaths);
+        result.setUnstagedCandidatePaths(unstagedCandidatePaths);
+        result.setCommitScope(stagedPaths.isEmpty()
+                ? "NONE"
+                : unstagedCandidatePaths.isEmpty() ? "COMPLETE" : "PARTIAL");
+        return result;
+    }
+
+    public synchronized GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
+        CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
+        stagePaths(List.of(candidate.path()));
+        return status();
+    }
+
+    public synchronized void stagePaths(Collection<String> relativePaths) throws IOException, InterruptedException {
+        if (relativePaths == null) {
+            return;
+        }
+        Path repository = repositoryRoot();
+        for (String relativePath : new LinkedHashSet<>(relativePaths)) {
+            validateRepositoryPath(repository, relativePath);
+            runGit(repository, List.of("git", "add", "-A", "--", normalizePath(relativePath)), 0);
+        }
+    }
+
+    public synchronized String commit(String message) throws IOException, InterruptedException {
+        Path repository = repositoryRoot();
+        String normalizedMessage = normalizeCommitMessage(message);
+        runGit(repository, List.of(
+                "git",
+                "-c", "user.name=FeatX",
+                "-c", "user.email=featx@localhost",
+                "commit", "-m", normalizedMessage
+        ), 0);
+        return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+    }
+
+    public synchronized GitWorkspaceStatusResult discardUncommittedChanges() throws IOException, InterruptedException {
+        Path repository = repositoryRoot();
+        runGit(repository, List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "."), 0);
+        runGit(repository, List.of("git", "clean", "-fd", "--", "."), 0);
+        candidateCodeService.discardCandidateState();
+        return status();
+    }
+
+    private Path repositoryRoot() throws IOException, InterruptedException {
+        String projectPath = ProjectState.getInstance().getProjectPath();
+        if (projectPath == null || projectPath.isBlank()) {
+            throw new IllegalStateException("No project is currently selected.");
+        }
+        Path expectedRoot = Path.of(projectPath).toAbsolutePath().normalize();
+        Path gitMetadata = expectedRoot.resolve(".git");
+        if (!Files.isDirectory(gitMetadata) && !Files.isRegularFile(gitMetadata)) {
+            throw new IllegalStateException("The current project is not backed by a Git repository.");
+        }
+        Path actualRoot = Path.of(runGit(
+                expectedRoot,
+                List.of("git", "rev-parse", "--show-toplevel"),
+                0
+        ).trim()).toRealPath();
+        if (!expectedRoot.toRealPath().equals(actualRoot)) {
+            throw new IllegalStateException("Git repository root does not match the selected project directory.");
+        }
+        return actualRoot;
+    }
+
+    private List<String> listPaths(Path repository, List<String> command) throws IOException, InterruptedException {
+        String output = runGit(repository, command, 0);
+        List<String> paths = new ArrayList<>();
+        for (String path : output.split("\\u0000")) {
+            if (path == null || path.isBlank()) {
+                continue;
+            }
+            String normalized = normalizePath(path);
+            if (!isGeneratedPath(normalized)) {
+                paths.add(normalized);
+            }
+        }
+        return paths.stream().distinct().sorted().toList();
+    }
+
+    private void validateRepositoryPath(Path repository, String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            throw new IllegalArgumentException("Repository file path is required.");
+        }
+        String normalized = normalizePath(relativePath);
+        if (normalized.startsWith("/") || normalized.contains("../")) {
+            throw new IllegalArgumentException("Invalid repository file path: " + relativePath);
+        }
+        Path resolved = repository.resolve(normalized).normalize();
+        if (!resolved.startsWith(repository)) {
+            throw new IllegalArgumentException("Invalid repository file path: " + relativePath);
+        }
+    }
+
+    private boolean isGeneratedPath(String relativePath) {
+        for (Path part : Path.of(relativePath)) {
+            if (GENERATED_DIRECTORIES.contains(part.toString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalizePath(String path) {
+        return path.replace('\\', '/');
+    }
+
+    private String normalizeCommitMessage(String message) {
+        String normalized = message == null ? "" : message.replaceAll("[\\r\\n]+", " ").trim();
+        if (normalized.isBlank()) {
+            return "FeatX: apply code changes";
+        }
+        return normalized.length() > 200 ? normalized.substring(0, 200) : normalized;
+    }
+
+    private String runGit(Path workingDirectory, List<String> command, int... acceptedExitCodes)
+            throws IOException, InterruptedException {
+        Process process = new ProcessBuilder(command)
+                .directory(workingDirectory.toFile())
+                .redirectErrorStream(true)
+                .start();
+        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(10, TimeUnit.SECONDS);
+        }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!exited) {
+            throw new IOException("Git command timed out.\n" + output);
+        }
+        int exitCode = process.exitValue();
+        if (Arrays.stream(acceptedExitCodes).noneMatch(code -> code == exitCode)) {
+            throw new IOException("Git command failed with exit code " + exitCode + "\n" + output);
+        }
+        return output;
+    }
+}

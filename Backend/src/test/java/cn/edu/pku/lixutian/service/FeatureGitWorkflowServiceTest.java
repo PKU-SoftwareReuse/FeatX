@@ -1,0 +1,156 @@
+package cn.edu.pku.lixutian.service;
+
+import cn.edu.pku.lixutian.config.ClusterState;
+import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.result.FeatureResult;
+import cn.edu.pku.lixutian.dto.result.GitCommitResult;
+import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
+import cn.edu.pku.lixutian.service.code.AgentService;
+import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+class FeatureGitWorkflowServiceTest {
+    @AfterEach
+    void resetGlobalState() {
+        AgentService.modificationMap = null;
+        AgentService.pythonModifiedMethods = null;
+        ClusterState state = ClusterState.getInstance();
+        state.setCandidateFeature(null);
+        state.setCandidateModuleId(null);
+        state.setNewFeatureDescription(null);
+    }
+
+    @Test
+    void stagesOneFileThenCreatesPartialAndCompleteCommits(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                codeMapService
+        );
+        selectFeatureForEdit();
+
+        GitWorkspaceStatusResult stagedFirst = workflow.stageCandidate("first.py");
+        assertEquals("PARTIAL", stagedFirst.getCommitScope());
+        assertEquals(java.util.List.of("first.py"), stagedFirst.getStagedPaths());
+        assertEquals(java.util.List.of("second.py"), stagedFirst.getUnstagedCandidatePaths());
+
+        GitCommitResult partial = workflow.commit("edit", null);
+        assertEquals("PARTIAL", partial.getCommitScope());
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
+        assertEquals(java.util.List.of("second.py"), partial.getStatus().getPendingCandidatePaths());
+        verifyNoInteractions(codeMapService);
+
+        GitWorkspaceStatusResult stagedSecond = workflow.stageCandidate("second.py");
+        assertEquals("COMPLETE", stagedSecond.getCommitScope());
+        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
+                .thenReturn(7);
+
+        GitCommitResult complete = workflow.commit("edit", null);
+        assertEquals("COMPLETE", complete.getCommitScope());
+        assertEquals(7, complete.getFeatureId());
+        assertTrue(complete.getStatus().getStagedPaths().isEmpty());
+        assertTrue(complete.getStatus().getPendingCandidatePaths().isEmpty());
+        assertTrue(AgentService.modificationMap.isEmpty());
+        assertEquals("3", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        verify(codeMapService).modifyFeatureFromMemoryAndDatabase(
+                7,
+                "updated feature",
+                ClusterState.getInstance().getAgentLanguage()
+        );
+    }
+
+    @Test
+    void discardKeepsPartialCommitAndIgnoredPreprocessOutput(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                mock(CodeMapService.class)
+        );
+        selectFeatureForEdit();
+
+        workflow.stageCandidate("first.py");
+        workflow.commit("edit", null);
+        workflow.stageCandidate("second.py");
+        Files.writeString(repository.resolve("notes.txt"), "untracked\n");
+        Path ignoredOutput = repository.resolve("preprocess1/report.csv");
+        Files.createDirectories(ignoredOutput.getParent());
+        Files.writeString(ignoredOutput, "generated\n");
+
+        GitWorkspaceStatusResult discarded = workflow.discard();
+
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
+        assertFalse(Files.exists(repository.resolve("notes.txt")));
+        assertTrue(Files.exists(ignoredOutput));
+        assertTrue(discarded.getStagedPaths().isEmpty());
+        assertTrue(discarded.getUnstagedPaths().isEmpty());
+        assertTrue(discarded.getUntrackedPaths().isEmpty());
+        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
+    }
+
+    private CandidateCodeService prepareTwoPythonCandidates(Path repository) throws Exception {
+        ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
+        CandidateCodeService candidateService = new CandidateCodeService(mock(GenerateImportLinesService.class));
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put("first.py", "print('first changed')\n");
+        AgentService.modificationMap.put("second.py", "print('second changed')\n");
+        candidateService.preparePythonCandidate("first.py", "first.py", AgentService.modificationMap.get("first.py"));
+        candidateService.preparePythonCandidate("second.py", "second.py", AgentService.modificationMap.get("second.py"));
+        return candidateService;
+    }
+
+    private void selectFeatureForEdit() {
+        FeatureResult feature = new FeatureResult();
+        feature.setFeatureId(7);
+        ClusterState.getInstance().setCandidateFeature(feature);
+        ClusterState.getInstance().setNewFeatureDescription("updated feature");
+    }
+
+    private void initializeRepository(Path repository) throws Exception {
+        runGit(repository, "init", "-b", "main");
+        runGit(repository, "config", "user.name", "FeatX Test");
+        runGit(repository, "config", "user.email", "featx-test@localhost");
+        Files.writeString(repository.resolve("first.py"), "print('first')\n");
+        Files.writeString(repository.resolve("second.py"), "print('second')\n");
+        Files.writeString(repository.resolve(".gitignore"), "/preprocess1/\n/delombok/\n/preprocess2/\n");
+        runGit(repository, "add", "-A");
+        runGit(repository, "commit", "-m", "baseline");
+    }
+
+    private String runGit(Path workingDirectory, String... arguments) throws IOException, InterruptedException {
+        String[] command = new String[arguments.length + 1];
+        command[0] = "git";
+        System.arraycopy(arguments, 0, command, 1, arguments.length);
+        Process process = new ProcessBuilder(command)
+                .directory(workingDirectory.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+        return output;
+    }
+}

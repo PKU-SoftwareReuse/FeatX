@@ -140,6 +140,24 @@ const API = {
             content,
         }).then(response => response.data);
     },
+    getGitWorkspaceStatus: () => {
+        return axios.get(`${BASE_URL}/code/git/status`)
+            .then(response => response.data);
+    },
+    stageCandidateFile: (key) => {
+        return axios.post(`${BASE_URL}/code/git/stage`, {key})
+            .then(response => response.data);
+    },
+    commitFeatureChanges: (operation, commitMessage) => {
+        return axios.post(`${BASE_URL}/code/git/commit`, {
+            operation,
+            message: commitMessage,
+        }).then(response => response.data);
+    },
+    discardFeatureChanges: () => {
+        return axios.post(`${BASE_URL}/code/git/discard`)
+            .then(response => response.data);
+    },
 
     confirmDelete: () => {
         return axios.post(`${BASE_URL}/feature/confirm/delete`)
