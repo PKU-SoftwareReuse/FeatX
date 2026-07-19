@@ -44,6 +44,7 @@ const FEATURE_PANEL_MINIMAL_WIDTH = 148;
 const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
 const WORKSPACE_MAX_WIDTH = 1600;
+const DIFF_DRAWER_LAYOUT_SETTLE_MS = 360;
 
 const getWorkspaceSideGap = (viewportWidth) => (
     viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
@@ -572,6 +573,7 @@ const DebloatingPage = () => {
 
     const [codeDiff, setCodeDiff] = useState('');
     const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
+    const [diffDrawerLayoutSettled, setDiffDrawerLayoutSettled] = useState(false);
     const [diffDrawerWidth, setDiffDrawerWidth] = useState(getDefaultDiffDrawerWidth);
     const [diffDrawerResizing, setDiffDrawerResizing] = useState(false);
     const [viewportWidth, setViewportWidth] = useState(() => (
@@ -596,6 +598,19 @@ const DebloatingPage = () => {
         window.addEventListener('resize', handleWindowResize);
         return () => window.removeEventListener('resize', handleWindowResize);
     }, []);
+
+    useEffect(() => {
+        if (!diffDrawerOpen) {
+            setDiffDrawerLayoutSettled(false);
+            return undefined;
+        }
+
+        const timer = window.setTimeout(
+            () => setDiffDrawerLayoutSettled(true),
+            DIFF_DRAWER_LAYOUT_SETTLE_MS
+        );
+        return () => window.clearTimeout(timer);
+    }, [diffDrawerOpen]);
 
     const startDrawerResize = useCallback((event) => {
         if (event.button !== 0 || window.innerWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT) return;
@@ -1531,13 +1546,14 @@ const DebloatingPage = () => {
         : Math.max(0, viewportWidth - diffDrawerWidth);
     const featurePanelCondensed = diffDrawerOpen
         && viewportWidth > DIFF_DRAWER_OVERLAY_BREAKPOINT;
+    const splitterLayoutCondensed = featurePanelCondensed && diffDrawerLayoutSettled;
     const featurePanelDrawerSize = Math.round(Math.max(
         FEATURE_PANEL_MINIMAL_WIDTH,
         Math.min(380, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
     ));
-    const featurePanelMinimal = featurePanelCondensed
+    const featurePanelMinimal = splitterLayoutCondensed
         && featurePanelDrawerSize < FEATURE_PANEL_DESCRIPTION_MIN_WIDTH;
-    const graphPanelCompact = featurePanelCondensed
+    const graphPanelCompact = splitterLayoutCondensed
         && workspaceWidthWithDrawer - featurePanelDrawerSize < 480;
 
 
@@ -1574,10 +1590,10 @@ const DebloatingPage = () => {
                         >
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel
-                        size={featurePanelCondensed ? featurePanelDrawerSize : featurePanelSize}
-                        min={featurePanelCondensed ? featurePanelDrawerSize : "20%"}
-                        max={featurePanelCondensed ? featurePanelDrawerSize : "60%"}
-                        resizable={!featurePanelCondensed}
+                        size={splitterLayoutCondensed ? featurePanelDrawerSize : featurePanelSize}
+                        min={splitterLayoutCondensed ? featurePanelDrawerSize : "20%"}
+                        max={splitterLayoutCondensed ? featurePanelDrawerSize : "60%"}
+                        resizable={!splitterLayoutCondensed}
                         className={classNames(styles.main_area, {
                             [styles.featurePanelAreaMinimal]: featurePanelMinimal,
                         })}
@@ -1717,7 +1733,7 @@ const DebloatingPage = () => {
 
 
                     {/*中间功能去臃肿详情*/}
-                    <Splitter.Panel min={featurePanelCondensed ? 0 : "55%"} className={styles.main_area}>
+                    <Splitter.Panel min={splitterLayoutCondensed ? 0 : "55%"} className={styles.main_area}>
                         <div className={styles.panelShell}>
                             <Card
                                 className={classNames(styles.panelCard, {
