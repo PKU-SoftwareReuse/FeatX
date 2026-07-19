@@ -1,45 +1,18 @@
 // FeatureGraph.jsx
-import React, {useEffect, useRef, forwardRef, useImperativeHandle} from 'react';
+import React, {useEffect, useRef} from 'react';
 import styles from './FeatureGraph.module.css';
 import {DataSet, Network} from 'vis-network/standalone/esm/vis-network';
 import GraphOption from "../GraphOption";
 
-const FeatureGraph = forwardRef(({graphData, onNodeClick, nodeFontSize}, ref) => {
+const FeatureGraph = ({graphData, onNodeClick, onBackgroundClick, nodeFontSize}) => {
     const containerRef = useRef(null);
     const networkRef = useRef(null);
-    const dataRef = useRef(null); // 保存 DataSet
+    const lastSelectedNodeRef = useRef(null);
+    const onNodeClickRef = useRef(onNodeClick);
+    const onBackgroundClickRef = useRef(onBackgroundClick);
 
-    const lastSelectedNodeRef = useRef(null); // 记录上一次选中的节点 ID
-
-    const addClickHandler = (networkInstance, dataset) => {
-        // 点击节点后展示更多信息
-        networkInstance.current.on('click', function (params) {
-            const nodeId = params.nodes[0];
-            const edgeId = params.edges[0];
-            if (nodeId) {
-                const selectedNode = dataset.nodes.get(nodeId); // 正确获取节点的方式
-                onNodeClick(nodeId);
-                lastSelectedNodeRef.current = nodeId; // 更新记录
-            }else {
-                // 点击空白 → 恢复上一次选中的节点
-                if (lastSelectedNodeRef.current) {
-                    networkInstance.current.selectNodes([lastSelectedNodeRef.current]);
-                }
-            }
-        });
-    }
-
-    useImperativeHandle(ref, () => ({
-        selectRandomNode:()=>{
-            if(dataRef.current && dataRef.current.nodes.length > 0 && networkRef.current) {
-                const allNodeIds = dataRef.current.nodes.getIds()
-                const randomNodeId = allNodeIds[Math.floor(Math.random() * allNodeIds.length)];
-                networkRef.current.selectNodes([randomNodeId]);
-                onNodeClick(randomNodeId);
-                lastSelectedNodeRef.current = randomNodeId; // 更新记录
-            }
-        }
-    }))
+    onNodeClickRef.current = onNodeClick;
+    onBackgroundClickRef.current = onBackgroundClick;
 
     useEffect(() => {
         if (containerRef.current && graphData && graphData.nodes.length > 0) {
@@ -76,8 +49,6 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick, nodeFontSize}, ref) =>
                 nodes: new DataSet(nodes),
                 edges: new DataSet(edges),
             };
-            dataRef.current = data; // 保存起来
-
             const baseOptions = nodeFontSize
                 ? {
                     ...GraphOption.options,
@@ -94,17 +65,42 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick, nodeFontSize}, ref) =>
             const networkOptions = reduceMotion
                 ? {...baseOptions, physics: {enabled: false}}
                 : baseOptions;
-            networkRef.current = new Network(containerRef.current, data, networkOptions);
+            const network = new Network(containerRef.current, data, networkOptions);
+            networkRef.current = network;
+            lastSelectedNodeRef.current = null;
 
-            addClickHandler(networkRef, data);
-            const firstNodeId = nodes[0]?.id;
-            if (firstNodeId) {
-                networkRef.current.selectNodes([firstNodeId]);
-                onNodeClick(firstNodeId);
-                lastSelectedNodeRef.current = firstNodeId;
-            }
+            network.on('click', (params) => {
+                if (params.nodes?.length > 0) {
+                    const nodeId = params.nodes[0];
+                    const previousNodeId = lastSelectedNodeRef.current;
+                    const accepted = onNodeClickRef.current?.(nodeId);
+                    if (accepted === false) {
+                        if (previousNodeId != null) {
+                            network.selectNodes([previousNodeId]);
+                        } else {
+                            network.unselectAll();
+                        }
+                        return;
+                    }
+                    lastSelectedNodeRef.current = nodeId;
+                    return;
+                }
+
+                const clearSelection = () => {
+                    network.unselectAll();
+                    lastSelectedNodeRef.current = null;
+                };
+                const shouldClear = onBackgroundClickRef.current?.(clearSelection);
+                if (shouldClear === false) {
+                    if (lastSelectedNodeRef.current != null) {
+                        network.selectNodes([lastSelectedNodeRef.current]);
+                    }
+                    return;
+                }
+                clearSelection();
+            });
         } else {
-            dataRef.current = null;
+            lastSelectedNodeRef.current = null;
         }
 
         return () => {
@@ -118,6 +114,6 @@ const FeatureGraph = forwardRef(({graphData, onNodeClick, nodeFontSize}, ref) =>
             ref={containerRef} className={styles.graphArea}
         />
     );
-});
+};
 
 export default FeatureGraph;

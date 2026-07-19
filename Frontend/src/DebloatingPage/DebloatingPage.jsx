@@ -524,8 +524,16 @@ const DebloatingPage = () => {
     const getFeatureGraphData = (featureId, selectedType) => {
         setLoadingFeatureGraph(true);
         setLoadingCode(false);
+        setGraphData({nodes: [], edges: []});
         setCodeDiff('');
         setSelectedCodeNodeId('');
+        setDiffDrawerOpen(false);
+        setIsRepositoryDiff(false);
+        setIsCandidateDiff(false);
+        setRepositoryDiffError(false);
+        setCandidateFile(null);
+        setCandidateDraft('');
+        setCandidateDirty(false);
         if (selectedType === 'delete') {
             API.getMinGraphData(featureId).then((data) => {
                 setGraphData(data)
@@ -562,14 +570,6 @@ const DebloatingPage = () => {
         }
 
     }
-
-    const featureGraphRef = useRef();
-
-    useEffect(() => {
-        if (graphData && graphData.nodes?.length > 0) {
-            featureGraphRef.current?.selectRandomNode();
-        }
-    }, [graphData]);
 
     const [codeDiff, setCodeDiff] = useState('');
     const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
@@ -686,7 +686,7 @@ const DebloatingPage = () => {
     const getCodeDiff = (classNodeId) => {
         if (isCandidateDiff && candidateDirty) {
             message.warning(copy.saveBeforeClose);
-            return;
+            return false;
         }
         setIsRepositoryDiff(false);
         setIsCandidateDiff(false);
@@ -750,8 +750,10 @@ const DebloatingPage = () => {
             setLoadingCode(false);
             setDiffDrawerOpen(false);
             alert(copy.noAction)
+            return false;
         }
 
+        return true;
     }
 
     const getRepositoryDiff = () => {
@@ -811,6 +813,39 @@ const DebloatingPage = () => {
     };
 
     const [modal, contextHolder] = Modal.useModal();
+
+    const resetGraphDiffDrawer = () => {
+        setSelectedCodeNodeId('');
+        setDiffDrawerOpen(false);
+        setLoadingCode(false);
+        setCodeDiff('');
+        setIsRepositoryDiff(false);
+        setIsCandidateDiff(false);
+        setRepositoryDiffError(false);
+        setCandidateFile(null);
+        setCandidateDraft('');
+        setCandidateDirty(false);
+    };
+
+    const handleGraphBackgroundClick = (clearGraphSelection) => {
+        if (isCandidateDiff && candidateDirty) {
+            modal.confirm({
+                title: copy.switchTitle,
+                icon: <ExclamationCircleOutlined/>,
+                content: copy.switchDescription,
+                okText: copy.discard,
+                cancelText: copy.cancel,
+                onOk: () => {
+                    clearGraphSelection();
+                    resetGraphDiffDrawer();
+                },
+            });
+            return false;
+        }
+
+        resetGraphDiffDrawer();
+        return true;
+    };
 
     const onClickItem = (item) => {
         if (selectedFeatureItem == null || item.featureId != selectedFeatureItem.featureId) {
@@ -1806,9 +1841,9 @@ const DebloatingPage = () => {
                                         size={"large"}
                                     >
                                         <FeatureGraph
-                                            ref={featureGraphRef}
                                             graphData={graphData}
                                             onNodeClick={getCodeDiff}
+                                            onBackgroundClick={handleGraphBackgroundClick}
                                             nodeFontSize={17}
                                         />
                                     </Spin>
