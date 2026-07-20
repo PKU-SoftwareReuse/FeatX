@@ -71,6 +71,7 @@ services:
     volumes:
       - ./repos:/workspace/repos
       - ./RepoSummary/output:/app/RepoSummary/output
+      - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped

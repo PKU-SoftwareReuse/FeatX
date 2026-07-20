@@ -29,7 +29,8 @@ import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
-const GitDiffEditor = React.lazy(() => import("./GitDiffEditor/GitDiffEditor"));
+const loadGitDiffEditor = () => import("./GitDiffEditor/GitDiffEditor");
+const GitDiffEditor = React.lazy(loadGitDiffEditor);
 
 const DEBLOATING_THEME = {
     token: {
@@ -1672,6 +1673,16 @@ const DebloatingPage = () => {
     const candidateIsStaged = Boolean(
         candidateFile?.path && gitStatus.stagedPaths?.includes(candidateFile.path)
     );
+
+    useEffect(() => {
+        const candidateReady = confirmEnabled
+            && (selectedType === "delete" || selectedType === "edit" || selectedType === "add")
+            && Array.isArray(graphData?.nodes)
+            && graphData.nodes.some((node) => node?.type === "Modify");
+        if (candidateReady) {
+            loadGitDiffEditor();
+        }
+    }, [confirmEnabled, graphData, selectedType]);
     const showGitOperationActions = hasPendingFeatureOperation()
         && (confirmEnabled
             || stagedFileCount > 0

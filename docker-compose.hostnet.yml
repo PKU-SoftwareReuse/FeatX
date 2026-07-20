@@ -81,8 +81,9 @@ services:
       REPOSUMMARY_DIR: /app/RepoSummary
       LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
     volumes:
-      - ./repos:/workspace/repos
-      - ./RepoSummary/output:/app/RepoSummary/output
+      - featx-repos:/workspace/repos
+      - featx-reposummary-output:/app/RepoSummary/output
+      - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     restart: unless-stopped
 
   frontend:
@@ -100,3 +101,5 @@ services:
 
 volumes:
   featx-mysql-data:
+  featx-repos:
+  featx-reposummary-output:
