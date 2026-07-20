@@ -2,7 +2,6 @@ package cn.edu.pku.lixutian.service;
 
 import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
-import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.config.ProjectState;
@@ -20,6 +19,7 @@ import cn.edu.pku.lixutian.graph.SKG;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import com.github.javaparser.ParseException;
 import com.github.javaparser.StaticJavaParser;
@@ -111,9 +111,6 @@ public class CodeMapService {
 
     @Autowired
     private ProcessService processService;
-
-    @Autowired
-    private GenerateImportLinesService generateImportLinesService;
 
     @Autowired
     private CandidateCodeService candidateCodeService;
@@ -501,14 +498,18 @@ public class CodeMapService {
         FeatureGraphResult debloatGraph = getMaxGraph();
         debloatGraph.setDebloatType();
         debloatGraph.getNodes().stream()
-                .filter(node -> node.getType() == "Modify")
+                .filter(node -> "Modify".equals(node.getType()))
                 .forEach(node -> {
                     try {
-                        Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(node.getId());
+                        String javaFilePath = JavaFilePath.fromClassName(node.getId());
+                        Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(javaFilePath);
                         if (editedContent.isPresent()) {
-                            RewriteFileHelper.rewriteJavaFileContent(node.getId(), editedContent.get());
+                            RewriteFileHelper.rewriteJavaFileContent(javaFilePath, editedContent.get());
                         } else {
-                            RewriteFileHelper.rewriteFile(node.getId(), codeDiffController.deleteCodeByClass(node.getId()));
+                            RewriteFileHelper.rewriteFile(
+                                    javaFilePath,
+                                    codeDiffController.deleteCodeByClass(node.getId())
+                            );
                         }
                     } catch (IOException e) {
                         throw new RuntimeException(e);
@@ -633,20 +634,22 @@ public class CodeMapService {
         }
 
 
-        // 3. 生成import语句、更新邻接表、重写文件
+        // 3. 从已确认的完整候选代码更新邻接表并重写文件
         for (Map.Entry<String, String> entry : AgentService.modificationMap.entrySet()) {
             try {
-                Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(entry.getKey());
+                String javaFilePath = JavaFilePath.normalize(entry.getKey());
+                String currentFile = JavaFilePath.toClassName(javaFilePath);
+                String editedContent = candidateCodeService.authoritativeJavaContent(javaFilePath)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Review and confirm the complete candidate before updating CodeMap: " + javaFilePath
+                        ));
 
-                String allFiles = "";
                 List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
-                for (String javaFile : javaFiles) {
-                    allFiles += javaFile + "\n";
-                }
-                // 3.1 生成import语句
-                List<String> importLines = editedContent.isPresent()
-                        ? RewriteFileHelper.extractJavaImportLines(editedContent.get())
-                        : generateImportLinesService.generate(entry.getKey(), entry.getValue(), allFiles);
+                Set<String> javaClassNames = javaFiles.stream()
+                        .map(JavaFilePath::toClassName)
+                        .collect(Collectors.toSet());
+                // 3.1 imports 已由 Agent3 的 Search/Replace 直接编辑，不再调用额外 LLM
+                List<String> importLines = RewriteFileHelper.extractJavaImportLines(editedContent);
                 // 3.2 更新邻接表
                 // 3.2.1 出边
                 Set<String> imports = new HashSet<>();
@@ -657,15 +660,15 @@ public class CodeMapService {
                                 .replace("import ", "")
                                 .replace(";", "")
                                 .trim();
-                        if (javaFiles.contains(className)) {
+                        if (javaClassNames.contains(className)) {
                             imports.add(className);
                         }
                     }
                 }
-                String currentFile = entry.getKey();
-                String currentPackage = currentFile.substring(0, currentFile.lastIndexOf('.'));
+                int packageSeparator = currentFile.lastIndexOf('.');
+                String currentPackage = packageSeparator < 0 ? "" : currentFile.substring(0, packageSeparator);
                 // 3.2.2 出入双向边
-                Set<String> samePackageClasses = javaFiles.stream()
+                Set<String> samePackageClasses = javaClassNames.stream()
                         .filter(name -> !name.equals(currentFile)) // 排除当前类自己
                         .filter(name -> {
                             int lastDot = name.lastIndexOf('.');
@@ -703,19 +706,12 @@ public class CodeMapService {
                     }
                 }
                 // 3.3 重写文件
-                if (editedContent.isPresent()) {
-                    RewriteFileHelper.rewriteJavaFileContent(entry.getKey(), editedContent.get());
-                } else {
-                    RewriteFileHelper.rewriteFile(entry.getKey(), entry.getValue(), importLines);
-                }
+                RewriteFileHelper.rewriteJavaFileContent(javaFilePath, editedContent);
 
                 // 3.4 写入CodeMap数据库
                 try {
                     // 用 JavaParser 解析
-                    String candidateBody = editedContent
-                            .map(RewriteFileHelper::stripJavaPackageAndImports)
-                            .orElse(entry.getValue());
-                    CompilationUnit cu = StaticJavaParser.parse(candidateBody);
+                    CompilationUnit cu = StaticJavaParser.parse(editedContent);
 
                     // 访问所有方法
                     cu.findAll(MethodDeclaration.class).forEach(cd -> {

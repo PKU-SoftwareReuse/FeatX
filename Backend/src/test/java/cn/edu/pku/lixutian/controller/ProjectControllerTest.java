@@ -5,7 +5,9 @@ import cn.edu.pku.lixutian.dao.repository.GraphEdgeRepository;
 import cn.edu.pku.lixutian.dao.repository.ModuleRepository;
 import cn.edu.pku.lixutian.dao.repository.ProjectInfoRepository;
 import cn.edu.pku.lixutian.config.LtmConfig;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.service.ProcessService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -55,6 +58,9 @@ class ProjectControllerTest {
     @MockitoBean
     private CodeMapService codeMapService;
 
+    @MockitoBean
+    private AgentRunRegistry agentRunRegistry;
+
     @Autowired
     private ProjectController projectController;
 
@@ -80,6 +86,7 @@ class ProjectControllerTest {
         when(projectInfoRepository.findById(12)).thenReturn(Optional.of(project));
         when(projectInfoRepository.save(any(ProjectInfo.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        ProjectState.getInstance().setRepoId(null);
     }
 
     @Test
@@ -126,6 +133,21 @@ class ProjectControllerTest {
                         .content("{\"repoId\":12}"))
                 .andExpect(status().isOk());
 
+        verify(processService, never()).process();
+    }
+
+    @Test
+    void reopeningTheCurrentProjectDoesNotInvalidateAnActiveAgentRun() throws Exception {
+        ProjectState.getInstance().setRepoId(12);
+        doThrow(new IllegalStateException("active run"))
+                .when(agentRunRegistry).ensureCanPrepare();
+
+        mockMvc.perform(post("/project/select")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"repoId\":12}"))
+                .andExpect(status().isOk());
+
+        verify(agentRunRegistry, never()).ensureCanPrepare();
         verify(processService, never()).process();
     }
 

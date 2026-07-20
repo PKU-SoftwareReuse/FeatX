@@ -16,6 +16,7 @@ import cn.edu.pku.lixutian.helper.GitRemoteHelper;
 import cn.edu.pku.lixutian.helper.RepoSummaryHelper;
 import cn.edu.pku.lixutian.service.ProcessService;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.helper.StatisticHelper;
 import com.github.javaparser.ParseException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +59,9 @@ public class ProjectController {
     @Autowired
     CodeMapService codeMapService;
 
+    @Autowired
+    AgentRunRegistry agentRunRegistry;
+
     @GetMapping("/getList")
     public List<ProjectInfoResult> getProjectList() {
         return projectInfoRepository.findAll()
@@ -91,11 +95,22 @@ public class ProjectController {
 
     @PostMapping("/select")
     public void selectProject(@RequestBody SelectProjectRequest request) throws ParseException, IOException, InterruptedException {
+        if (request == null || request.getRepoId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project id is required.");
+        }
         ProjectInfo projectInfo = projectInfoRepository.findById(request.getRepoId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found."));
         ProjectType type = extractProjectType(projectInfo);
 
         ProjectState state = ProjectState.getInstance();
+        if (Objects.equals(state.getRepoId(), request.getRepoId())) {
+            // Opening the workspace that already owns the active Agent run is
+            // navigation, not a project switch. Reprocessing it would also
+            // invalidate the in-memory candidate the user is returning to.
+            return;
+        }
+
+        ensureWorkspaceCanChange();
         state.setRepoId(request.getRepoId());
         state.setProjectPath(repoId2Path(request.getRepoId()), type.name());
 
@@ -132,12 +147,23 @@ public class ProjectController {
         return LtmConfig.getRepoPath() + "/" + repoId;
     }
 
+    private void ensureWorkspaceCanChange() {
+        try {
+            agentRunRegistry.ensureCanPrepare();
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+        }
+    }
+
     @PostMapping("/drop")
     public void dropProject(@RequestBody SelectProjectRequest request) throws IOException {
         if (request == null || request.getRepoId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project id is required.");
         }
         Integer repoId = request.getRepoId();
+        if (java.util.Objects.equals(ProjectState.getInstance().getRepoId(), repoId)) {
+            ensureWorkspaceCanChange();
+        }
         if (!projectInfoRepository.existsById(repoId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found.");
         }

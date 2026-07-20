@@ -2,18 +2,18 @@ package cn.edu.pku.lixutian.service;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
-import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import cn.edu.pku.lixutian.service.code.AgentService;
-import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -32,15 +32,10 @@ import java.util.stream.Stream;
 public class CandidateCodeService {
     private static final long MAX_EDITABLE_FILE_BYTES = 2 * 1024 * 1024;
 
-    private final GenerateImportLinesService generateImportLinesService;
     private final Map<String, CandidateDocument> candidateDocuments = new ConcurrentHashMap<>();
     private final Set<String> expectedCandidateKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> committedCandidateKeys = ConcurrentHashMap.newKeySet();
     private String operationId;
-
-    public CandidateCodeService(GenerateImportLinesService generateImportLinesService) {
-        this.generateImportLinesService = generateImportLinesService;
-    }
 
     public synchronized void clear() {
         candidateDocuments.clear();
@@ -130,44 +125,36 @@ public class CandidateCodeService {
             String operation,
             String candidateBody
     ) throws IOException, InterruptedException {
-        CandidateDocument cached = candidateDocuments.get(classId);
+        String filePath = JavaFilePath.normalize(classId);
+        CandidateDocument cached = candidateDocuments.get(filePath);
         if (cached != null) {
             return toResult(cached);
         }
 
-        Path sourceFile = RewriteFileHelper.resolveJavaFilePath(classId).toAbsolutePath().normalize();
+        Path sourceFile = RewriteFileHelper.resolveJavaFilePath(filePath).toAbsolutePath().normalize();
         boolean originalExists = Files.isRegularFile(sourceFile);
         String originalContent = originalExists ? readEditableFile(sourceFile) : "";
-        List<String> importLines = null;
-        boolean authoritative = "delete".equalsIgnoreCase(operation);
-        String warning = null;
-
-        if (!authoritative && candidateBody != null && !candidateBody.isBlank()) {
-            try {
-                List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
-                importLines = generateImportLinesService.generate(
-                        classId,
-                        candidateBody,
-                        String.join("\n", javaFiles)
-                );
-                authoritative = true;
-            } catch (RuntimeException exception) {
-                warning = "Import generation failed; existing imports are shown until the candidate is saved.";
-            }
+        boolean deletion = "delete".equalsIgnoreCase(operation);
+        if (!deletion && (candidateBody == null || candidateBody.isBlank())) {
+            throw new IllegalArgumentException("Generated Java candidate content cannot be empty.");
         }
-
-        String modifiedContent = RewriteFileHelper.buildJavaFileContent(classId, candidateBody, importLines);
+        String modifiedContent = deletion
+                ? RewriteFileHelper.buildJavaFileContent(filePath, candidateBody, null)
+                : candidateBody;
+        if (!modifiedContent.isBlank()) {
+            validateJavaCandidate(filePath, modifiedContent);
+        }
         CandidateDocument document = new CandidateDocument(
-                classId,
+                filePath,
                 projectRelativePath(sourceFile),
                 "java",
                 originalContent,
                 modifiedContent,
                 originalExists,
-                authoritative,
-                warning
+                true,
+                null
         );
-        candidateDocuments.put(classId, document);
+        candidateDocuments.put(filePath, document);
         return toResult(document);
     }
 
@@ -214,7 +201,8 @@ public class CandidateCodeService {
             return preparePythonCandidate(key, key, modifications.get(key));
         }
 
-        CandidateDocument document = candidateDocuments.get(key);
+        String normalizedKey = JavaFilePath.normalize(key);
+        CandidateDocument document = candidateDocuments.get(normalizedKey);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before saving it.");
         }
@@ -229,17 +217,91 @@ public class CandidateCodeService {
         document.warning = null;
 
         Map<String, String> modifications = mutableModifications();
-        modifications.put(key, RewriteFileHelper.stripJavaPackageAndImports(updatedContent));
+        modifications.remove(key);
+        modifications.put(normalizedKey, updatedContent);
         AgentService.modificationMap = modifications;
         return toResult(document);
     }
 
     public Optional<String> authoritativeJavaContent(String classId) {
-        CandidateDocument document = candidateDocuments.get(classId);
+        CandidateDocument document = candidateDocuments.get(JavaFilePath.normalize(classId));
         if (document == null || !document.authoritative) {
             return Optional.empty();
         }
         return Optional.of(document.modifiedContent);
+    }
+
+    /**
+     * Performs an offline consistency check before the final commit.
+     *
+     * <p>This deliberately does not invoke Maven, Gradle, or a target-project
+     * compiler. It only validates the candidate state already held by FeatX
+     * and parses Java source with the JavaParser bundled with this service.</p>
+     */
+    public synchronized void validateCompleteCandidateSet() {
+        Set<String> keys = allCandidateKeys();
+        if (keys.isEmpty()) {
+            throw new IllegalStateException("There are no generated candidates to commit.");
+        }
+
+        for (String key : keys.stream().sorted().toList()) {
+            CandidateDocument document = candidateDocuments.get(key);
+            if (document == null) {
+                throw new IllegalStateException(
+                        "Candidate " + key + " has not been reviewed in the Diff Panel."
+                );
+            }
+            if (!document.authoritative) {
+                throw new IllegalStateException(
+                        "Candidate " + key + " is not ready. Review and save it first."
+                );
+            }
+            if ("java".equals(document.language) && !document.modifiedContent.isBlank()) {
+                validateJavaCandidate(key, document.modifiedContent);
+            }
+        }
+    }
+
+    private void validateJavaCandidate(String key, String content) {
+        String normalizedKey = JavaFilePath.normalize(key);
+        String expectedTypeName = JavaFilePath.simpleTypeName(normalizedKey);
+        CompilationUnit compilationUnit;
+        try {
+            compilationUnit = StaticJavaParser.parse(content);
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("Candidate " + normalizedKey + " is not valid Java source.", exception);
+        }
+
+        boolean containsExpectedType = compilationUnit.getTypes().stream()
+                .map(TypeDeclaration::getNameAsString)
+                .anyMatch(expectedTypeName::equals);
+        if (!containsExpectedType) {
+            throw new IllegalStateException(
+                    "Candidate " + normalizedKey + " must declare the top-level type " + expectedTypeName + "."
+            );
+        }
+
+        compilationUnit.getTypes().stream()
+                .filter(TypeDeclaration::isPublic)
+                .map(TypeDeclaration::getNameAsString)
+                .filter(typeName -> !expectedTypeName.equals(typeName))
+                .findFirst()
+                .ifPresent(typeName -> {
+                    throw new IllegalStateException(
+                            "Candidate " + normalizedKey + " cannot declare public top-level type " + typeName + "."
+                    );
+                });
+
+        String expectedPackage = JavaFilePath.packageName(normalizedKey);
+        String actualPackage = compilationUnit.getPackageDeclaration()
+                .map(declaration -> declaration.getNameAsString())
+                .orElse("");
+        if (!expectedPackage.equals(actualPackage)) {
+            throw new IllegalStateException(
+                    "Candidate " + normalizedKey + " must declare package "
+                            + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
+            );
+        }
     }
 
     public MaterializedCandidate materializeCandidate(String key) throws IOException {
@@ -252,6 +314,11 @@ public class CandidateCodeService {
         CandidateDocument document = candidateDocuments.get(key);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before confirming the file.");
+        }
+        if (!document.authoritative) {
+            throw new IllegalStateException(
+                    "This candidate is not ready. Review and save it before staging."
+            );
         }
 
         Path projectRoot = projectRoot();
@@ -308,7 +375,7 @@ public class CandidateCodeService {
                 Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
                 sourceFile = safeResolve(sourceRoot, key);
             } else {
-                sourceFile = RewriteFileHelper.resolveJavaFilePath(key).toAbsolutePath().normalize();
+                sourceFile = RewriteFileHelper.resolveJavaFilePath(JavaFilePath.normalize(key)).toAbsolutePath().normalize();
             }
             return Optional.of(projectRelativePath(sourceFile));
         } catch (IllegalArgumentException exception) {

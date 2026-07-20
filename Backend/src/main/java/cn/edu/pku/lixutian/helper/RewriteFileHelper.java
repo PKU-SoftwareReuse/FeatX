@@ -5,7 +5,6 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.printer.configuration.PrettyPrinterConfiguration;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,13 +24,7 @@ public class RewriteFileHelper {
 
     public static Path resolveJavaFilePath(String fullName) {
         String absoluteSrcPath = ProjectState.getInstance().getSrcPath();
-        String relativePath = fullName.replace('.', File.separatorChar) + ".java";
-        Path sourceRoot = Paths.get(absoluteSrcPath).normalize();
-        Path filePath = sourceRoot.resolve(relativePath).normalize();
-        if (!filePath.startsWith(sourceRoot)) {
-            throw new IllegalArgumentException("Invalid Java class name: " + fullName);
-        }
-        return filePath;
+        return JavaFilePath.resolve(Paths.get(absoluteSrcPath), fullName);
     }
 
     public static void rewriteFile(String fullName, String content) throws IOException {
@@ -68,12 +61,12 @@ public class RewriteFileHelper {
             }
         } else {
             // === 文件不存在：自动生成 package，忽略 import ===
-            int lastDot = fullName.lastIndexOf('.');
+            String className = JavaFilePath.toClassName(fullName);
+            int lastDot = className.lastIndexOf('.');
             if (lastDot != -1) {
-                String packageName = fullName.substring(0, lastDot);
+                String packageName = className.substring(0, lastDot);
                 packageLine = "package " + packageName + ";";
             }
-            assert generatedImportLines != null;
             importLines = generatedImportLines;
         }
         importLines = sanitizeImportLines(importLines);

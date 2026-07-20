@@ -2,6 +2,7 @@ package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +27,9 @@ class CodeDiffControllerTest {
 
     @MockitoBean
     private CandidateCodeService candidateCodeService;
+
+    @MockitoBean
+    private AgentRunRegistry agentRunRegistry;
 
     @Test
     void repositoryDiffIncludesTrackedAndUntrackedFiles(@TempDir Path repoPath) throws Exception {

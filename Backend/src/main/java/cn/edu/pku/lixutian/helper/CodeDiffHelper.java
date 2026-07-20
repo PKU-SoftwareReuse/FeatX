@@ -129,7 +129,10 @@ public class CodeDiffHelper {
             originalCode = "";
         }
 
-        String newCode = ModifyAgentService.modificationMap.get(classId);
+        String newCode = ModifyAgentService.modificationMap.get(JavaFilePath.fromClassName(classId));
+        if (newCode == null) {
+            newCode = ModifyAgentService.modificationMap.get(classId);
+        }
         if (newCode == null) {
             newCode = originalCode;
         }

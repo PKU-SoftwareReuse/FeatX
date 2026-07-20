@@ -7,4 +7,5 @@ import lombok.Setter;
 @Setter
 public class StageCandidateRequest {
     private String key;
+    private String runId;
 }

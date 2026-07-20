@@ -1,4 +1,4 @@
-import axios, {options} from "axios";
+import axios from "axios";
 
 // const BASE_URL = "http://101.201.65.66:3000/api";
 // const BASE_URL = "/api";
@@ -79,8 +79,8 @@ const API = {
         })
             .then(response => response.data);
     },
-    getNewGraphData: () => {
-        return axios.get(`${BASE_URL}/graph/feature/newGraph`)
+    getNewGraphData: (runId) => {
+        return axios.get(`${BASE_URL}/graph/feature/newGraph`, {params: {runId}})
             .then(response => response.data);
     },
 
@@ -128,30 +128,32 @@ const API = {
         return axios.get(`${BASE_URL}/code/repositoryDiff`)
             .then(response => response.data);
     },
-    getCandidateDiff: (classId, operation) => {
+    getCandidateDiff: (classId, operation, runId) => {
         return axios.get(`${BASE_URL}/code/candidateDiff`, {
-            params: {classId, operation}
+            params: {classId, operation, runId}
         }).then(response => response.data);
     },
-    updateCandidateDiff: (key, operation, content) => {
+    updateCandidateDiff: (key, operation, content, runId) => {
         return axios.put(`${BASE_URL}/code/candidateDiff`, {
             key,
             operation,
             content,
+            runId,
         }).then(response => response.data);
     },
     getGitWorkspaceStatus: () => {
         return axios.get(`${BASE_URL}/code/git/status`)
             .then(response => response.data);
     },
-    stageCandidateFile: (key) => {
-        return axios.post(`${BASE_URL}/code/git/stage`, {key})
+    stageCandidateFile: (key, runId) => {
+        return axios.post(`${BASE_URL}/code/git/stage`, {key, runId})
             .then(response => response.data);
     },
-    commitFeatureChanges: (operation, commitMessage) => {
+    commitFeatureChanges: (operation, commitMessage, runId) => {
         return axios.post(`${BASE_URL}/code/git/commit`, {
             operation,
             message: commitMessage,
+            runId,
         }).then(response => response.data);
     },
     discardFeatureChanges: () => {
@@ -170,34 +172,41 @@ const API = {
         return axios.post(`${BASE_URL}/feature/modify`, {
             featureDescription: featureDescription,
             language: language,
-        })
+        }).then(response => response.data)
     },
-    confirmModify: () => {
-        return axios.post(`${BASE_URL}/feature/confirm/modify`)
+    confirmModify: (runId) => {
+        return axios.post(`${BASE_URL}/feature/confirm/modify`, null, {params: {runId}})
             .then(response => response.data);
     },
 
     addFeature: (requestData) => {
         return axios.post(`${BASE_URL}/feature/add`, requestData)
+            .then(response => response.data)
     },
-    confirmAdd: () => {
-        return axios.post(`${BASE_URL}/feature/confirm/add`)
+    confirmAdd: (runId) => {
+        return axios.post(`${BASE_URL}/feature/confirm/add`, null, {params: {runId}})
             .then(response => response.data);
     },
     getLlmModels: () => {
         return axios.get(`${BASE_URL}/llm/models`)
             .then(response => response.data);
     },
-    getLlmResponse: (language, model) => {
-        const query = new URLSearchParams({language, model});
+    getLlmResponse: (runId, language, model) => {
+        const query = new URLSearchParams({runId});
+        if (language) query.set('language', language);
+        if (model) query.set('model', model);
         return new EventSource(`${BASE_URL}/llm/get?${query.toString()}`)
+    },
+    getAgentRun: (runId) => {
+        return axios.get(`${BASE_URL}/llm/run`, {params: {runId}})
+            .then(response => response.data);
     },
     getLlmProgress: () => {
         return axios.get(`${BASE_URL}/llm/progress`)
             .then(response => response.data);
     },
-    getFocusGraphStages: () => {
-        return axios.get(`${BASE_URL}/llm/focusgraph/stages`)
+    getFocusGraphStages: (runId) => {
+        return axios.get(`${BASE_URL}/llm/focusgraph/stages`, {params: {runId}})
             .then(response => response.data);
     },
 

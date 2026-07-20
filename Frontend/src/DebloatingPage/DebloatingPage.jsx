@@ -49,6 +49,9 @@ const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
 const WORKSPACE_MAX_WIDTH = 1600;
 const DIFF_DRAWER_LAYOUT_SETTLE_MS = 360;
+const ACTIVE_RUN_STORAGE_KEY = 'featx.activeRunId';
+const CANDIDATE_DRAFT_STORAGE_PREFIX = 'featx.candidateDraft.';
+const FEATURE_REQUEST_DRAFT_KEY = 'featx.featureRequestDraft';
 
 const EMPTY_GIT_STATUS = {
     branch: '',
@@ -94,6 +97,59 @@ const clampDiffDrawerWidth = (width) => {
 const getDefaultDiffDrawerWidth = () => {
     const viewportWidth = typeof window === "undefined" ? 1440 : window.innerWidth;
     return clampDiffDrawerWidth(viewportWidth * DIFF_DRAWER_DEFAULT_RATIO);
+};
+
+const candidateDraftStorageKey = (runId, candidateKey) => (
+    `${CANDIDATE_DRAFT_STORAGE_PREFIX}${encodeURIComponent(runId || '')}.${encodeURIComponent(candidateKey || '')}`
+);
+
+const loadCandidateDraft = (runId, candidate) => {
+    if (!runId || !candidate?.key) return null;
+    try {
+        const stored = JSON.parse(sessionStorage.getItem(candidateDraftStorageKey(runId, candidate.key)) || 'null');
+        if (!stored || stored.baseContent !== (candidate.modifiedContent || '')) return null;
+        return typeof stored.draft === 'string' ? stored.draft : null;
+    } catch (error) {
+        return null;
+    }
+};
+
+const removeCandidateDraft = (runId, candidateKey) => {
+    if (!runId || !candidateKey) return;
+    try {
+        sessionStorage.removeItem(candidateDraftStorageKey(runId, candidateKey));
+    } catch (error) {
+        // Ignore unavailable browser storage.
+    }
+};
+
+const removeRunCandidateDrafts = (runId) => {
+    if (!runId) return;
+    try {
+        const prefix = `${CANDIDATE_DRAFT_STORAGE_PREFIX}${encodeURIComponent(runId)}.`;
+        Object.keys(sessionStorage)
+            .filter((key) => key.startsWith(prefix))
+            .forEach((key) => sessionStorage.removeItem(key));
+    } catch (error) {
+        // Storage is an extra recovery layer; the backend candidate remains authoritative.
+    }
+};
+
+const loadFeatureRequestDraft = (repositoryId) => {
+    try {
+        const draft = JSON.parse(sessionStorage.getItem(FEATURE_REQUEST_DRAFT_KEY) || 'null');
+        return draft && String(draft.repositoryId) === String(repositoryId) ? draft : null;
+    } catch (error) {
+        return null;
+    }
+};
+
+const clearFeatureRequestDraft = () => {
+    try {
+        sessionStorage.removeItem(FEATURE_REQUEST_DRAFT_KEY);
+    } catch (error) {
+        // Ignore unavailable browser storage.
+    }
 };
 
 const DEBLOATING_COPY = {
@@ -166,7 +222,11 @@ const DEBLOATING_COPY = {
         submittingFeatureModification: "正在提交功能修改。",
         preparingModification: "正在准备修改。",
         streamingPythonAgent: "正在流式生成 Python 代码。",
+        streamingAgent: "正在执行三阶段 Agent 代码生成。",
         codeGenerationFinished: "代码生成已完成。请检查差异后确认或放弃。",
+        codeGenerationFailed: "代码生成失败，未创建可确认的候选修改。",
+        restoringAgentRun: "正在恢复刷新前的 Agent 任务……",
+        failedRestoreAgentRun: "无法恢复刷新前的 Agent 任务，请重新提交需求。",
         pythonDeleteReady: "Python 删除差异已准备好。请检查受影响文件后确认或放弃。",
         focusGraphReady: "查看 Python FocusGraph 的初始、扩展和推理阶段。",
         focusGraphPending: "Python 新增/修改提交后可查看 FocusGraph 阶段。",
@@ -252,7 +312,11 @@ const DEBLOATING_COPY = {
         submittingFeatureModification: "Submitting feature modification.",
         preparingModification: "Preparing modification.",
         streamingPythonAgent: "Streaming Python Agent code generation.",
+        streamingAgent: "Running the three-stage Agent code generation.",
         codeGenerationFinished: "Code generation finished. Review the diff and confirm or drop it.",
+        codeGenerationFailed: "Code generation failed; no candidate changes are available to confirm.",
+        restoringAgentRun: "Restoring the Agent run from before the refresh...",
+        failedRestoreAgentRun: "The Agent run from before the refresh could not be restored. Submit the request again.",
         pythonDeleteReady: "Deterministic Python delete diff is ready. Review the affected files and confirm or drop it.",
         focusGraphReady: "Show Python FocusGraph initial, expanded, and reasoning graphs.",
         focusGraphPending: "FocusGraph stages are available after Python Add/Modify submit.",
@@ -482,7 +546,6 @@ const DebloatingPage = () => {
     const progressTimerRef = useRef(null);
     const expectedProgressOperationRef = useRef(null);
     const graphRefreshTimerRef = useRef(null);
-    const chatCloseTimerRef = useRef(null);
     const eventSourceRef = useRef(null);
     const isPythonProject = currentProject?.projectType === "PYTHON";
 
@@ -494,10 +557,6 @@ const DebloatingPage = () => {
         if (graphRefreshTimerRef.current) {
             clearTimeout(graphRefreshTimerRef.current);
             graphRefreshTimerRef.current = null;
-        }
-        if (chatCloseTimerRef.current) {
-            clearTimeout(chatCloseTimerRef.current);
-            chatCloseTimerRef.current = null;
         }
     };
 
@@ -541,12 +600,40 @@ const DebloatingPage = () => {
             setCurrentProject(project)
             await refreshGitStatus()
             const res = await getFeatureData()
-            if (res.length > 0 && res[0].featureList.length > 0) {
+            const requestDraft = !activeRunId
+                ? loadFeatureRequestDraft(project?.repositoryId ?? project?.repoId)
+                : null
+            if (requestDraft?.operation === 'edit') {
+                const target = res.flatMap((module) => module.featureList || []).find(
+                    (feature) => String(feature.featureId) === String(requestDraft.featureId)
+                )
+                if (target) {
+                    goEdit(target)
+                    setEditedText(requestDraft.text || '')
+                    setRequestDraftDirty(true)
+                    return
+                }
+            }
+            if (requestDraft?.operation === 'add') {
+                const targetModule = res.find(
+                    (module) => String(module.moduleId) === String(requestDraft.moduleId)
+                )
+                if (targetModule) {
+                    goAdd(targetModule)
+                    setEditedText(requestDraft.text || '')
+                    setRequestDraftDirty(true)
+                    return
+                }
+            }
+            if (!activeRunId && res.length > 0 && res[0].featureList.length > 0) {
                 setActiveKey(res[0].moduleId)
                 handleSelect(res[0].featureList[0])
             }
         }
         fetchData()
+        // This is a one-time bootstrap. The functions intentionally use the
+        // initial session snapshot and would restart requests if dependencies changed.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
 
@@ -578,8 +665,21 @@ const DebloatingPage = () => {
     }
 
     const [graphData, setGraphData] = useState({nodes: [], edges: []});
+    const [activeRunId, setActiveRunId] = useState(() => sessionStorage.getItem(ACTIVE_RUN_STORAGE_KEY));
 
-    const getFeatureGraphData = (featureId, selectedType) => {
+    useEffect(() => {
+        try {
+            if (activeRunId) {
+                sessionStorage.setItem(ACTIVE_RUN_STORAGE_KEY, activeRunId)
+            } else {
+                sessionStorage.removeItem(ACTIVE_RUN_STORAGE_KEY)
+            }
+        } catch (error) {
+            // The backend still owns the run; storage only enables automatic refresh recovery.
+        }
+    }, [activeRunId]);
+
+    const getFeatureGraphData = (featureId, selectedType, runId = activeRunId) => {
         setLoadingFeatureGraph(true);
         setLoadingCode(false);
         setGraphData({nodes: [], edges: []});
@@ -615,7 +715,7 @@ const DebloatingPage = () => {
             setGraphData(null)
             setLoadingFeatureGraph(false);
         } else if (selectedType === 'new') {
-            API.getNewGraphData().then((data) => {
+            API.getNewGraphData(runId).then((data) => {
                 setGraphData(data)
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
@@ -647,10 +747,43 @@ const DebloatingPage = () => {
     const [candidateFile, setCandidateFile] = useState(null);
     const [candidateDraft, setCandidateDraft] = useState('');
     const [candidateDirty, setCandidateDirty] = useState(false);
+    const [requestDraftDirty, setRequestDraftDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
     const [stagingCandidate, setStagingCandidate] = useState(false);
     const [gitStatus, setGitStatus] = useState(EMPTY_GIT_STATUS);
     const [loadingConfirm, setLoadingConfirm] = useState(false);
+
+    useEffect(() => {
+        const shouldWarn = Boolean(activeRunId || candidateDirty || savingCandidate || requestDraftDirty);
+        if (!shouldWarn) return undefined;
+        const warnBeforeUnload = (event) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', warnBeforeUnload);
+        return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+    }, [activeRunId, candidateDirty, requestDraftDirty, savingCandidate]);
+
+    useEffect(() => {
+        if (!activeRunId || !candidateFile?.key) return;
+        const storageKey = candidateDraftStorageKey(activeRunId, candidateFile.key);
+        if (!candidateDirty) {
+            try {
+                sessionStorage.removeItem(storageKey);
+            } catch (error) {
+                // Ignore unavailable browser storage.
+            }
+            return;
+        }
+        try {
+            sessionStorage.setItem(storageKey, JSON.stringify({
+                baseContent: candidateFile.modifiedContent || '',
+                draft: candidateDraft,
+            }));
+        } catch (error) {
+            // Large files may exceed browser storage; the unload warning still protects them.
+        }
+    }, [activeRunId, candidateDirty, candidateDraft, candidateFile]);
 
     const refreshGitStatus = () => API.getGitWorkspaceStatus()
         .then((status) => {
@@ -774,10 +907,13 @@ const DebloatingPage = () => {
             && (selectedType === "delete" || selectedType === "edit" || selectedType === "add");
 
         if (candidateReady) {
-            API.getCandidateDiff(classNodeId, selectedType)
+            API.getCandidateDiff(classNodeId, selectedType, activeRunId)
                 .then((data) => {
+                    const restoredDraft = loadCandidateDraft(activeRunId, data);
                     setCandidateFile(data);
-                    setCandidateDraft(data.modifiedContent || '');
+                    setCandidateDraft(restoredDraft ?? (data.modifiedContent || ''));
+                    setCandidateDirty(restoredDraft !== null
+                        && restoredDraft !== (data.modifiedContent || ''));
                     setCodeDiff(data.diff || '');
                     setIsCandidateDiff(true);
                     setLoadingCode(false);
@@ -862,7 +998,7 @@ const DebloatingPage = () => {
         if (contentToSave === (candidateFile.modifiedContent || '')) return;
         setCandidateDraft(contentToSave);
         setSavingCandidate(true);
-        API.updateCandidateDiff(candidateFile.key, selectedType, contentToSave)
+        API.updateCandidateDiff(candidateFile.key, selectedType, contentToSave, activeRunId)
             .then((data) => {
                 setCandidateFile(data);
                 setCandidateDraft((currentDraft) => {
@@ -876,6 +1012,7 @@ const DebloatingPage = () => {
                 });
                 setCodeDiff(data.diff || '');
                 setSavingCandidate(false);
+                removeCandidateDraft(activeRunId, candidateFile.key);
                 message.success(copy.candidateSaved);
             })
             .catch((error) => {
@@ -892,11 +1029,12 @@ const DebloatingPage = () => {
         }
 
         setStagingCandidate(true);
-        API.stageCandidateFile(candidateFile.key)
+            API.stageCandidateFile(candidateFile.key, activeRunId)
             .then((status) => {
                 setGitStatus(status || EMPTY_GIT_STATUS);
                 setStagingCandidate(false);
                 setCandidateFile((current) => current ? {...current, warning: null} : current);
+                removeCandidateDraft(activeRunId, candidateFile.key);
                 message.success(copy.candidateStaged);
             })
             .catch((error) => {
@@ -971,6 +1109,8 @@ const DebloatingPage = () => {
         setModeTrans(false);
         setChatMode(false);
         setConfirmEnabled(false);
+        setRequestDraftDirty(false);
+        clearFeatureRequestDraft();
 
         setSelectedFeatureItem(item)
         setSelectedType("select")
@@ -999,6 +1139,8 @@ const DebloatingPage = () => {
         setModeTrans(false);
         setChatMode(false);
         setConfirmEnabled(false);
+        setRequestDraftDirty(false);
+        clearFeatureRequestDraft();
 
         setSelectedFeatureItem(item)
         setSelectedType("delete")
@@ -1031,6 +1173,8 @@ const DebloatingPage = () => {
         setConfirmEnabled(false);
         setModeTrans(false);
         setChatMode(false);
+        setRequestDraftDirty(false);
+        clearFeatureRequestDraft();
 
 
         setSelectedFeatureItem(item)
@@ -1040,6 +1184,26 @@ const DebloatingPage = () => {
     }
 
     const [editedText, setEditedText] = useState('')
+    const updateEditedText = (value) => {
+        setEditedText(value)
+        setRequestDraftDirty(true)
+    }
+
+    useEffect(() => {
+        if (!requestDraftDirty || activeRunId || !currentProject) return
+        if (selectedType !== 'edit' && selectedType !== 'add') return
+        try {
+            sessionStorage.setItem(FEATURE_REQUEST_DRAFT_KEY, JSON.stringify({
+                repositoryId: currentProject.repositoryId ?? currentProject.repoId,
+                operation: selectedType,
+                featureId: selectedType === 'edit' ? selectedFeatureItem?.featureId : null,
+                moduleId: selectedType === 'add' ? selectedFeatureItem?.moduleId : null,
+                text: editedText,
+            }))
+        } catch (error) {
+            // The unload warning remains active when browser storage is unavailable.
+        }
+    }, [activeRunId, currentProject, editedText, requestDraftDirty, selectedFeatureItem, selectedType])
     const [activeKey, setActiveKey] = useState(null);
     const [featureSearchText, setFeatureSearchText] = useState('');
     const [featureScrollTarget, setFeatureScrollTarget] = useState(null);
@@ -1187,6 +1351,8 @@ const DebloatingPage = () => {
         setModeTrans(false);
         setChatMode(false);
         setConfirmEnabled(false);
+        setRequestDraftDirty(false);
+        clearFeatureRequestDraft();
 
 
         setActiveKey(module.moduleId)
@@ -1225,57 +1391,124 @@ const DebloatingPage = () => {
     }, [chatContent]);
 
 
-    const handleChat = (eventSource) => {
+    const handleChat = (eventSource, runId, operationType = selectedType, restoring = false) => {
         clearPostAgentTimers()
         eventSourceRef.current = eventSource
+        let settled = false
+        let checkingConnection = false
         setChatContent("");
         setChatMode(true)
         setModeTrans(true)
-        if (isPythonProject) {
+        setOperationProgress({
+            operation: isPythonProject
+                ? operationType === 'add' ? "python-add" : "python-modify"
+                : operationType,
+            stage: "agent-stream",
+            message: restoring
+                ? copy.restoringAgentRun
+                : isPythonProject ? copy.streamingPythonAgent : copy.streamingAgent,
+            currentStep: isPythonProject ? 8 : 0,
+            totalSteps: isPythonProject ? 8 : 1,
+            running: true,
+            failed: false
+        })
+        const decodeEvent = (event) => {
+            try {
+                const binary = atob(event.data)
+                const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
+                return new TextDecoder().decode(bytes)
+            } catch (error) {
+                console.error('Failed to decode Agent SSE event:', error)
+                return ''
+            }
+        }
+        const appendEvent = (event) => {
+            const decoded = decodeEvent(event)
+            setChatContent(prev => prev + decoded);
+            return decoded
+        }
+        const resetReplay = () => {
+            setChatContent("")
+        }
+        const finishSuccess = (event) => {
+            if (settled) return
+            settled = true
+            appendEvent(event)
+            eventSource.close()
+            eventSourceRef.current = null
+            stopProgressPolling()
             setOperationProgress({
-                operation: selectedType === 'add' ? "python-add" : "python-modify",
-                stage: "agent-stream",
-                message: copy.streamingPythonAgent,
-                currentStep: 8,
-                totalSteps: 8,
-                running: true,
+                operation: isPythonProject
+                    ? operationType === 'add' ? "python-add" : "python-modify"
+                    : operationType,
+                stage: "complete",
+                message: copy.codeGenerationFinished,
+                currentStep: isPythonProject ? 8 : 1,
+                totalSteps: isPythonProject ? 8 : 1,
+                running: false,
                 failed: false
             })
-        }
-        eventSource.onmessage = (event) => {
-            const decoded = decodeURIComponent(escape(atob(event.data)));
-            setChatContent(prev => prev + decoded);
-        };
-        eventSource.onerror = () => {
-
-            eventSource.close(); // 关闭连接
-            eventSourceRef.current = null
-            if (isPythonProject) {
-                stopProgressPolling()
-                setOperationProgress({
-                    operation: selectedType === 'add' ? "python-add" : "python-modify",
-                    stage: "complete",
-                    message: copy.codeGenerationFinished,
-                    currentStep: 8,
-                    totalSteps: 8,
-                    running: false,
-                    failed: false
-                })
-            }
-            setLoadingFeatureList(false);
+            setLoadingFeatureList(false)
             setConfirmEnabled(true)
+            setRequestDraftDirty(false)
+            clearFeatureRequestDraft()
 
             graphRefreshTimerRef.current = setTimeout(() => {
-                getFeatureGraphData(0, "new")
+                getFeatureGraphData(0, "new", runId)
                 graphRefreshTimerRef.current = null
-            }, 1500); // 延迟 3000 毫秒（3秒）
+            }, 1500)
 
-            chatCloseTimerRef.current = setTimeout(() => {
-                setChatMode(false);
-                chatCloseTimerRef.current = null
-            }, 3000); // 延迟 3000 毫秒（3秒）
-        };
+        }
+        const finishFailure = (event, fallbackDetail = '') => {
+            if (settled) return
+            settled = true
+            const detail = event ? appendEvent(event) : fallbackDetail
+            eventSource.close()
+            eventSourceRef.current = null
+            stopProgressPolling()
+            setLoadingFeatureList(false)
+            setConfirmEnabled(false)
+            setActiveRunId(null)
+            setSubmitEnabled(true)
+            setRequestDraftDirty(true)
+            setModeTrans(true)
+            setChatMode(true)
+            setOperationProgress((current) => ({
+                ...(current || {}),
+                stage: "failed",
+                message: detail || copy.codeGenerationFailed,
+                running: false,
+                failed: true,
+                error: detail || copy.codeGenerationFailed,
+            }))
+            message.error(detail || copy.codeGenerationFailed)
+        }
+
+        eventSource.addEventListener('reset', resetReplay)
+        eventSource.addEventListener('status', appendEvent)
+        eventSource.addEventListener('delta', appendEvent)
+        eventSource.addEventListener('completed', finishSuccess)
+        eventSource.addEventListener('failed', finishFailure)
+        eventSource.onmessage = appendEvent
+        eventSource.onerror = () => {
+            if (settled || checkingConnection) return
+            checkingConnection = true
+            API.getAgentRun(runId)
+                .then((snapshot) => {
+                    checkingConnection = false
+                    if (snapshot?.status === 'FAILED') {
+                        finishFailure(null, snapshot.failureMessage || copy.codeGenerationFailed)
+                    }
+                    // PREPARED/RUNNING/COMPLETED runs remain recoverable. EventSource
+                    // reconnects and the backend replays the complete output.
+                })
+                .catch((error) => {
+                    checkingConnection = false
+                    finishFailure(null, errorMessage(error, copy.failedRestoreAgentRun))
+                })
+        }
         return () => {
+            settled = true
             eventSource.close();
             eventSourceRef.current = null;
         };
@@ -1283,6 +1516,86 @@ const DebloatingPage = () => {
 
     const [confirmEnabled, setConfirmEnabled] = useState(false)
     const [submitEnabled, setSubmitEnabled] = useState(false)
+    const restoredRunRef = useRef(null)
+
+    useEffect(() => {
+        if (!activeRunId || !currentProject || loadingModels || !featureData.length) return
+        if (restoredRunRef.current === activeRunId) return
+        restoredRunRef.current = activeRunId
+
+        API.getAgentRun(activeRunId)
+            .then(async (snapshot) => {
+                const operationType = snapshot.mode?.startsWith('add') ? 'add' : 'edit'
+                let targetFeature = null
+                let targetModule = null
+
+                if (operationType === 'add') {
+                    targetModule = featureData.find(
+                        (module) => String(module.moduleId) === String(snapshot.moduleId)
+                    )
+                    if (!targetModule) throw new Error(copy.failedRestoreAgentRun)
+                    targetFeature = {
+                        featureId: `restored-${snapshot.runId}`,
+                        featureDescription: snapshot.request || copy.newSubfeature,
+                        isNew: true,
+                        moduleId: targetModule.moduleId,
+                    }
+                    setFeatureData((modules) => modules.map((module) => {
+                        if (String(module.moduleId) !== String(targetModule.moduleId)) return module
+                        const withoutOldRestore = (module.featureList || []).filter(
+                            (feature) => feature.featureId !== targetFeature.featureId
+                        )
+                        return {...module, featureList: [targetFeature, ...withoutOldRestore]}
+                    }))
+                } else {
+                    targetModule = featureData.find((module) => (module.featureList || []).some(
+                        (feature) => String(feature.featureId) === String(snapshot.featureId)
+                    ))
+                    targetFeature = targetModule?.featureList?.find(
+                        (feature) => String(feature.featureId) === String(snapshot.featureId)
+                    )
+                    if (!targetFeature) throw new Error(copy.failedRestoreAgentRun)
+                }
+
+                setActiveKey(targetModule.moduleId)
+                setSelectedFeatureItem(targetFeature)
+                setSelectedType(operationType)
+                setEditedText(snapshot.request || getFeatureDescription(targetFeature, language))
+                setSubmitEnabled(false)
+                setConfirmEnabled(snapshot.status === 'COMPLETED')
+                setLoadingFeatureList(snapshot.status === 'PREPARED' || snapshot.status === 'RUNNING')
+                getFeatureGraphData(
+                    operationType === 'edit' ? targetFeature.featureId : null,
+                    operationType,
+                    snapshot.runId
+                )
+
+                if (isPythonProject) {
+                    await loadFocusGraphStages(snapshot.runId).catch(() => [])
+                }
+                handleChat(
+                    API.getLlmResponse(
+                        snapshot.runId,
+                        snapshot.language || apiLanguage,
+                        snapshot.model || selectedModel
+                    ),
+                    snapshot.runId,
+                    operationType,
+                    true
+                )
+            })
+            .catch((error) => {
+                console.error('Failed to restore Agent run:', error)
+                setActiveRunId(null)
+                setLoadingFeatureList(false)
+                setSubmitEnabled(true)
+                restoreSelectedFeature(featureData, null)
+                message.warning(errorMessage(error, copy.failedRestoreAgentRun))
+            })
+        // Recovery is keyed by restoredRunRef; callback dependencies are
+        // intentionally read from the render that claims this run id.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeRunId, currentProject, featureData, loadingModels, selectedModel])
 
     const hasPendingFeatureOperation = () => {
         const isFeatureOperation = selectedType === "delete" || selectedType === "edit" || selectedType === "add";
@@ -1294,6 +1607,7 @@ const DebloatingPage = () => {
         const operationRunning = Boolean(operationProgress?.running);
         return confirmEnabled
             || operationRunning
+            || requestDraftDirty
             || candidateDirty
             || stagedFileCount > 0
             || pendingCandidateCount > 0
@@ -1303,8 +1617,11 @@ const DebloatingPage = () => {
     const discardPendingChanges = async () => {
         setLoadingConfirm(true);
         try {
+            const discardedRunId = activeRunId;
             const status = await API.discardFeatureChanges();
             setGitStatus(status || EMPTY_GIT_STATUS);
+            eventSourceRef.current?.close()
+            eventSourceRef.current = null
             clearPostAgentTimers();
             clearFocusGraphStages();
             resetGraphDiffDrawer();
@@ -1313,6 +1630,10 @@ const DebloatingPage = () => {
             setModeTrans(false);
             setChatMode(false);
             setOperationProgress(null);
+            setRequestDraftDirty(false);
+            clearFeatureRequestDraft();
+            removeRunCandidateDrafts(discardedRunId);
+            setActiveRunId(null);
             setSelectedType(null);
             setSelectedFeatureItem(null);
             const features = await getFeatureData();
@@ -1453,12 +1774,12 @@ const DebloatingPage = () => {
         progressTimerRef.current = setInterval(() => fetchOperationProgress(expectedOperation), 1000)
     }
 
-    const loadFocusGraphStages = () => {
+    const loadFocusGraphStages = (runId) => {
         if (!isPythonProject || (selectedType !== "edit" && selectedType !== "add")) {
             clearFocusGraphStages()
             return Promise.resolve([])
         }
-        return API.getFocusGraphStages()
+        return API.getFocusGraphStages(runId)
             .then((stages) => {
                 const normalized = Array.isArray(stages) ? stages : []
                 setFocusGraphStages(normalized)
@@ -1473,6 +1794,8 @@ const DebloatingPage = () => {
 
     useEffect(() => {
         return () => {
+            eventSourceRef.current?.close()
+            eventSourceRef.current = null
             stopProgressPolling()
             clearPostAgentTimers()
         }
@@ -1562,10 +1885,15 @@ const DebloatingPage = () => {
             // console.log(editedText);
             API.modifyFeature(editedText, apiLanguage)
                 .then(async (data) => {
+                    const runId = data?.runId
+                    restoredRunRef.current = runId
+                    setRequestDraftDirty(false)
+                    clearFeatureRequestDraft()
+                    setActiveRunId(runId)
                     if (isPythonProject) {
-                        await loadFocusGraphStages()
+                        await loadFocusGraphStages(runId)
                     }
-                    handleChat(API.getLlmResponse(apiLanguage, selectedModel))
+                    handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Modify Feature:', error)
@@ -1597,10 +1925,15 @@ const DebloatingPage = () => {
 
             API.addFeature(requestData)
                 .then(async (data) => {
+                    const runId = data?.runId
+                    restoredRunRef.current = runId
+                    setRequestDraftDirty(false)
+                    clearFeatureRequestDraft()
+                    setActiveRunId(runId)
                     if (isPythonProject) {
-                        await loadFocusGraphStages()
+                        await loadFocusGraphStages(runId)
                     }
-                    handleChat(API.getLlmResponse(apiLanguage, selectedModel))
+                    handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -1626,6 +1959,7 @@ const DebloatingPage = () => {
     }
 
     const finishCompleteCommit = async (commitResult) => {
+        const completedRunId = activeRunId;
         const previousFeatureId = selectedFeatureItem?.featureId;
         const features = await getFeatureData();
         const preferredFeatureId = selectedType === 'add'
@@ -1634,13 +1968,15 @@ const DebloatingPage = () => {
         restoreSelectedFeature(features, preferredFeatureId);
         setConfirmEnabled(false);
         setOperationProgress(null);
+        removeRunCandidateDrafts(completedRunId);
+        setActiveRunId(null);
         resetGraphDiffDrawer();
     };
 
     const performFeatureCommit = async () => {
         setLoadingConfirm(true);
         try {
-            const result = await API.commitFeatureChanges(selectedType);
+            const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
             setGitStatus(result.status || EMPTY_GIT_STATUS);
             resetGraphDiffDrawer();
             if (result.commitScope === 'COMPLETE') {
@@ -1888,7 +2224,7 @@ const DebloatingPage = () => {
                                                                 submitEnabled={submitEnabled}
                                                                 selectedModel={selectedModel}
                                                                 editedText={editedText}
-                                                                setEditedText={setEditedText}
+                                                                setEditedText={updateEditedText}
                                                                 copy={copy}
                                                                 onClickItem={onClickItem}
                                                                 submitEdit={submitEdit}

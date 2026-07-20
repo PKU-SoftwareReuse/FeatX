@@ -1,6 +1,5 @@
 package cn.edu.pku.lixutian.service.code;
 
-import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -8,14 +7,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class PythonModifyAgentService extends AgentService {
@@ -43,34 +44,50 @@ public class PythonModifyAgentService extends AgentService {
         public List<ModifiedFile> modifiedFileList = new ArrayList<>();
     }
 
-    public SseEmitter runPipeline(String changeRequest, String originalFeatureDesc, String focusGraphContext, String fileList) {
-        return runPipelineForOperation("modify", changeRequest, originalFeatureDesc, focusGraphContext, fileList);
+    public SseEmitter runPipeline(String runId, String model) {
+        return runPipelineForOperation("modify", runId, model);
     }
 
-    public SseEmitter runAddPipeline(String featureRequest, String focusGraphContext, String fileList) {
-        return runPipelineForOperation("add", featureRequest, "", focusGraphContext, fileList);
-    }
-
-    public SseEmitter runDeletePipeline(String deleteRequest, String originalFeatureDesc, String focusGraphContext, String fileList) {
-        return runPipelineForOperation("delete", deleteRequest, originalFeatureDesc, focusGraphContext, fileList);
+    public SseEmitter runAddPipeline(String runId, String model) {
+        return runPipelineForOperation("add", runId, model);
     }
 
     private SseEmitter runPipelineForOperation(
             String operation,
-            String changeRequest,
-            String originalFeatureDesc,
-            String focusGraphContext,
-            String fileList
+            String runId,
+            String model
     ) {
-        SseEmitter emitter = new SseEmitter(0L);
-
-        Executors.newSingleThreadExecutor().submit(() -> {
+        AgentRunContext context = agentRunRegistry.claim(runId);
+        AgentRunEventStream eventStream = agentRunRegistry.eventStream(runId);
+        SseEmitter subscriber = agentRunRegistry.subscribe(runId);
+        AtomicBoolean terminal = new AtomicBoolean(false);
+        AtomicReference<Future<?>> futureRef = new AtomicReference<>();
+        Runnable cancel = () -> {
+            if (!terminal.compareAndSet(false, true)) {
+                return;
+            }
+            Future<?> future = futureRef.get();
+            if (future != null) {
+                future.cancel(true);
+            }
+            agentRunRegistry.fail(runId, new IOException("Python Agent stream was cancelled or timed out."));
+        };
+        Future<?> future;
+        try {
+            future = agentPipelineExecutor.submit(() -> {
             try {
                 pythonModifiedMethods = Collections.emptySet();
-                emitter.send(SseEmitter.event().data(encode("# === Stage I: Python Information Requirement Analysis (" + operation + ") ===\n")));
+                sendStatus(eventStream, "# === Stage I: Python Information Requirement Analysis (" + operation + ") ===\n");
                 String agent1Result = llmClient.streamGenerateWithPrompt(
-                        buildAgent1Prompt(operation, changeRequest, originalFeatureDesc, focusGraphContext, fileList),
-                        emitter
+                        buildAgent1Prompt(
+                                operation,
+                                context.newRequest(),
+                                context.oldRequest(),
+                                context.relatedCodes(),
+                                context.allFiles()
+                        ),
+                        eventStream,
+                        model
                 );
 
                 String extraInfo = "None";
@@ -79,7 +96,7 @@ public class PythonModifyAgentService extends AgentService {
                     StringBuilder extraBuilder = new StringBuilder();
                     for (AdditionalFile file : agent1ParsedResult.additionalFileList) {
                         String filename = normalizePythonPath(file.filename);
-                        String fileContent = ListFileHelper.getPythonFileContent(ProjectState.getInstance().getSrcPath(), filename);
+                        String fileContent = ListFileHelper.getPythonFileContent(context.sourceRoot(), filename);
                         extraBuilder.append("filename: ").append(filename).append("\n");
                         extraBuilder.append("recommendReason: ").append(file.recommendReason).append("\n");
                         extraBuilder.append("fileContent: ").append(fileContent).append("\n=======================\n");
@@ -87,50 +104,96 @@ public class PythonModifyAgentService extends AgentService {
                     extraInfo = extraBuilder.toString();
                 }
 
-                emitter.send(SseEmitter.event().data(encode("\n# === Stage II: Python File Planning (" + operation + ") ===\n")));
+                sendStatus(eventStream, "\n# === Stage II: Python File Planning (" + operation + ") ===\n");
                 String agent2Result = llmClient.streamGenerateWithPrompt(
-                        buildAgent2Prompt(operation, changeRequest, originalFeatureDesc, focusGraphContext, extraInfo),
-                        emitter
+                        buildAgent2Prompt(
+                                operation,
+                                context.newRequest(),
+                                context.oldRequest(),
+                                context.relatedCodes(),
+                                extraInfo
+                        ),
+                        eventStream,
+                        model
                 );
                 Agent2ParsedResult agent2ParsedResult = parseAgent2Result(agent2Result);
+                if (agent2ParsedResult.modifiedFileList.isEmpty()) {
+                    throw new IllegalStateException("Agent2 planned no Python file changes.");
+                }
 
                 Map<String, String> map = new HashMap<>();
                 for (ModifiedFile file : agent2ParsedResult.modifiedFileList) {
                     String filename = normalizePythonPath(file.filename);
                     if ("delete".equalsIgnoreCase(file.action)) {
-                        emitter.send(SseEmitter.event().data(encode("\n# === Stage III: Mark Python File Deletion " + filename + " ===\n")));
+                        sendStatus(eventStream, "\n# === Stage III: Mark Python File Deletion " + filename + " ===\n");
                         map.put(filename, DELETE_FILE_SENTINEL);
                         continue;
                     }
-                    emitter.send(SseEmitter.event().data(encode("\n# === Stage III: Concrete Python File Rewrite " + filename + " ===\n")));
-                    String fileContent = ListFileHelper.getPythonFileContent(ProjectState.getInstance().getSrcPath(), filename);
+                    sendStatus(eventStream, "\n# === Stage III: Concrete Python File Rewrite " + filename + " ===\n");
+                    String fileContent = ListFileHelper.getPythonFileContent(context.sourceRoot(), filename);
                     String plan = "filename: " + filename + "\n"
                             + "modificationPlan: " + file.plan + "\n"
                             + "modificationNote: " + file.note + "\n";
                     String agent3Result = llmClient.streamGenerateWithPrompt(
-                            buildAgent3Prompt(operation, changeRequest, originalFeatureDesc, plan, fileContent),
-                            emitter
+                            buildAgent3Prompt(
+                                    operation,
+                                    context.newRequest(),
+                                    context.oldRequest(),
+                                    plan,
+                                    fileContent
+                            ),
+                            eventStream,
+                            model
                     );
                     map.put(filename, parsePythonCodeBlock(agent3Result));
                 }
 
-                emitter.send(SseEmitter.event().data(encode("\n# === Pipeline complete! ===\n")));
-                modificationMap = map;
-                emitter.complete();
-            } catch (Exception e) {
+                agentRunRegistry.complete(runId, map);
+                terminal.set(true);
                 try {
-                    emitter.send(SseEmitter.event().data(encode("错误: " + e.getMessage())));
+                    sendCompleted(eventStream, "\n# === Pipeline complete! ===\n");
+                } catch (IOException ignored) {
+                    logger.debug("Python Agent run completed after its SSE client disconnected: {}", runId);
+                }
+            } catch (Exception e) {
+                if (terminal.get()) {
+                    try {
+                        if (agentRunRegistry.status(runId) == AgentRunRegistry.Status.COMPLETED) {
+                            return;
+                        }
+                    } catch (IllegalArgumentException | IllegalStateException ignored) {
+                        // The run was explicitly discarded while this worker was unwinding.
+                    }
+                }
+                terminal.set(true);
+                agentRunRegistry.fail(runId, e);
+                try {
+                    sendFailed(eventStream, "错误: " + e.getMessage());
                 } catch (IOException ignored) {
                 }
-                emitter.completeWithError(e);
             }
         });
+        } catch (RuntimeException exception) {
+            terminal.set(true);
+            agentRunRegistry.fail(runId, exception);
+            throw exception;
+        }
+        futureRef.set(future);
+        agentRunRegistry.registerCancellation(runId, cancel);
+        CompletableFuture.delayedExecutor(30, TimeUnit.MINUTES).execute(cancel);
 
-        return emitter;
+        return subscriber;
     }
 
     private Agent1ParsedResult parseAgent1Result(String agent1Result) throws JsonProcessingException {
         JsonNode root = objectMapper.readTree(extractJsonBlock(agent1Result));
+        if (!root.path("needAdditionalFile").isBoolean()
+                || !root.path("additionalFileList").isArray()) {
+            throw new IllegalArgumentException("Agent1 returned an invalid Python file-retrieval schema.");
+        }
+        if (root.path("additionalFileList").size() > 12) {
+            throw new IllegalArgumentException("Agent1 requested too many Python files.");
+        }
         Agent1ParsedResult result = new Agent1ParsedResult();
         result.needAdditionalFile = root.path("needAdditionalFile").asBoolean(false);
         for (JsonNode fileNode : root.path("additionalFileList")) {
@@ -139,11 +202,20 @@ public class PythonModifyAgentService extends AgentService {
             file.recommendReason = fileNode.path("recommendReason").asText();
             result.additionalFileList.add(file);
         }
+        if (result.needAdditionalFile != !result.additionalFileList.isEmpty()) {
+            throw new IllegalArgumentException("Agent1 Python retrieval flag does not match its file list.");
+        }
         return result;
     }
 
     private Agent2ParsedResult parseAgent2Result(String agent2Result) throws JsonProcessingException {
         JsonNode root = objectMapper.readTree(extractJsonBlock(agent2Result));
+        if (!root.path("modifiedFileList").isArray()) {
+            throw new IllegalArgumentException("Agent2 returned an invalid Python modification schema.");
+        }
+        if (root.path("modifiedFileList").size() > 20) {
+            throw new IllegalArgumentException("Agent2 planned too many Python files.");
+        }
         Agent2ParsedResult result = new Agent2ParsedResult();
         for (JsonNode fileNode : root.path("modifiedFileList")) {
             ModifiedFile file = new ModifiedFile();
@@ -263,10 +335,6 @@ public class PythonModifyAgentService extends AgentService {
             throw new IllegalArgumentException("Invalid Python filename: " + path);
         }
         return normalized;
-    }
-
-    private String encode(String input) {
-        return Base64.getEncoder().encodeToString(input.getBytes(StandardCharsets.UTF_8));
     }
 
     private String buildAgent1Prompt(String operation, String changeDesc, String originalDesc, String context, String fileList) {

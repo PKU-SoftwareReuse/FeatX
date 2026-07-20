@@ -3,7 +3,7 @@ import React, {useEffect, useState} from "react";
 import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
 import {Button, Card, Descriptions, Form, Input, message, Modal, Popconfirm, Popover, Progress, Segmented, Spin, Tag, Tooltip,} from "antd";
-import {DeleteOutlined, DownOutlined, GithubOutlined, SettingOutlined, SyncOutlined, TranslationOutlined} from '@ant-design/icons';
+import {DeleteOutlined, DownOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined, TranslationOutlined} from '@ant-design/icons';
 import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
@@ -52,6 +52,12 @@ const WELCOME_COPY = {
         step: "步骤",
         waiting: "等待中。",
         open: "打开",
+        openFailed: "无法打开项目。",
+        pendingOperationBlocksOpen: "另一个项目中还有尚未确认的 Agent 修改，请先返回该项目确认或放弃修改。",
+        discardBeforeSwitchTitle: "放弃当前修改并切换项目？",
+        discardBeforeSwitchDescription: "当前项目仍有未完成或未确认的 Agent 修改。继续将恢复当前项目到最近一次提交，并清除全部暂存、未暂存及非忽略的未跟踪文件；已有提交不会删除。完成后将打开目标项目。",
+        discardAndOpen: "放弃并打开",
+        discardAndSwitchFailed: "放弃当前修改或切换项目失败。",
         metrics: {
             language: "编程语言",
             linesOfCode: "代码行数",
@@ -111,6 +117,12 @@ const WELCOME_COPY = {
         step: "Step",
         waiting: "Waiting.",
         open: "Open",
+        openFailed: "Failed to open the project.",
+        pendingOperationBlocksOpen: "Another project still has unconfirmed Agent changes. Return to it and confirm or discard them first.",
+        discardBeforeSwitchTitle: "Discard current changes and switch projects?",
+        discardBeforeSwitchDescription: "The current project still has an unfinished or unconfirmed Agent change. Continuing restores it to the latest commit and removes all staged, unstaged, and non-ignored untracked files; existing commits are preserved. The target project will then open.",
+        discardAndOpen: "Discard and open",
+        discardAndSwitchFailed: "Failed to discard the current changes or switch projects.",
         metrics: {
             language: "Language",
             linesOfCode: "Line of Codes",
@@ -199,6 +211,7 @@ const WelcomePage = () => {
     const [settingsAction, setSettingsAction] = useState(null);
     const [summaryProgressByRepo, setSummaryProgressByRepo] = useState({});
     const [settingsForm] = Form.useForm();
+    const [modal, modalContextHolder] = Modal.useModal();
 
 
     useEffect(() => {
@@ -270,16 +283,46 @@ const WelcomePage = () => {
         };
     }, [hasPendingSummary]);
 
-    const handleConfirmButton = (repoId) => {
+    const handleConfirmButton = async (repoId) => {
         setLoadingAnalyse(true);
-
-        API.postProjectPath(repoId).then(response => {
+        try {
+            const currentProject = await API.getCurrentProject().catch(() => null);
+            if (String(currentProject?.repoId) !== String(repoId)) {
+                await API.postProjectPath(repoId);
+            }
             navigate('/debloating')
-            setLoadingAnalyse(false);
-        }).catch(error => {
+        } catch (error) {
             console.log(error)
+            if (error?.response?.status === 409) {
+                modal.confirm({
+                    title: copy.discardBeforeSwitchTitle,
+                    icon: <ExclamationCircleOutlined/>,
+                    content: copy.discardBeforeSwitchDescription,
+                    okText: copy.discardAndOpen,
+                    okButtonProps: {danger: true},
+                    cancelText: copy.cancel,
+                    onOk: async () => {
+                        setLoadingAnalyse(true);
+                        try {
+                            await API.discardFeatureChanges();
+                            await API.postProjectPath(repoId);
+                            navigate('/debloating');
+                        } catch (switchError) {
+                            console.log(switchError);
+                            message.error(
+                                switchError?.response?.data?.message || copy.discardAndSwitchFailed
+                            );
+                        } finally {
+                            setLoadingAnalyse(false);
+                        }
+                    },
+                });
+            } else {
+                message.error(error?.response?.data?.message || copy.openFailed);
+            }
+        } finally {
             setLoadingAnalyse(false);
-        })
+        }
     }
 
     const handleResummaryButton = (repoId) => {
@@ -446,6 +489,7 @@ const WelcomePage = () => {
 
     return (
         <div className={styles.welcomePage}>
+            {modalContextHolder}
 
             <div className={styles.languageSwitcher}>
                 <TranslationOutlined className={styles.languageIcon}/>

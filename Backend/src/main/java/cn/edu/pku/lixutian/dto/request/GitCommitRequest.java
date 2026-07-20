@@ -8,4 +8,5 @@ import lombok.Setter;
 public class GitCommitRequest {
     private String operation;
     private String message;
+    private String runId;
 }

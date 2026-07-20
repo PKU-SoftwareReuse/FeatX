@@ -3,7 +3,8 @@ package cn.edu.pku.lixutian.controller;
 import cn.edu.pku.lixutian.service.code.AddAgentService;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
-import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
+import cn.edu.pku.lixutian.service.code.AgentRunContext;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.service.code.ModifyAgentService;
 import cn.edu.pku.lixutian.service.code.PythonModifyAgentService;
 import cn.edu.pku.lixutian.config.ClusterState;
@@ -13,6 +14,8 @@ import cn.edu.pku.lixutian.dto.request.AddOrModifyRequest;
 import cn.edu.pku.lixutian.dto.result.FeatureGraphResult;
 import cn.edu.pku.lixutian.dto.result.FeatureResult;
 import cn.edu.pku.lixutian.dto.result.FocusGraphContextResult;
+import cn.edu.pku.lixutian.dto.result.AgentRunStartResult;
+import cn.edu.pku.lixutian.dto.result.AgentRunSnapshotResult;
 import cn.edu.pku.lixutian.graph.SKG;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
@@ -27,17 +30,21 @@ import cn.edu.pku.lixutian.service.llm.LlmClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javaparser.ast.body.TypeDeclaration;
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/llm")
@@ -58,8 +65,6 @@ public class LlmController {
     private OperationProgressService progressService;
 
     @Autowired
-    private GenerateImportLinesService generateImportLinesService;
-    @Autowired
     private CodeMapService codeMapService;
     @Autowired
     private LlmClient llmClient;
@@ -67,55 +72,77 @@ public class LlmController {
     @Autowired
     private CandidateCodeService candidateCodeService;
 
+    @Autowired
+    private AgentRunRegistry agentRunRegistry;
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    public void modifyFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+    public synchronized AgentRunStartResult modifyFeature(AddOrModifyRequest request)
+            throws IOException, InterruptedException {
+        validateFeatureRequest(request, false);
+        agentRunRegistry.ensureCanPrepare();
         resetCandidateState();
         if (ProjectState.getInstance().isPython()) {
-            modifyPythonFeature(request);
-            return;
+            return modifyPythonFeature(request);
         }
 
-        lastFocusGraphContext = null;
-        mode = "modify";
-        requestLanguage = AgentLanguage.orDefault(request.getLanguage());
-        ClusterState.getInstance().setAgentLanguage(requestLanguage);
-        newRequest = request.getFeatureDescription();
-        ClusterState.getInstance().setNewFeatureDescription(newRequest);
-        oldRequest = localizedDescription(
-                ClusterState.getInstance().getCandidateFeature().getFeatureDescription(),
-                ClusterState.getInstance().getCandidateFeature().getFeatureDescriptionCn(),
+        AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+        ClusterState state = ClusterState.getInstance();
+        FeatureResult candidateFeature = state.getCandidateFeature();
+        if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
+            throw new IllegalStateException("Please select a Java feature before modifying it.");
+        }
+        state.setAgentLanguage(requestLanguage);
+        String newRequest = request.getFeatureDescription();
+        state.setNewFeatureDescription(newRequest);
+        String oldRequest = localizedDescription(
+                candidateFeature.getFeatureDescription(),
+                candidateFeature.getFeatureDescriptionCn(),
                 requestLanguage
         );
 
-        relatedCodes = "";
+        StringBuilder relatedCodes = new StringBuilder();
         SKG maxGraph = SKG.getInstance().getMaxGraph();
         VertexMap vertexMap = VertexMap.getInstance();
-
         new FeatureGraphResult(maxGraph).getNodes().forEach(node -> {
             Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(node.getId());
-            GraphAggregationHelper contextHelper = new ContextHelper(maxGraph, classVertex, ClusterState.getInstance().getClusterIds());
-            String contextCode = contextHelper.generateCode();
-            relatedCodes += node.getId() + ":\n" + contextCode + "\n=======================\n";
+            GraphAggregationHelper contextHelper = new ContextHelper(
+                    maxGraph,
+                    classVertex,
+                    state.getClusterIds()
+            );
+            relatedCodes.append(node.getId()).append(":\n")
+                    .append(contextHelper.generateCode())
+                    .append("\n=======================\n");
         });
 
-
-        allFiles = "";
-        List<String> projectFiles = ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath());
-        for (String projectFile : projectFiles) {
-            allFiles += projectFile + "\n";
-        }
+        ProjectState project = ProjectState.getInstance();
+        AgentRunContext context = agentRunRegistry.prepare(
+                "modify",
+                newRequest,
+                oldRequest,
+                relatedCodes.toString(),
+                String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                requestLanguage,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                candidateFeature.getFeatureId(),
+                null,
+                List.of()
+        );
+        return new AgentRunStartResult(context.runId());
     }
 
-    private void modifyPythonFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+    private AgentRunStartResult modifyPythonFeature(AddOrModifyRequest request)
+            throws IOException, InterruptedException {
         progressService.start(
                 "python-modify",
                 8,
                 "start",
                 "Preparing Python Modify Feature request."
         );
-        mode = "modify-python";
-        newRequest = request.getFeatureDescription();
+        String newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
 
         FeatureResult candidateFeature = ClusterState.getInstance().getCandidateFeature();
@@ -125,7 +152,7 @@ public class LlmController {
         }
 
         try {
-            oldRequest = candidateFeature.getFeatureDescription();
+            String oldRequest = candidateFeature.getFeatureDescription();
 
             progressService.update(
                     "collect-code-map",
@@ -165,8 +192,7 @@ public class LlmController {
                     deltaQuery,
                     currentCodeMap
             );
-            lastFocusGraphContext = context;
-            relatedCodes = context.getContextPrompt();
+            String relatedCodes = context.getContextPrompt();
 
             progressService.update(
                     "prepare-agent",
@@ -174,76 +200,115 @@ public class LlmController {
                     7,
                     8
             );
-            allFiles = projectFileList();
+            String allFiles = projectFileList();
             progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+            ProjectState project = ProjectState.getInstance();
+            AgentRunContext run = agentRunRegistry.prepare(
+                    "modify-python",
+                    newRequest,
+                    oldRequest,
+                    relatedCodes,
+                    allFiles,
+                    AgentLanguage.orDefault(request.getLanguage()),
+                    project.getSrcPath(),
+                    project.getProjectPath(),
+                    project.getRepoId(),
+                    candidateFeature.getFeatureId(),
+                    null,
+                    context.getGraphStages()
+            );
+            return new AgentRunStartResult(run.runId());
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
             throw e;
         }
     }
 
-    public void addFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+    public synchronized AgentRunStartResult addFeature(AddOrModifyRequest request)
+            throws IOException, InterruptedException {
+        validateFeatureRequest(request, true);
+        agentRunRegistry.ensureCanPrepare();
         resetCandidateState();
         if (ProjectState.getInstance().isPython()) {
-            addPythonFeature(request);
-            return;
+            return addPythonFeature(request);
         }
 
-        lastFocusGraphContext = null;
-        mode = "add";
-        requestLanguage = AgentLanguage.orDefault(request.getLanguage());
-        ClusterState.getInstance().setAgentLanguage(requestLanguage);
-        newRequest = request.getFeatureDescription();
-        ClusterState.getInstance().setNewFeatureDescription(newRequest);
+        AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+        String newRequest = request.getFeatureDescription();
+        ClusterState state = ClusterState.getInstance();
+        state.setAgentLanguage(requestLanguage);
+        state.setNewFeatureDescription(newRequest);
 
-        ClusterState.getInstance().setCandidateModuleId(request.getModuleId());
+        state.setCandidateModuleId(request.getModuleId());
         List<Feature> features = codeMapService.getFeaturesByModuleId(request.getModuleId());
 
-        relatedCodes = "";
-        for (int i = 0; i < features.size(); i++) {
-            Feature feature = features.get(i);
-            if (i > 3) {
-                break;
+        StringBuilder relatedCodes = new StringBuilder();
+        List<Feature> referenceFeatures = features.stream()
+                .sorted(java.util.Comparator.comparingInt(
+                        (Feature feature) -> relevanceScore(
+                                newRequest,
+                                localizedDescription(feature.getFeatureDesc(), feature.getFeatureDescCN(), requestLanguage)
+                        )
+                ).reversed())
+                .limit(4)
+                .toList();
+        try {
+            for (Feature feature : referenceFeatures) {
+                String featureDescription = localizedDescription(
+                        feature.getFeatureDesc(),
+                        feature.getFeatureDescCN(),
+                        requestLanguage
+                );
+                relatedCodes.append(requestLanguage.featureLabel()).append("\n\"")
+                        .append(featureDescription).append("\": \n\n");
+                codeMapService.selectFeature(feature.getId());
+                SKG maxGraph = SKG.getInstance().getMaxGraph();
+                VertexMap vertexMap = VertexMap.getInstance();
+
+                new FeatureGraphResult(maxGraph).getNodes().forEach(node -> {
+                    Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(node.getId());
+                    GraphAggregationHelper contextHelper = new ContextHelper(
+                            maxGraph,
+                            classVertex,
+                            state.getClusterIds()
+                    );
+                    relatedCodes.append(node.getId()).append(":\n")
+                            .append(contextHelper.generateCode())
+                            .append("\n-----------------------\n");
+                });
+                relatedCodes.append("\n=======================\n\n");
             }
-
-            String featureDescription = localizedDescription(
-                    feature.getFeatureDesc(),
-                    feature.getFeatureDescCN(),
-                    requestLanguage
-            );
-            relatedCodes += requestLanguage.featureLabel() + "\n" + "\"" + featureDescription + "\": \n\n";
-            codeMapService.selectFeature(feature.getId());
-            SKG maxGraph = SKG.getInstance().getMaxGraph();
-            VertexMap vertexMap = VertexMap.getInstance();
-
-            new FeatureGraphResult(maxGraph).getNodes().forEach(node -> {
-                Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(node.getId());
-                GraphAggregationHelper contextHelper = new ContextHelper(maxGraph, classVertex, ClusterState.getInstance().getClusterIds());
-                String contextCode = contextHelper.generateCode();
-                relatedCodes += node.getId() + ":\n" + contextCode + "\n-----------------------\n";
-            });
-            relatedCodes += "\n=======================\n\n";
+        } finally {
+            codeMapService.selectFeature(null);
         }
 
-        allFiles = "";
-        List<String> projectFiles = ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath());
-        for (String projectFile : projectFiles) {
-            allFiles += projectFile + "\n";
-        }
-
-        codeMapService.selectFeature(null);
+        ProjectState project = ProjectState.getInstance();
+        AgentRunContext context = agentRunRegistry.prepare(
+                "add",
+                newRequest,
+                "",
+                relatedCodes.toString(),
+                String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                requestLanguage,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                null,
+                request.getModuleId(),
+                List.of()
+        );
+        return new AgentRunStartResult(context.runId());
     }
 
-    private void addPythonFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+    private AgentRunStartResult addPythonFeature(AddOrModifyRequest request)
+            throws IOException, InterruptedException {
         progressService.start(
                 "python-add",
                 8,
                 "start",
                 "Preparing Python Add Feature request."
         );
-        mode = "add-python";
-        newRequest = request.getFeatureDescription();
-        oldRequest = "";
+        String newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
         ClusterState.getInstance().setCandidateModuleId(request.getModuleId());
         codeMapService.selectFeature(null);
@@ -259,8 +324,7 @@ public class LlmController {
                     request.getModuleId(),
                     newRequest
             );
-            lastFocusGraphContext = context;
-            relatedCodes = context.getContextPrompt();
+            String relatedCodes = context.getContextPrompt();
 
             progressService.update(
                     "prepare-agent",
@@ -268,30 +332,44 @@ public class LlmController {
                     7,
                     8
             );
-            allFiles = projectFileList();
+            String allFiles = projectFileList();
             progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+            ProjectState project = ProjectState.getInstance();
+            AgentRunContext run = agentRunRegistry.prepare(
+                    "add-python",
+                    newRequest,
+                    "",
+                    relatedCodes,
+                    allFiles,
+                    AgentLanguage.orDefault(request.getLanguage()),
+                    project.getSrcPath(),
+                    project.getProjectPath(),
+                    project.getRepoId(),
+                    null,
+                    request.getModuleId(),
+                    context.getGraphStages()
+            );
+            return new AgentRunStartResult(run.runId());
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
             throw e;
         }
     }
 
-    public void deleteFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+    public synchronized void deleteFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+        agentRunRegistry.ensureCanPrepare();
+        agentRunRegistry.clear();
         resetCandidateState();
         if (!ProjectState.getInstance().isPython()) {
-            lastFocusGraphContext = null;
-            mode = "delete";
             return;
         }
 
-        lastFocusGraphContext = null;
         progressService.start(
                 "python-delete",
                 4,
                 "start",
                 "Preparing deterministic Python Delete Feature diff."
         );
-        mode = "delete-python";
         if (request.getFeatureId() != null) {
             codeMapService.selectFeature(request.getFeatureId());
         }
@@ -303,8 +381,6 @@ public class LlmController {
         }
 
         try {
-            oldRequest = candidateFeature.getFeatureDescription();
-            newRequest = "Delete feature: " + oldRequest;
             progressService.update(
                     "collect-code-map",
                     "Collecting current feature CodeMap methods.",
@@ -331,8 +407,6 @@ public class LlmController {
                     currentCodeMap
             );
 
-            relatedCodes = "";
-            allFiles = "";
             int deletedCount = plan.path("deletedMethods").size();
             int skippedCount = plan.path("skippedMethods").size();
             int fileCount = plan.path("affectedFiles").size();
@@ -345,74 +419,62 @@ public class LlmController {
         }
     }
 
-    private String mode;
-    // modify or add
-    private String newRequest;
-    private String oldRequest;
-    private String relatedCodes;
-    private String allFiles;
-    private AgentLanguage requestLanguage = AgentLanguage.EN;
-    private FocusGraphContextResult lastFocusGraphContext;
-
-
     @GetMapping("/get")
     public SseEmitter streamResponse(
-            HttpServletResponse response,
+            @RequestParam String runId,
             @RequestParam(required = false) AgentLanguage language,
             @RequestParam(required = false) String model
     ) throws IOException {
-        AgentLanguage responseLanguage = language == null ? requestLanguage : language;
+        AgentRunContext context = agentRunRegistry.requireActiveContext(runId);
+        AgentRunRegistry.Status status = agentRunRegistry.status(runId);
+        if (status != AgentRunRegistry.Status.PREPARED) {
+            return agentRunRegistry.subscribe(runId);
+        }
+        if (language != null && language != context.language()) {
+            agentRunRegistry.fail(runId, new IllegalArgumentException("Agent language does not match the prepared run."));
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Agent language does not match the prepared run.");
+        }
         String selectedModel;
         try {
             selectedModel = llmClient.resolveModel(model);
         } catch (IllegalArgumentException e) {
+            agentRunRegistry.fail(runId, e);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
+        } catch (IOException e) {
+            agentRunRegistry.fail(runId, e);
+            throw e;
         }
+        agentRunRegistry.selectModel(runId, selectedModel);
 
-        if (mode.equals("modify")) {
-            return modifyAgentService.runPipeline(
-                    newRequest,
-                    oldRequest,
-                    relatedCodes,
-                    allFiles,
-                    responseLanguage,
-                    selectedModel
-            );
-        } else if (mode.equals("modify-python")) {
+        if (context.mode().equals("modify")) {
+            return modifyAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals("modify-python")) {
             progressService.update(
                     "agent-stream",
                     "Streaming Python Agent code generation.",
                     8,
                     8
             );
-            return pythonModifyAgentService.runPipeline(newRequest, oldRequest, relatedCodes, allFiles);
-        } else if (mode.equals("add-python")) {
+            return pythonModifyAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals("add-python")) {
             progressService.update(
                     "agent-stream",
                     "Streaming Python Agent code generation.",
                     8,
                     8
             );
-            return pythonModifyAgentService.runAddPipeline(newRequest, relatedCodes, allFiles);
-        } else if (mode.equals("delete-python")) {
-            progressService.update(
-                    "agent-stream",
-                    "Streaming Python Agent code generation.",
-                    8,
-                    8
-            );
-            return pythonModifyAgentService.runDeletePipeline(newRequest, oldRequest, relatedCodes, allFiles);
-        } else if (mode.equals("add")) {
-            return addAgentService.runPipeline(
-                    newRequest,
-                    relatedCodes,
-                    allFiles,
-                    responseLanguage,
-                    selectedModel
-            );
+            return pythonModifyAgentService.runAddPipeline(runId, selectedModel);
+        } else if (context.mode().equals("add")) {
+            return addAgentService.runPipeline(runId, selectedModel);
         } else {
+            agentRunRegistry.fail(runId, new IllegalStateException("Unsupported Agent run mode: " + context.mode()));
             throw new UnsupportedOperationException("非法访问");
         }
+    }
+
+    @GetMapping("/run")
+    public AgentRunSnapshotResult runSnapshot(@RequestParam String runId) {
+        return agentRunRegistry.snapshot(runId);
     }
 
     @GetMapping("/models")
@@ -421,16 +483,23 @@ public class LlmController {
     }
 
     @GetMapping("/focusgraph/stages")
-    public List<FocusGraphContextResult.GraphStage> focusGraphStages() {
-        if (lastFocusGraphContext == null || lastFocusGraphContext.getGraphStages() == null) {
-            return List.of();
-        }
-        return lastFocusGraphContext.getGraphStages();
+    public List<FocusGraphContextResult.GraphStage> focusGraphStages(@RequestParam String runId) {
+        return agentRunRegistry.requireActiveContext(runId).graphStages();
     }
 
     @GetMapping("/progress")
     public OperationProgressService.ProgressSnapshot progress() {
         return progressService.getSnapshot();
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, String>> handleOperationConflict(IllegalStateException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", exception.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException exception) {
+        return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
     }
 
     @GetMapping("/testLLM")
@@ -458,6 +527,30 @@ public class LlmController {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private void validateFeatureRequest(AddOrModifyRequest request, boolean requireModule) {
+        if (request == null || !hasText(request.getFeatureDescription())) {
+            throw new IllegalArgumentException("Feature description is required.");
+        }
+        if (requireModule && request.getModuleId() == null) {
+            throw new IllegalArgumentException("Module id is required when adding a feature.");
+        }
+    }
+
+    private int relevanceScore(String request, String candidate) {
+        if (!hasText(request) || !hasText(candidate)) {
+            return 0;
+        }
+        Set<String> requestTerms = new HashSet<>(Arrays.asList(
+                request.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}_]+")
+        ));
+        Set<String> candidateTerms = new HashSet<>(Arrays.asList(
+                candidate.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}_]+")
+        ));
+        requestTerms.removeIf(term -> term.length() < 2);
+        candidateTerms.retainAll(requestTerms);
+        return candidateTerms.size();
     }
 
     private String buildDeltaQuery(String oldDescription, String newDescription) {
@@ -532,7 +625,7 @@ public class LlmController {
 
     private String projectFileList() {
         StringBuilder fileList = new StringBuilder();
-        for (String projectFile : ListFileHelper.findAllFiles(ProjectState.getInstance().getSrcPath())) {
+        for (String projectFile : ListFileHelper.findPythonFiles(ProjectState.getInstance().getSrcPath())) {
             fileList.append(projectFile).append("\n");
         }
         return fileList.toString();

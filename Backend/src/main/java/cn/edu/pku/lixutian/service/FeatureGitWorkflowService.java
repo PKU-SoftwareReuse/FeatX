@@ -3,9 +3,11 @@ package cn.edu.pku.lixutian.service;
 import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.dto.result.GitCommitResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
-import cn.edu.pku.lixutian.service.code.AgentLanguage;
+import cn.edu.pku.lixutian.service.code.AgentRunContext;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import com.github.javaparser.ParseException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.util.List;
@@ -16,28 +18,37 @@ public class FeatureGitWorkflowService {
     private final RepositoryGitService repositoryGitService;
     private final CandidateCodeService candidateCodeService;
     private final CodeMapService codeMapService;
+    private final AgentRunRegistry agentRunRegistry;
 
     public FeatureGitWorkflowService(
             RepositoryGitService repositoryGitService,
             CandidateCodeService candidateCodeService,
-            CodeMapService codeMapService
+            CodeMapService codeMapService,
+            AgentRunRegistry agentRunRegistry
     ) {
         this.repositoryGitService = repositoryGitService;
         this.candidateCodeService = candidateCodeService;
         this.codeMapService = codeMapService;
+        this.agentRunRegistry = agentRunRegistry;
     }
 
     public GitWorkspaceStatusResult status() throws IOException, InterruptedException {
         return repositoryGitService.status();
     }
 
-    public GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
+    public GitWorkspaceStatusResult stageCandidate(String key, String runId) throws IOException, InterruptedException {
+        agentRunRegistry.requireCompletedIfActive(runId);
         return repositoryGitService.stageCandidate(key);
     }
 
-    public synchronized GitCommitResult commit(String operation, String requestedMessage)
+    @Transactional(rollbackFor = Exception.class)
+    public synchronized GitCommitResult commit(String operation, String requestedMessage, String runId)
             throws IOException, InterruptedException, ParseException {
         String normalizedOperation = normalizeOperation(operation);
+        AgentRunContext agentRun = null;
+        if ("edit".equals(normalizedOperation) || "add".equals(normalizedOperation)) {
+            agentRun = agentRunRegistry.requireCompleted(runId);
+        }
         GitWorkspaceStatusResult before = repositoryGitService.status();
         if (before.getStagedPaths().isEmpty()) {
             throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");
@@ -46,7 +57,8 @@ public class FeatureGitWorkflowService {
         boolean complete = "COMPLETE".equals(before.getCommitScope());
         Integer featureId = null;
         if (complete) {
-            featureId = confirmFeatureOperation(normalizedOperation);
+            candidateCodeService.validateCompleteCandidateSet();
+            featureId = confirmFeatureOperation(normalizedOperation, agentRun);
             repositoryGitService.stagePaths(candidateCodeService.allCandidateProjectPaths());
         }
 
@@ -65,6 +77,7 @@ public class FeatureGitWorkflowService {
 
         if (complete) {
             candidateCodeService.discardCandidateState();
+            agentRunRegistry.clear();
         }
 
         GitCommitResult result = new GitCommitResult();
@@ -76,13 +89,14 @@ public class FeatureGitWorkflowService {
     }
 
     public GitWorkspaceStatusResult discard() throws IOException, InterruptedException {
-        return repositoryGitService.discardUncommittedChanges();
+        GitWorkspaceStatusResult result = repositoryGitService.discardUncommittedChanges();
+        agentRunRegistry.clear();
+        return result;
     }
 
-    private Integer confirmFeatureOperation(String operation)
+    private Integer confirmFeatureOperation(String operation, AgentRunContext agentRun)
             throws ParseException, IOException, InterruptedException {
         ClusterState state = ClusterState.getInstance();
-        AgentLanguage language = state.getAgentLanguage();
         return switch (operation) {
             case "delete" -> {
                 if (state.getCandidateFeature() == null || state.getCandidateFeature().getFeatureId() == null) {
@@ -93,23 +107,17 @@ public class FeatureGitWorkflowService {
                 yield deletedFeatureId;
             }
             case "edit" -> {
-                if (state.getCandidateFeature() == null || state.getCandidateFeature().getFeatureId() == null) {
-                    throw new IllegalStateException("No feature is selected for modification.");
-                }
                 yield codeMapService.modifyFeatureFromMemoryAndDatabase(
-                        state.getCandidateFeature().getFeatureId(),
-                        state.getNewFeatureDescription(),
-                        language
+                        agentRun.featureId(),
+                        agentRun.newRequest(),
+                        agentRun.language()
                 );
             }
             case "add" -> {
-                if (state.getCandidateModuleId() == null) {
-                    throw new IllegalStateException("No module is selected for the new feature.");
-                }
                 yield codeMapService.addFeatureFromMemoryAndDatabase(
-                        state.getCandidateModuleId(),
-                        state.getNewFeatureDescription(),
-                        language
+                        agentRun.moduleId(),
+                        agentRun.newRequest(),
+                        agentRun.language()
                 );
             }
             default -> throw new IllegalArgumentException("Unsupported feature operation: " + operation);

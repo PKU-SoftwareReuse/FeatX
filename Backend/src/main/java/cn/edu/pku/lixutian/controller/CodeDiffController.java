@@ -9,12 +9,14 @@ import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.CodeDiffHelper;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.DeleteHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.code.AgentService;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -39,9 +41,11 @@ public class CodeDiffController {
     );
 
     private final CandidateCodeService candidateCodeService;
+    private final AgentRunRegistry agentRunRegistry;
 
-    public CodeDiffController(CandidateCodeService candidateCodeService) {
+    public CodeDiffController(CandidateCodeService candidateCodeService, AgentRunRegistry agentRunRegistry) {
         this.candidateCodeService = candidateCodeService;
+        this.agentRunRegistry = agentRunRegistry;
     }
 
     @GetMapping("/deleteDiffByClass")
@@ -145,13 +149,17 @@ public class CodeDiffController {
     @GetMapping("/candidateDiff")
     public CodeFileDiffResult candidateDiff(
             @RequestParam String classId,
-            @RequestParam String operation
+            @RequestParam String operation,
+            @RequestParam(required = false) String runId
     ) throws IOException, InterruptedException {
         if (classId == null || classId.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class or file id is required.");
         }
 
         try {
+            if (!"delete".equalsIgnoreCase(operation)) {
+                agentRunRegistry.requireCompleted(runId);
+            }
             if (ProjectState.getInstance().isPython()) {
                 String filePath = CodeMapService.resolvePythonNodeToFile(classId);
                 Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
@@ -161,14 +169,21 @@ public class CodeDiffController {
                 return candidateCodeService.preparePythonCandidate(filePath, filePath, candidateEntry.getValue());
             }
 
+            String javaFilePath = classId.endsWith(".java")
+                    ? JavaFilePath.normalize(classId)
+                    : JavaFilePath.fromClassName(classId);
             Map.Entry<String, String> candidateEntry = "delete".equalsIgnoreCase(operation)
-                    ? Map.entry(classId, deleteCodeByClass(classId))
-                    : findCandidateEntry(classId, classId);
+                    ? Map.entry(javaFilePath, deleteCodeByClass(classId))
+                    : findCandidateEntry(javaFilePath, classId);
             String candidate = candidateEntry == null ? null : candidateEntry.getValue();
             if (candidate == null) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + classId);
             }
-            return candidateCodeService.prepareJavaCandidate(candidateEntry.getKey(), operation, candidate);
+            return candidateCodeService.prepareJavaCandidate(
+                    candidateEntry.getKey(),
+                    operation,
+                    candidate
+            );
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         } catch (IllegalStateException exception) {
@@ -183,11 +198,18 @@ public class CodeDiffController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate file key is required.");
         }
         try {
-            return candidateCodeService.updateCandidate(
+            if (!"delete".equalsIgnoreCase(request.getOperation())) {
+                agentRunRegistry.requireCompleted(request.getRunId());
+            }
+            CodeFileDiffResult result = candidateCodeService.updateCandidate(
                     request.getKey(),
                     request.getOperation(),
                     request.getContent()
             );
+            if (!"delete".equalsIgnoreCase(request.getOperation())) {
+                agentRunRegistry.replaceCompletedModifications(request.getRunId(), AgentService.modificationMap);
+            }
+            return result;
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         } catch (IllegalStateException exception) {
@@ -209,6 +231,15 @@ public class CodeDiffController {
             return Map.entry(candidateKey, candidate);
         }
         for (var entry : AgentService.modificationMap.entrySet()) {
+            if (!ProjectState.getInstance().isPython()) {
+                try {
+                    if (JavaFilePath.normalize(entry.getKey()).equals(JavaFilePath.normalize(primaryKey))) {
+                        return Map.entry(JavaFilePath.normalize(entry.getKey()), entry.getValue());
+                    }
+                } catch (IllegalArgumentException ignored) {
+                    continue;
+                }
+            }
             if (entry.getKey().equals(primaryKey)
                     || entry.getKey().endsWith("." + primaryKey)
                     || primaryKey.endsWith("." + entry.getKey())) {

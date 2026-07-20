@@ -3,7 +3,6 @@ package cn.edu.pku.lixutian.service;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.service.code.AgentService;
-import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,14 +10,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class CandidateCodeServiceTest {
     @AfterEach
@@ -34,16 +30,17 @@ class CandidateCodeServiceTest {
         Files.writeString(sourceFile, original);
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
-        GenerateImportLinesService importService = mock(GenerateImportLinesService.class);
-        when(importService.generate(anyString(), anyString(), anyString())).thenReturn(List.of());
-        CandidateCodeService service = new CandidateCodeService(importService);
+        CandidateCodeService service = new CandidateCodeService();
         AgentService.modificationMap = new LinkedHashMap<>();
-        AgentService.modificationMap.put("demo.Example", "class Example { int value = 2; }");
+        AgentService.modificationMap.put(
+                "demo/Example.java",
+                "package demo;\n\nclass Example {\n    int value = 2;\n}\n"
+        );
 
         CodeFileDiffResult result = service.prepareJavaCandidate(
-                "demo.Example",
+                "demo/Example.java",
                 "edit",
-                AgentService.modificationMap.get("demo.Example")
+                AgentService.modificationMap.get("demo/Example.java")
         );
 
         assertEquals("src/main/java/demo/Example.java", result.getPath());
@@ -61,20 +58,18 @@ class CandidateCodeServiceTest {
         Files.writeString(sourceFile, original);
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
-        GenerateImportLinesService importService = mock(GenerateImportLinesService.class);
-        when(importService.generate(anyString(), anyString(), anyString())).thenReturn(List.of());
-        CandidateCodeService service = new CandidateCodeService(importService);
+        CandidateCodeService service = new CandidateCodeService();
         AgentService.modificationMap = new LinkedHashMap<>();
-        AgentService.modificationMap.put("demo.Example", "class Example {}");
-        service.prepareJavaCandidate("demo.Example", "edit", "class Example {}");
+        AgentService.modificationMap.put("demo/Example.java", original);
+        service.prepareJavaCandidate("demo/Example.java", "edit", original);
 
         String edited = "package demo;\n\nimport java.util.List;\n\nclass Example { List<String> values; }\n";
-        CodeFileDiffResult saved = service.updateCandidate("demo.Example", "edit", edited);
+        CodeFileDiffResult saved = service.updateCandidate("demo/Example.java", "edit", edited);
 
         assertFalse(saved.getDiff().isBlank());
-        assertEquals(edited, service.authoritativeJavaContent("demo.Example").orElseThrow());
+        assertEquals(edited, service.authoritativeJavaContent("demo/Example.java").orElseThrow());
         assertEquals(original, Files.readString(sourceFile));
-        assertTrue(AgentService.modificationMap.get("demo.Example").contains("List<String> values"));
+        assertTrue(AgentService.modificationMap.get("demo/Example.java").contains("List<String> values"));
     }
 
     @Test
@@ -86,18 +81,81 @@ class CandidateCodeServiceTest {
         Files.writeString(secondFile, "package demo;\n\nclass Second {}\n");
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
-        GenerateImportLinesService importService = mock(GenerateImportLinesService.class);
-        when(importService.generate(anyString(), anyString(), anyString())).thenReturn(List.of());
-        CandidateCodeService service = new CandidateCodeService(importService);
+        CandidateCodeService service = new CandidateCodeService();
         AgentService.modificationMap = new LinkedHashMap<>();
-        AgentService.modificationMap.put("demo.First", "class First { int changed; }");
-        AgentService.modificationMap.put("demo.Second", "class Second { int untouched; }");
-        service.prepareJavaCandidate("demo.First", "edit", AgentService.modificationMap.get("demo.First"));
+        AgentService.modificationMap.put("demo/First.java", "package demo;\n\nclass First { int changed; }\n");
+        AgentService.modificationMap.put("demo/Second.java", "package demo;\n\nclass Second { int untouched; }\n");
+        service.prepareJavaCandidate("demo/First.java", "edit", AgentService.modificationMap.get("demo/First.java"));
 
-        service.materializeCandidate("demo.First");
+        service.materializeCandidate("demo/First.java");
 
         assertTrue(Files.readString(firstFile).contains("int changed"));
         assertEquals("package demo;\n\nclass Second {}\n", Files.readString(secondFile));
+    }
+
+    @Test
+    void completeValidationAcceptsAReviewedJavaCandidate(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\n\nclass Example {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put(
+                "demo/Example.java",
+                "package demo;\n\nclass Example { int changed; }\n"
+        );
+        service.beginOperation("test", AgentService.modificationMap.keySet());
+        service.prepareJavaCandidate(
+                "demo/Example.java",
+                "edit",
+                AgentService.modificationMap.get("demo/Example.java")
+        );
+
+        service.validateCompleteCandidateSet();
+    }
+
+    @Test
+    void candidatePreparationRejectsInvalidJavaSyntax(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\n\nclass Example {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put("demo/Example.java", "package demo; class Example {");
+        service.beginOperation("test", AgentService.modificationMap.keySet());
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> service.prepareJavaCandidate(
+                        "demo/Example.java",
+                        "edit",
+                        AgentService.modificationMap.get("demo/Example.java")
+                )
+        );
+        assertTrue(error.getMessage().contains("valid Java source"));
+    }
+
+    @Test
+    void completeValidationRejectsATypeThatDoesNotMatchItsJavaPath(@TempDir Path projectRoot) throws Exception {
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put("cn/edu/pku/Foo.java", "public class Bar {}");
+        service.beginOperation("test", AgentService.modificationMap.keySet());
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> service.prepareJavaCandidate(
+                        "cn/edu/pku/Foo.java",
+                        "add",
+                        AgentService.modificationMap.get("cn/edu/pku/Foo.java")
+                )
+        );
+        assertTrue(error.getMessage().contains("Foo"));
     }
 
     @Test
@@ -105,7 +163,7 @@ class CandidateCodeServiceTest {
         Files.writeString(projectRoot.resolve("removed.py"), "print('old')\n");
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "PYTHON");
 
-        CandidateCodeService service = new CandidateCodeService(mock(GenerateImportLinesService.class));
+        CandidateCodeService service = new CandidateCodeService();
         CodeFileDiffResult added = service.preparePythonCandidate(
                 "added.py",
                 "added.py",

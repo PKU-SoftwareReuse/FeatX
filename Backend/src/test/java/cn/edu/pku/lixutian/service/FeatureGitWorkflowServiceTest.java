@@ -6,7 +6,9 @@ import cn.edu.pku.lixutian.dto.result.FeatureResult;
 import cn.edu.pku.lixutian.dto.result.GitCommitResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
 import cn.edu.pku.lixutian.service.code.AgentService;
-import cn.edu.pku.lixutian.service.code.GenerateImportLinesService;
+import cn.edu.pku.lixutian.service.code.AgentRunContext;
+import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
+import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,31 +44,35 @@ class FeatureGitWorkflowServiceTest {
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
         RepositoryGitService gitService = new RepositoryGitService(candidateService);
         CodeMapService codeMapService = mock(CodeMapService.class);
+        TestRun run = completedEditRun();
+        AgentRunRegistry runRegistry = run.registry();
+        String runId = run.runId();
         FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
                 gitService,
                 candidateService,
-                codeMapService
+                codeMapService,
+                runRegistry
         );
         selectFeatureForEdit();
 
-        GitWorkspaceStatusResult stagedFirst = workflow.stageCandidate("first.py");
+        GitWorkspaceStatusResult stagedFirst = workflow.stageCandidate("first.py", runId);
         assertEquals("PARTIAL", stagedFirst.getCommitScope());
         assertEquals(java.util.List.of("first.py"), stagedFirst.getStagedPaths());
         assertEquals(java.util.List.of("second.py"), stagedFirst.getUnstagedCandidatePaths());
 
-        GitCommitResult partial = workflow.commit("edit", null);
+        GitCommitResult partial = workflow.commit("edit", null, runId);
         assertEquals("PARTIAL", partial.getCommitScope());
         assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
         assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
         assertEquals(java.util.List.of("second.py"), partial.getStatus().getPendingCandidatePaths());
         verifyNoInteractions(codeMapService);
 
-        GitWorkspaceStatusResult stagedSecond = workflow.stageCandidate("second.py");
+        GitWorkspaceStatusResult stagedSecond = workflow.stageCandidate("second.py", runId);
         assertEquals("COMPLETE", stagedSecond.getCommitScope());
         when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
                 .thenReturn(7);
 
-        GitCommitResult complete = workflow.commit("edit", null);
+        GitCommitResult complete = workflow.commit("edit", null, runId);
         assertEquals("COMPLETE", complete.getCommitScope());
         assertEquals(7, complete.getFeatureId());
         assertTrue(complete.getStatus().getStagedPaths().isEmpty());
@@ -85,16 +91,20 @@ class FeatureGitWorkflowServiceTest {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
         RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        TestRun run = completedEditRun();
+        AgentRunRegistry runRegistry = run.registry();
+        String runId = run.runId();
         FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
                 gitService,
                 candidateService,
-                mock(CodeMapService.class)
+                mock(CodeMapService.class),
+                runRegistry
         );
         selectFeatureForEdit();
 
-        workflow.stageCandidate("first.py");
-        workflow.commit("edit", null);
-        workflow.stageCandidate("second.py");
+        workflow.stageCandidate("first.py", runId);
+        workflow.commit("edit", null, runId);
+        workflow.stageCandidate("second.py", runId);
         Files.writeString(repository.resolve("notes.txt"), "untracked\n");
         Path ignoredOutput = repository.resolve("preprocess1/report.csv");
         Files.createDirectories(ignoredOutput.getParent());
@@ -114,13 +124,38 @@ class FeatureGitWorkflowServiceTest {
 
     private CandidateCodeService prepareTwoPythonCandidates(Path repository) throws Exception {
         ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
-        CandidateCodeService candidateService = new CandidateCodeService(mock(GenerateImportLinesService.class));
+        CandidateCodeService candidateService = new CandidateCodeService();
         AgentService.modificationMap = new LinkedHashMap<>();
         AgentService.modificationMap.put("first.py", "print('first changed')\n");
         AgentService.modificationMap.put("second.py", "print('second changed')\n");
         candidateService.preparePythonCandidate("first.py", "first.py", AgentService.modificationMap.get("first.py"));
         candidateService.preparePythonCandidate("second.py", "second.py", AgentService.modificationMap.get("second.py"));
         return candidateService;
+    }
+
+    private TestRun completedEditRun() {
+        ProjectState project = ProjectState.getInstance();
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "modify-python",
+                "updated feature",
+                "original feature",
+                "",
+                "first.py\nsecond.py",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                7,
+                null,
+                java.util.List.of()
+        );
+        registry.claim(context.runId());
+        registry.complete(context.runId(), AgentService.modificationMap);
+        return new TestRun(registry, context.runId());
+    }
+
+    private record TestRun(AgentRunRegistry registry, String runId) {
     }
 
     private void selectFeatureForEdit() {

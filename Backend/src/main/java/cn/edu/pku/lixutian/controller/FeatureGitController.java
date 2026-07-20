@@ -39,7 +39,7 @@ public class FeatureGitController {
         if (request == null || request.getKey() == null || request.getKey().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate file key is required.");
         }
-        return workflowService.stageCandidate(request.getKey());
+        return workflowService.stageCandidate(request.getKey(), request.getRunId());
     }
 
     @PostMapping("/commit")
@@ -48,7 +48,7 @@ public class FeatureGitController {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Commit request is required.");
         }
-        return workflowService.commit(request.getOperation(), request.getMessage());
+        return workflowService.commit(request.getOperation(), request.getMessage(), request.getRunId());
     }
 
     @PostMapping("/discard")
