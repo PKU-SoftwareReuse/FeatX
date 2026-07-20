@@ -572,11 +572,14 @@ const DebloatingPage = () => {
             .then((catalog) => {
                 if (!active) return;
                 const availableModels = Array.isArray(catalog.models) ? catalog.models : [];
-                setModels(availableModels);
+                const sortedModels = [...availableModels].sort(
+                    new Intl.Collator('en', {numeric: true, sensitivity: 'base'}).compare
+                );
+                setModels(sortedModels);
                 setSelectedModel(
-                    availableModels.includes(catalog.defaultModel)
+                    sortedModels.includes(catalog.defaultModel)
                         ? catalog.defaultModel
-                        : availableModels[0] || null
+                        : sortedModels[0] || null
                 );
             })
             .catch((error) => {
