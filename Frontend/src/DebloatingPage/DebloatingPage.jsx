@@ -951,9 +951,21 @@ const DebloatingPage = () => {
         }
     }
 
+    const clearLocalDraftFeature = () => {
+        if (!(selectedType === "add" && selectedFeatureItem?.isNew)) {
+            return;
+        }
+        const draftFeatureId = selectedFeatureItem.featureId;
+        setFeatureData((prev) => prev.map((module) => ({
+            ...module,
+            featureList: (module.featureList || []).filter((feature) => feature.featureId !== draftFeatureId),
+        })));
+    };
+
     const goSelect = (item) => {
         clearPostAgentTimers();
         clearFocusGraphStages();
+        clearLocalDraftFeature();
         setSubmitEnabled(false);
         setModeTrans(false);
         setChatMode(false);
@@ -981,6 +993,7 @@ const DebloatingPage = () => {
     const goDelete = (item) => {
         clearPostAgentTimers();
         clearFocusGraphStages();
+        clearLocalDraftFeature();
         setSubmitEnabled(false);
         setModeTrans(false);
         setChatMode(false);
@@ -1012,6 +1025,7 @@ const DebloatingPage = () => {
     const goEdit = (item) => {
         clearPostAgentTimers();
         clearFocusGraphStages();
+        clearLocalDraftFeature();
         setSubmitEnabled(true);
         setConfirmEnabled(false);
         setModeTrans(false);
@@ -1130,9 +1144,11 @@ const DebloatingPage = () => {
     const changeActiveKey = (newActiveKey) => {
         if (hasPendingFeatureOperation()) {
             confirmDiscardAndRun(() => {
+                clearLocalDraftFeature();
                 setActiveKey(newActiveKey)
             });
         } else {
+            clearLocalDraftFeature();
             setActiveKey(newActiveKey)
             setSelectedFeatureItem(null)
         }
@@ -1165,6 +1181,7 @@ const DebloatingPage = () => {
     const goAdd = (module) => {
         clearPostAgentTimers();
         clearFocusGraphStages();
+        clearLocalDraftFeature();
         setSubmitEnabled(true)
         setModeTrans(false);
         setChatMode(false);
@@ -1266,9 +1283,21 @@ const DebloatingPage = () => {
     const [confirmEnabled, setConfirmEnabled] = useState(false)
     const [submitEnabled, setSubmitEnabled] = useState(false)
 
-    const hasPendingFeatureOperation = () => (
-        selectedType === "delete" || selectedType === "edit" || selectedType === "add"
-    );
+    const hasPendingFeatureOperation = () => {
+        const isFeatureOperation = selectedType === "delete" || selectedType === "edit" || selectedType === "add";
+        if (!isFeatureOperation) {
+            return false;
+        }
+        const pendingCandidateCount = gitStatus.pendingCandidatePaths?.length || 0;
+        const committedCandidateCount = gitStatus.committedCandidatePaths?.length || 0;
+        const operationRunning = Boolean(operationProgress?.running);
+        return confirmEnabled
+            || operationRunning
+            || candidateDirty
+            || stagedFileCount > 0
+            || pendingCandidateCount > 0
+            || committedCandidateCount > 0;
+    };
 
     const discardPendingChanges = async () => {
         setLoadingConfirm(true);
