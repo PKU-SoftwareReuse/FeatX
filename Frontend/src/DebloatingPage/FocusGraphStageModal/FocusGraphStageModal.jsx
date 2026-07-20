@@ -9,6 +9,9 @@ const STAGE_ORDER = ["initial", "expanded", "reasoning"];
 const INITIAL_HOLD_MS = 1200;
 const EXPAND_NODE_STAGGER_MS = 160;
 const EXPAND_SETTLE_MS = 850;
+const RANKING_PULSE_ROUNDS = 7;
+const RANKING_PULSE_INTERVAL_MS = 560;
+const RANKING_FINAL_HOLD_MS = 900;
 const FILTER_FADE_DURATION_MS = 1800;
 const FILTER_FADE_FRAMES = 24;
 const FILTER_REMOVE_PAUSE_MS = 90;
@@ -39,21 +42,17 @@ const paletteFor = (node) => {
             border: [212, 136, 6],
             highlightBackground: [255, 231, 186],
             highlightBorder: [173, 104, 0],
-        };
-    }
-    if (node.srcType === "original") {
-        return {
-            background: [230, 244, 255],
-            border: [22, 119, 255],
-            highlightBackground: [186, 224, 255],
-            highlightBorder: [9, 88, 217],
+            pulseBackground: [250, 140, 22],
+            pulseBorder: [135, 56, 0],
         };
     }
     return {
-        background: [246, 255, 237],
-        border: [82, 196, 26],
-        highlightBackground: [217, 247, 190],
-        highlightBorder: [56, 158, 13],
+        background: [230, 244, 255],
+        border: [22, 119, 255],
+        highlightBackground: [186, 224, 255],
+        highlightBorder: [9, 88, 217],
+        pulseBackground: [22, 119, 255],
+        pulseBorder: [0, 58, 140],
     };
 };
 
@@ -82,19 +81,24 @@ const edgeId = (edge) => `${edge.from}->${edge.to}:${edge.type || "rel"}`;
 
 const positionOrZero = (position) => position || {x: 0, y: 0};
 
+const stableHash = (value) => {
+    let hash = 2166136261;
+    const text = String(value || "");
+    for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+};
+
 const toVisNode = (node, options = {}) => {
     const {
-        stageId,
-        previousStage,
-        reasoningIds = new Set(),
         position,
         opacity = 1,
         sizeScale = 1,
         fadeOut = false,
     } = options;
     const resolvedNode = {...node, fadeOut: fadeOut || node.fadeOut};
-    const isAdded = stageId === "expanded" && previousStage && !previousStage.nodes.some((item) => item.id === node.id);
-    const isKept = stageId === "reasoning" && reasoningIds.has(node.id);
     const baseSize = node.category === "Class" ? 16 : 14;
     const pos = positionOrZero(position);
     const fontOpacity = resolvedNode.fadeOut ? Math.max(0.18, opacity * 0.55) : opacity;
@@ -110,17 +114,68 @@ const toVisNode = (node, options = {}) => {
         ].filter(Boolean).join("\n"),
         shape: "dot",
         size: Math.max(4, baseSize * sizeScale),
-        borderWidth: isAdded || isKept ? 3 : 1.5,
+        borderWidth: 1.5,
+        borderWidthSelected: 1.5,
         color: categoryColor(resolvedNode, opacity),
         font: {
             size: 12,
             face: "Inter, Arial, sans-serif",
             color: rgba(resolvedNode.fadeOut ? [71, 85, 105] : [31, 41, 55], fontOpacity),
         },
+        shadow: false,
+        chosen: false,
         x: pos.x,
         y: pos.y,
         fixed: false,
         physics: false,
+    };
+};
+
+const toBaseNodeVisual = (node) => {
+    const baseSize = node.category === "Class" ? 16 : 14;
+    return {
+        id: node.id,
+        size: baseSize,
+        borderWidth: 1.5,
+        borderWidthSelected: 1.5,
+        color: categoryColor(node, 1),
+        font: {
+            size: 12,
+            face: "Inter, Arial, sans-serif",
+            color: "#1f2937",
+        },
+        shadow: false,
+        chosen: false,
+    };
+};
+
+const toRankingNodeVisual = (node, options = {}) => {
+    const {final = false, intensity = 1} = options;
+    const safeIntensity = Math.max(0.25, Math.min(1, intensity));
+    const baseSize = node.category === "Class" ? 16 : 14;
+    const palette = paletteFor(node);
+    const background = final ? palette.background : palette.pulseBackground;
+    const border = final ? palette.border : palette.pulseBorder;
+    return {
+        id: node.id,
+        size: final ? baseSize : baseSize * 1.28,
+        borderWidth: 1.5,
+        borderWidthSelected: 1.5,
+        color: {
+            background: rgba(background, 1),
+            border: rgba(border, safeIntensity),
+            highlight: {
+                background: rgba(final ? palette.highlightBackground : palette.pulseBackground, 1),
+                border: rgba(final ? palette.highlightBorder : palette.pulseBorder, safeIntensity),
+            },
+        },
+        font: {
+            size: 12,
+            face: "Inter, Arial, sans-serif",
+            color: final ? "#1f2937" : "#ffffff",
+        },
+        shadow: false,
+        chosen: false,
     };
 };
 
@@ -129,6 +184,8 @@ const toFadingNodeVisual = (node, opacity) => {
     const palette = paletteFor({...node, fadeOut: true});
     return {
         id: node.id,
+        borderWidth: 1.5,
+        borderWidthSelected: 1.5,
         color: {
             background: rgba(palette.background, safeOpacity * 0.42),
             border: rgba(palette.border, safeOpacity * 0.46),
@@ -142,7 +199,22 @@ const toFadingNodeVisual = (node, opacity) => {
             face: "Inter, Arial, sans-serif",
             color: rgba([71, 85, 105], safeOpacity * 0.62),
         },
+        shadow: false,
+        chosen: false,
     };
+};
+
+const selectRankingPulseNodes = (nodes, round) => {
+    if (!nodes?.length) {
+        return [];
+    }
+    const pulseCount = Math.min(
+        nodes.length,
+        Math.max(2, Math.min(7, Math.ceil(nodes.length * 0.18)))
+    );
+    return [...nodes]
+        .sort((left, right) => stableHash(`${round}:${left.id}`) - stableHash(`${round}:${right.id}`))
+        .slice(0, pulseCount);
 };
 
 const toVisEdge = (edge, options = {}) => {
@@ -636,55 +708,110 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
         if (!expanded || !reasoning || !nodesRef.current || !edgesRef.current || animationRunRef.current !== runId) {
             return;
         }
-        setActiveStageId("reasoning");
+        setActiveStageId("expanded");
         const reasoningIds = new Set(reasoning.nodes.map((node) => node.id));
         const reasoningEdgeIds = new Set(reasoning.edges.map(edgeId));
         const fadingNodes = expanded.nodes.filter((node) => !reasoningIds.has(node.id));
         const fadingEdges = expanded.edges.filter((edge) => !reasoningEdgeIds.has(edgeId(edge)));
+        const nodeById = new Map(expanded.nodes.map((node) => [node.id, node]));
 
-        reasoning.nodes.forEach((node) => {
+        expanded.nodes.forEach((node) => {
             upsertNode(node, {
-                stageId: "reasoning",
+                stageId: "expanded",
                 reasoningIds,
-                position: positionForStage("reasoning", node.id),
+                position: positionForStage("expanded", node.id),
                 preserveCurrentPosition: true,
             });
         });
-        reasoning.edges.forEach((edge) => upsertEdge(edge));
+        expanded.edges.forEach((edge) => upsertEdge(edge));
+        applyExpandedViewport();
 
-        if (fadingNodes.length) {
-            nodesRef.current.update(fadingNodes.map((node) => toFadingNodeVisual(node, 1)));
-        }
-        if (fadingEdges.length) {
-            edgesRef.current.update(fadingEdges.map((edge) => toFadingEdgeVisual(edge, 1)));
+        let previousPulseIds = new Set();
+        const resetPulseNodes = () => {
+            const resetItems = [...previousPulseIds]
+                .map((id) => nodeById.get(id))
+                .filter(Boolean)
+                .map((node) => toBaseNodeVisual(node, {stageId: "expanded", reasoningIds}));
+            if (resetItems.length) {
+                nodesRef.current.update(resetItems);
+            }
+            previousPulseIds = new Set();
+        };
+
+        for (let round = 0; round < RANKING_PULSE_ROUNDS; round += 1) {
+            scheduleTimeout(() => {
+                if (animationRunRef.current !== runId || !nodesRef.current) {
+                    return;
+                }
+                resetPulseNodes();
+                const pulseNodes = selectRankingPulseNodes(expanded.nodes, round);
+                previousPulseIds = new Set(pulseNodes.map((node) => node.id));
+                nodesRef.current.update(pulseNodes.map((node, index) => toRankingNodeVisual(node, {
+                    intensity: 0.72 + (index % 3) * 0.12,
+                })));
+            }, round * RANKING_PULSE_INTERVAL_MS);
         }
 
-        let frame = 0;
-        const interval = scheduleInterval(() => {
+        const startFadeOut = () => {
             if (animationRunRef.current !== runId) {
-                clearInterval(interval);
                 return;
             }
-            frame += 1;
-            const ratio = Math.min(1, frame / FILTER_FADE_FRAMES);
-            const opacity = Math.pow(1 - ratio, 1.35);
             if (fadingNodes.length) {
-                nodesRef.current.update(fadingNodes.map((node) => toFadingNodeVisual(node, opacity)));
+                nodesRef.current.update(fadingNodes.map((node) => toBaseNodeVisual(node, {
+                    stageId: "expanded",
+                    reasoningIds,
+                })));
             }
             if (fadingEdges.length) {
-                edgesRef.current.update(fadingEdges.map((edge) => toFadingEdgeVisual(edge, opacity)));
+                edgesRef.current.update(fadingEdges.map((edge) => toVisEdge(edge)));
             }
-            if (frame >= FILTER_FADE_FRAMES) {
-                clearInterval(interval);
-            }
-        }, FILTER_FADE_DURATION_MS / FILTER_FADE_FRAMES);
+
+            let frame = 0;
+            const interval = scheduleInterval(() => {
+                if (animationRunRef.current !== runId) {
+                    clearInterval(interval);
+                    return;
+                }
+                frame += 1;
+                const ratio = Math.min(1, frame / FILTER_FADE_FRAMES);
+                const opacity = Math.pow(1 - ratio, 1.35);
+                if (fadingNodes.length) {
+                    nodesRef.current.update(fadingNodes.map((node) => toFadingNodeVisual(node, opacity)));
+                }
+                if (fadingEdges.length) {
+                    edgesRef.current.update(fadingEdges.map((edge) => toFadingEdgeVisual(edge, opacity)));
+                }
+                if (frame >= FILTER_FADE_FRAMES) {
+                    clearInterval(interval);
+                }
+            }, FILTER_FADE_DURATION_MS / FILTER_FADE_FRAMES);
+
+            scheduleTimeout(() => {
+                if (animationRunRef.current !== runId) {
+                    return;
+                }
+                edgesRef.current.remove(fadingEdges.map(edgeId));
+                nodesRef.current.remove(fadingNodes.map((node) => node.id));
+                reasoning.nodes.forEach((node) => {
+                    upsertNode(node, {
+                        stageId: "reasoning",
+                        reasoningIds,
+                        position: positionForStage("reasoning", node.id),
+                        preserveCurrentPosition: true,
+                    });
+                });
+                reasoning.edges.forEach((edge) => upsertEdge(edge));
+                nodesRef.current.update(reasoning.nodes.map((node) => toRankingNodeVisual(node, {final: true})));
+                applyExpandedViewport();
+            }, FILTER_FADE_DURATION_MS + FILTER_REMOVE_PAUSE_MS);
+        };
 
         scheduleTimeout(() => {
             if (animationRunRef.current !== runId) {
                 return;
             }
-            edgesRef.current.remove(fadingEdges.map(edgeId));
-            nodesRef.current.remove(fadingNodes.map((node) => node.id));
+            setActiveStageId("reasoning");
+            resetPulseNodes();
             reasoning.nodes.forEach((node) => {
                 upsertNode(node, {
                     stageId: "reasoning",
@@ -694,8 +821,9 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
                 });
             });
             reasoning.edges.forEach((edge) => upsertEdge(edge));
-            applyExpandedViewport();
-        }, FILTER_FADE_DURATION_MS + FILTER_REMOVE_PAUSE_MS);
+            nodesRef.current.update(reasoning.nodes.map((node) => toRankingNodeVisual(node, {final: true})));
+            scheduleTimeout(startFadeOut, RANKING_FINAL_HOLD_MS);
+        }, RANKING_PULSE_ROUNDS * RANKING_PULSE_INTERVAL_MS);
     };
 
     const playAnimation = () => {
@@ -779,8 +907,7 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
             </div>
 
             <div className={styles.legend}>
-                <span><i className={styles.seedDot}/> seed/original method</span>
-                <span><i className={styles.expandDot}/> one-hop expanded method</span>
+                <span><i className={styles.seedDot}/> method node</span>
                 <span><i className={styles.classDot}/> class node</span>
                 <span><i className={styles.fadeDot}/> filtered out during reasoning</span>
             </div>

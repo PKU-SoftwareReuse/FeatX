@@ -39,7 +39,6 @@
 }
 
 .seedDot,
-.expandDot,
 .classDot,
 .fadeDot {
     width: 10px;
@@ -52,11 +51,6 @@
 .seedDot {
     background: #e6f4ff;
     border-color: #1677ff;
-}
-
-.expandDot {
-    background: #f6ffed;
-    border-color: #52c41a;
 }
 
 .classDot {
