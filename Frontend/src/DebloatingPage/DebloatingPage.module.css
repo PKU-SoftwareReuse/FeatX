@@ -707,6 +707,17 @@
     overflow: hidden;
 }
 
+.featureItemCondensed.featureItemEditing,
+.featureItemCondensed.featureItemEditing .featureContent {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+
+.featureItemEditing .featureEditor {
+    width: 100%;
+}
+
 .featureItemCondensed .featureDescription {
     display: -webkit-box;
     overflow: hidden;
@@ -723,6 +734,23 @@
     align-content: start;
     align-items: start !important;
     gap: 2px;
+}
+
+.featureItemMinimal.featureItemEditing {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px 0 !important;
+    gap: 6px;
+}
+
+.featureItemMinimal.featureItemEditing .featureContent {
+    width: 100%;
+    overflow: visible;
+    grid-column: 1;
+}
+
+.featureItemMinimal.featureItemEditing .featureActions {
+    grid-column: 1;
+    justify-self: end;
 }
 
 .featureItemMinimal .featureContent {

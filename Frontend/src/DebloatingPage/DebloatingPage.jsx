@@ -283,7 +283,7 @@ const getFeatureDisplayIndex = (featureList, item) => item.isNew || item.isNewGe
         .filter((feature) => !feature.isNew && !feature.isNewGenerated)
         .findIndex((feature) => feature === item) + 1;
 
-const FeatureListItem = ({
+export const FeatureListItem = ({
     item,
     moduleId,
     itemNumber,
@@ -389,8 +389,9 @@ const FeatureListItem = ({
                 [styles.selectedItem]: isSelected,
                 [styles.featureItemCondensed]: compressed,
                 [styles.featureItemMinimal]: minimal,
+                [styles.featureItemEditing]: isEditing,
             })}
-            style={compressed && preservedHeight ? {
+            style={compressed && preservedHeight && !isEditing ? {
                 height: `${preservedHeight}px`,
                 minHeight: `${preservedHeight}px`,
                 maxHeight: `${preservedHeight}px`,
@@ -398,14 +399,7 @@ const FeatureListItem = ({
             } : undefined}
         >
             <div ref={featureContentRef} className={styles.featureContent}>
-                {minimal ? (
-                    <span className={styles.featureNumber}>{itemNumber}</span>
-                ) : compressed ? (
-                    <div className={styles.featureDescription}>
-                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
-                        <span>{description}</span>
-                    </div>
-                ) : isEditing ? (
+                {isEditing ? (
                     <Tooltip title={!submitEnabled ? copy.pendingChanges : ""}>
                         <div className={styles.featureEditor}>
                             <span className={styles.featureNumber}>{itemNumber}</span>
@@ -426,6 +420,13 @@ const FeatureListItem = ({
                             </Button>
                         </div>
                     </Tooltip>
+                ) : minimal ? (
+                    <span className={styles.featureNumber}>{itemNumber}</span>
+                ) : compressed ? (
+                    <div className={styles.featureDescription}>
+                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
+                        <span>{description}</span>
+                    </div>
                 ) : (
                     <div ref={descriptionRef} className={styles.featureDescription}>
                         <span className={styles.featureNumber}>{itemNumber}</span>{" "}
