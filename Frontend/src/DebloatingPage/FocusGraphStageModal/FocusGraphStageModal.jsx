@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from "react";
 import {Button, Modal, Segmented, Tag} from "antd";
 import {PlayCircleOutlined} from "@ant-design/icons";
 import {DataSet, Network} from "vis-network/standalone/esm/vis-network";
+import {useLanguage} from "../../i18n/LanguageContext";
 import styles from "./FocusGraphStageModal.module.css";
 
 const STAGE_ORDER = ["initial", "expanded", "reasoning"];
@@ -19,10 +20,59 @@ const MIN_NODE_DISTANCE = 96;
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const EXPANDED_VIEW_PADDING = 96;
 
-const stageLabel = {
-    initial: "Initial Graph",
-    expanded: "Expanded Graph",
-    reasoning: "Reasoning Graph",
+const modalCopy = {
+    zh: {
+        title: "推理图构建阶段",
+        replay: "重播动画",
+        nodes: "节点",
+        edges: "边",
+        callableNode: "method 节点",
+        typeNode: "class 节点",
+        filteredNode: "推理阶段被筛除的节点",
+        switchTo: "切换到",
+        stageLabels: {
+            initial: "初始图",
+            expanded: "扩展图",
+            reasoning: "推理图",
+        },
+        stageDescriptions: {
+            initial: "由检索到的功能所对应的种子代码节点及其直接关系组成。",
+            expanded: "在初始图基础上完成依赖扩展后、用于图排序的代码关系图。",
+            reasoning: "经过查询-代码排序和个性化 PageRank 筛选得到的 Top-K 诱导子图。",
+        },
+        tooltip: {
+            file: "文件",
+            category: "类别",
+            source: "来源",
+            score: "得分",
+        },
+    },
+    en: {
+        title: "Reasoning Graph Stages",
+        replay: "Replay",
+        nodes: "Nodes",
+        edges: "Edges",
+        callableNode: "callable / field node",
+        typeNode: "type node",
+        filteredNode: "filtered out during reasoning",
+        switchTo: "Switch to",
+        stageLabels: {
+            initial: "Initial Graph",
+            expanded: "Expanded Graph",
+            reasoning: "Reasoning Graph",
+        },
+        stageDescriptions: {
+            initial: "Seed code nodes from retrieved features and their direct relations.",
+            expanded: "The dependency-expanded code graph used for graph ranking.",
+            reasoning: "The Top-K induced subgraph after query-code ranking and personalized PageRank.",
+        },
+        tooltip: {
+            file: "File",
+            category: "Category",
+            source: "Source",
+            score: "Score",
+        },
+    },
 };
 
 const rgba = ([r, g, b], alpha = 1) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
@@ -97,6 +147,7 @@ const toVisNode = (node, options = {}) => {
         opacity = 1,
         sizeScale = 1,
         fadeOut = false,
+        tooltipLabels = modalCopy.en.tooltip,
     } = options;
     const resolvedNode = {...node, fadeOut: fadeOut || node.fadeOut};
     const baseSize = ["Class", "Interface", "Enum", "Annotation"].includes(node.category) ? 16 : 14;
@@ -107,10 +158,10 @@ const toVisNode = (node, options = {}) => {
         label: shortLabel(node),
         title: [
             node.methodSignature || node.label || node.id,
-            node.funcFile ? `File: ${node.funcFile}` : "",
-            node.category ? `Category: ${node.category}` : "",
-            node.srcType ? `Source: ${node.srcType}` : "",
-            typeof node.score === "number" ? `Score: ${node.score.toFixed(4)}` : "",
+            node.funcFile ? `${tooltipLabels.file}: ${node.funcFile}` : "",
+            node.category ? `${tooltipLabels.category}: ${node.category}` : "",
+            node.srcType ? `${tooltipLabels.source}: ${node.srcType}` : "",
+            typeof node.score === "number" ? `${tooltipLabels.score}: ${node.score.toFixed(4)}` : "",
         ].filter(Boolean).join("\n"),
         shape: "dot",
         size: Math.max(4, baseSize * sizeScale),
@@ -438,6 +489,8 @@ const computeStagePositions = (stageMap) => {
 };
 
 const FocusGraphStageModal = ({open, onClose, stages}) => {
+    const {language} = useLanguage();
+    const copy = modalCopy[language] || modalCopy.en;
     const containerRef = useRef(null);
     const networkRef = useRef(null);
     const nodesRef = useRef(null);
@@ -465,6 +518,10 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
     const stagePositions = useMemo(() => computeStagePositions(stageMap), [stageMap]);
     const activeStage = stageMap.get(activeStageId) || orderedStages[0];
     const activeIndex = orderedStages.findIndex((stage) => stage.id === activeStage?.id);
+    const stageName = (stage) => copy.stageLabels[stage?.id] || stage?.label || stage?.id;
+    const stageDescription = (stage) => (
+        copy.stageDescriptions[stage?.id] || stage?.description || ""
+    );
 
     const clearTimers = () => {
         animationRunRef.current += 1;
@@ -541,7 +598,7 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
             return;
         }
         const existing = nodesRef.current.get(node.id);
-        const item = toVisNode(node, options);
+        const item = toVisNode(node, {...options, tooltipLabels: copy.tooltip});
         if (options.preserveCurrentPosition && existing) {
             delete item.x;
             delete item.y;
@@ -614,6 +671,7 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
             previousStage,
             reasoningIds,
             position: positionForStage(stage.id, node.id),
+            tooltipLabels: copy.tooltip,
         }));
         const edgeItems = stage.edges.map((edge) => toVisEdge(edge));
         nodesRef.current.clear();
@@ -875,7 +933,7 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
 
     return (
         <Modal
-            title="Reasoning Graph Stages"
+            title={copy.title}
             open={open}
             onCancel={onClose}
             footer={null}
@@ -887,42 +945,46 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
                     value={activeStage?.id || "initial"}
                     onChange={handleStageChange}
                     options={orderedStages.map((stage) => ({
-                        label: stage.label || stageLabel[stage.id] || stage.id,
+                        label: stageName(stage),
                         value: stage.id,
                     }))}
                 />
                 <Button icon={<PlayCircleOutlined/>} onClick={playAnimation}>
-                    Replay
+                    {copy.replay}
                 </Button>
             </div>
 
             <div className={styles.metaRow}>
                 <Tag color={activeStage?.id === "reasoning" ? "blue" : activeStage?.id === "expanded" ? "green" : "geekblue"}>
-                    {activeStage?.label || stageLabel[activeStage?.id] || activeStage?.id}
+                    {stageName(activeStage)}
                 </Tag>
-                <span>{activeStage?.description}</span>
+                <span>{stageDescription(activeStage)}</span>
                 <span className={styles.counts}>
-                    Nodes {activeStage?.nodes?.length || 0} · Edges {activeStage?.edges?.length || 0}
+                    {copy.nodes} {activeStage?.nodes?.length || 0} · {copy.edges} {activeStage?.edges?.length || 0}
                 </span>
             </div>
 
             <div className={styles.legend}>
-                <span><i className={styles.seedDot}/> callable / field node</span>
-                <span><i className={styles.classDot}/> type node</span>
-                <span><i className={styles.fadeDot}/> filtered out during reasoning</span>
+                <span><i className={styles.seedDot}/> {copy.callableNode}</span>
+                <span><i className={styles.classDot}/> {copy.typeNode}</span>
+                <span><i className={styles.fadeDot}/> {copy.filteredNode}</span>
             </div>
 
             <div ref={containerRef} className={styles.graphCanvas}/>
 
             <div className={styles.stageList}>
                 {orderedStages.map((stage, index) => (
-                    <div
+                    <button
+                        type="button"
                         key={stage.id}
                         className={`${styles.stageCard} ${index === activeIndex ? styles.stageCardActive : ""}`}
+                        onClick={() => handleStageChange(stage.id)}
+                        aria-pressed={index === activeIndex}
+                        aria-label={`${copy.switchTo} ${stageName(stage)}`}
                     >
-                        <strong>{index + 1}. {stage.label || stageLabel[stage.id] || stage.id}</strong>
-                        <span>{stage.nodes.length} nodes, {stage.edges.length} edges</span>
-                    </div>
+                        <strong>{index + 1}. {stageName(stage)}</strong>
+                        <span>{stage.nodes.length} {copy.nodes.toLowerCase()}, {stage.edges.length} {copy.edges.toLowerCase()}</span>
+                    </button>
                 ))}
             </div>
         </Modal>

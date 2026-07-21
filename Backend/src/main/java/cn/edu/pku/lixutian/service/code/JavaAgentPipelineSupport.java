@@ -265,12 +265,25 @@ abstract class JavaAgentPipelineSupport extends AgentService {
     ) throws IOException {
         String response = llmClient.streamGenerateWithPrompt(prompt, eventSink, model);
         try {
-            return parseAndValidateAgent2(response, sourceRoot);
+            return requirePlannedFiles(parseAndValidateAgent2(response, sourceRoot));
         } catch (RuntimeException exception) {
             sendStatus(eventSink, retryMessage(language, "Agent2", exception));
-            String retried = llmClient.streamGenerateWithPrompt(repairPrompt(prompt, "Agent2"), eventSink, model);
-            return parseAndValidateAgent2(retried, sourceRoot);
+            String retried = llmClient.streamGenerateWithPrompt(
+                    repairPrompt(prompt, "Agent2", exception),
+                    eventSink,
+                    model
+            );
+            return requirePlannedFiles(parseAndValidateAgent2(retried, sourceRoot));
         }
+    }
+
+    private Agent2ParsedResult requirePlannedFiles(Agent2ParsedResult result) {
+        if (result.modifiedFileList.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Agent2 planned no Java file changes for the submitted requirement."
+            );
+        }
+        return result;
     }
 
     protected String requestAndApplyAgent3(
@@ -301,6 +314,13 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                     throw new IOException("Agent pipeline was cancelled.", exception);
                 }
                 lastFailure = exception;
+                logger.warn(
+                        "Java Agent3 failed for {} on attempt {}/{}: {}",
+                        filename,
+                        attempt + 1,
+                        MAX_AGENT3_RETRIES + 1,
+                        safeFailureMessage(exception)
+                );
                 if (attempt == MAX_AGENT3_RETRIES) {
                     throw new IOException(
                             "Agent3 failed for " + filename + " after " + (MAX_AGENT3_RETRIES + 1)
@@ -536,7 +556,8 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                     }
                   ]
                 }
-                A genuinely no-op change must return an empty modifiedFileList.
+                The submitted requirement is authoritative and must produce a concrete change. Do not return an
+                empty modifiedFileList merely because the requested behavior is small or unconventional.
                 Write plan and note values in %s.
                 """.formatted(
                 addition ? "feature addition" : "feature modification",
@@ -582,6 +603,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 Rules:
                 - Never return the complete existing file.
                 - SEARCH must be non-empty and match exactly once in the current file at that step.
+                - Every REPLACE must differ from its SEARCH and must implement part of the requirement.
                 - Include enough unchanged context to make every SEARCH unique.
                 - Use additional blocks for additional edits, including package or import changes.
                 - Do not use ellipses, line numbers, regexes, explanations, or omitted-code placeholders.
@@ -687,8 +709,14 @@ abstract class JavaAgentPipelineSupport extends AgentService {
     }
 
     private String repairPrompt(String originalPrompt, String agent) {
+        return repairPrompt(originalPrompt, agent, null);
+    }
+
+    private String repairPrompt(String originalPrompt, String agent, Exception failure) {
         return originalPrompt + "\n\nYour previous " + agent
-                + " response violated the required contract. Try once more and follow the output schema exactly.";
+                + " response violated the required contract."
+                + (failure == null ? "" : " The exact reason was:\n" + safeFailureMessage(failure))
+                + "\nTry once more and follow the output schema exactly.";
     }
 
     private String buildAgent3RetryPrompt(
@@ -703,7 +731,8 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 + "Previous response:\n"
                 + boundedPromptSection(previousResponse, MAX_RETRY_RESPONSE_CHARS) + "\n\n"
                 + "Generate a fresh protocol response against the ORIGINAL target content. Do not apply edits "
-                + "to the previous response. Correct the reported failure and follow the protocol exactly.";
+                + "to the previous response. Every REPLACE must differ from SEARCH, and the resulting file must "
+                + "differ from the original. Correct the reported failure and follow the protocol exactly.";
     }
 
     private String agent3RetryMessage(

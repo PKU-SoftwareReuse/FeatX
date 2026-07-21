@@ -76,6 +76,33 @@ test('formats completed Agent1 and Agent2 JSON as structured output', () => {
     expect(screen.getByText(/"filename": "cn\/edu\/pku\/Foo.java"/)).toBeInTheDocument()
 })
 
+test('removes JSON markdown fences without breaking the following stage heading', () => {
+    const segments = splitAgentContent(`# === 阶段 II：修改方案规划 ===
+\`\`\`json
+{"modifiedFileList":[{"filename":"package/module.py","plan":"修改实现"}]}
+\`\`\`
+# === 阶段 III：具体文件修改 package/module.py ===
+`)
+
+    expect(segments.map((segment) => segment.type)).toEqual(['markdown', 'json', 'markdown'])
+    expect(segments[0].value).toContain('阶段 II')
+    expect(segments[0].value).not.toContain('```json')
+    expect(segments[1]).toMatchObject({type: 'json', complete: true})
+    expect(segments[2].value).toContain('阶段 III')
+    expect(segments[2].value).not.toContain('```')
+})
+
+test('hides an opening JSON fence while its object is still streaming', () => {
+    const segments = splitAgentContent(`# === Stage II ===
+\`\`\`json
+{"modifiedFileList":[`)
+
+    expect(segments).toHaveLength(2)
+    expect(segments[0]).toMatchObject({type: 'markdown'})
+    expect(segments[0].value).not.toContain('```json')
+    expect(segments[1]).toMatchObject({type: 'json', complete: false})
+})
+
 test('renders incomplete streamed JSON and respects braces inside strings', () => {
     const segments = splitAgentContent(`# Stage II
 {"modifiedFileList":[{"plan":"Keep {value} and escaped \\"quote\\"","filename":"Foo.java"`)

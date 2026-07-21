@@ -27,7 +27,7 @@ final class SearchReplacePatch {
         int start = nextContentLine(lines, 0);
         if (start >= lines.size() || !CREATE_START.equals(lines.get(start).trim())) {
             throw new IllegalArgumentException(
-                    "A new or empty Java file must use one <<<<<<< CREATE block."
+                    "A new or empty source file must use one <<<<<<< CREATE block."
             );
         }
         int end = findMarker(lines, start + 1, CREATE_END);

@@ -15,6 +15,7 @@ const SEARCH_SEPARATOR = '======='
 const REPLACE_END = '>>>>>>> REPLACE'
 const CREATE_START = '<<<<<<< CREATE'
 const CREATE_END = '>>>>>>> CREATE'
+const JSON_FENCE = '```json'
 
 const trimCodeEdges = (code) => code
     .replace(/^[\r\n]+/, '')
@@ -81,6 +82,18 @@ const nextProtocolStart = (content, cursor) => {
     return candidates[0] || null
 }
 
+const jsonFenceStart = (content, cursor, jsonStart) => {
+    const fence = content.lastIndexOf(JSON_FENCE, jsonStart)
+    if (fence < cursor) return -1
+    return content.slice(fence + JSON_FENCE.length, jsonStart).trim() === '' ? fence : -1
+}
+
+const afterClosingJsonFence = (content, jsonEnd) => {
+    let cursor = jsonEnd
+    while (cursor < content.length && /\s/.test(content[cursor])) cursor += 1
+    return content.startsWith('```', cursor) ? cursor + 3 : jsonEnd
+}
+
 export const splitAgentContent = (content = '') => {
     const segments = []
     let cursor = 0
@@ -92,8 +105,13 @@ export const splitAgentContent = (content = '') => {
             break
         }
 
-        if (protocol.index > cursor) {
-            segments.push({type: 'markdown', value: content.slice(cursor, protocol.index)})
+        const fencedJsonStart = protocol.type === 'json'
+            ? jsonFenceStart(content, cursor, protocol.index)
+            : -1
+        const segmentStart = fencedJsonStart >= 0 ? fencedJsonStart : protocol.index
+
+        if (segmentStart > cursor) {
+            segments.push({type: 'markdown', value: content.slice(cursor, segmentStart)})
         }
 
         const bodyStart = protocol.index + protocol.marker.length
@@ -112,7 +130,7 @@ export const splitAgentContent = (content = '') => {
                 value: content.slice(protocol.index, end),
                 complete: true,
             })
-            cursor = end
+            cursor = fencedJsonStart >= 0 ? afterClosingJsonFence(content, end) : end
             continue
         }
         if (protocol.type === 'pythonCode') {

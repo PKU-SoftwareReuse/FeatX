@@ -81,6 +81,7 @@
 }
 
 .stageCard {
+    width: 100%;
     border: 1px solid #e5e7eb;
     border-radius: 6px;
     padding: 8px 10px;
@@ -90,6 +91,21 @@
     color: #475569;
     background: #fafafa;
     font-size: 12px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    appearance: none;
+    transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.stageCard:hover {
+    border-color: #91caff;
+    background: #f0f7ff;
+}
+
+.stageCard:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
 }
 
 .stageCard strong {

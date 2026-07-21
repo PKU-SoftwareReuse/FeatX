@@ -103,6 +103,22 @@ class ModifyAgentServiceTest {
     }
 
     @Test
+    void rejectsSearchReplaceBlocksThatProduceNoChange() {
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class,
+                () -> service.applyAgent3Result("""
+                        <<<<<<< SEARCH
+                        private int value = 1;
+                        =======
+                        private int value = 1;
+                        >>>>>>> REPLACE
+                        """, "cn/edu/pku/Foo.java", ORIGINAL, false)
+        );
+
+        assertTrue(error.getMessage().contains("produced no changes"));
+    }
+
+    @Test
     void rejectsAReplacementThatBreaksJavaSyntax() {
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
