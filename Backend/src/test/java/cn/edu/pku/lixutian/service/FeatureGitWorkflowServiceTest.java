@@ -122,6 +122,40 @@ class FeatureGitWorkflowServiceTest {
         assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
     }
 
+    @Test
+    void discardInitializesLegacyNonGitProjectAndKeepsGeneratedOutput(@TempDir Path repository) throws Exception {
+        Files.writeString(repository.resolve("feature.py"), "print('original')\n");
+        Path generatedOutput = repository.resolve("preprocess1/report.csv");
+        Files.createDirectories(generatedOutput.getParent());
+        Files.writeString(generatedOutput, "generated\n");
+        ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
+
+        CandidateCodeService candidateService = new CandidateCodeService();
+        AgentService.modificationMap = new LinkedHashMap<>();
+        AgentService.modificationMap.put("feature.py", "print('candidate')\n");
+        candidateService.preparePythonCandidate(
+                "feature.py",
+                "feature.py",
+                AgentService.modificationMap.get("feature.py")
+        );
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                new RepositoryGitService(candidateService),
+                candidateService,
+                mock(CodeMapService.class),
+                new AgentRunRegistry()
+        );
+
+        GitWorkspaceStatusResult discarded = workflow.discard();
+
+        assertTrue(Files.isDirectory(repository.resolve(".git")));
+        assertEquals("featx-dev/main", discarded.getBranch());
+        assertEquals("print('original')\n", Files.readString(repository.resolve("feature.py")));
+        assertTrue(Files.exists(generatedOutput));
+        assertTrue(discarded.getCandidatePaths().isEmpty());
+        assertTrue(discarded.getStagedPaths().isEmpty());
+        assertTrue(discarded.getUnstagedPaths().isEmpty());
+    }
+
     private CandidateCodeService prepareTwoPythonCandidates(Path repository) throws Exception {
         ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
         CandidateCodeService candidateService = new CandidateCodeService();

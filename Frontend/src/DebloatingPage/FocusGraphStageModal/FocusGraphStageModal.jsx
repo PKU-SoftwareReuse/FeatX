@@ -36,7 +36,7 @@ const paletteFor = (node) => {
             highlightBorder: [148, 163, 184],
         };
     }
-    if (node.category === "Class") {
+    if (["Class", "Interface", "Enum", "Annotation"].includes(node.category)) {
         return {
             background: [255, 247, 230],
             border: [212, 136, 6],
@@ -99,7 +99,7 @@ const toVisNode = (node, options = {}) => {
         fadeOut = false,
     } = options;
     const resolvedNode = {...node, fadeOut: fadeOut || node.fadeOut};
-    const baseSize = node.category === "Class" ? 16 : 14;
+    const baseSize = ["Class", "Interface", "Enum", "Annotation"].includes(node.category) ? 16 : 14;
     const pos = positionOrZero(position);
     const fontOpacity = resolvedNode.fadeOut ? Math.max(0.18, opacity * 0.55) : opacity;
     return {
@@ -132,7 +132,7 @@ const toVisNode = (node, options = {}) => {
 };
 
 const toBaseNodeVisual = (node) => {
-    const baseSize = node.category === "Class" ? 16 : 14;
+    const baseSize = ["Class", "Interface", "Enum", "Annotation"].includes(node.category) ? 16 : 14;
     return {
         id: node.id,
         size: baseSize,
@@ -152,7 +152,7 @@ const toBaseNodeVisual = (node) => {
 const toRankingNodeVisual = (node, options = {}) => {
     const {final = false, intensity = 1} = options;
     const safeIntensity = Math.max(0.25, Math.min(1, intensity));
-    const baseSize = node.category === "Class" ? 16 : 14;
+    const baseSize = ["Class", "Interface", "Enum", "Annotation"].includes(node.category) ? 16 : 14;
     const palette = paletteFor(node);
     const background = final ? palette.background : palette.pulseBackground;
     const border = final ? palette.border : palette.pulseBorder;
@@ -875,7 +875,7 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
 
     return (
         <Modal
-            title="FocusGraph Stages"
+            title="Reasoning Graph Stages"
             open={open}
             onCancel={onClose}
             footer={null}
@@ -907,8 +907,8 @@ const FocusGraphStageModal = ({open, onClose, stages}) => {
             </div>
 
             <div className={styles.legend}>
-                <span><i className={styles.seedDot}/> method node</span>
-                <span><i className={styles.classDot}/> class node</span>
+                <span><i className={styles.seedDot}/> callable / field node</span>
+                <span><i className={styles.classDot}/> type node</span>
                 <span><i className={styles.fadeDot}/> filtered out during reasoning</span>
             </div>
 

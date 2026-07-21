@@ -5,9 +5,16 @@ jest.mock("./CodeDiffComponent/CodeDiffComponent", () => () => null);
 jest.mock("./MarkdownRenderComponent/MarkdownRenderComponent", () => () => null);
 jest.mock("./FocusGraphStageModal/FocusGraphStageModal", () => () => null);
 
-import {FeatureListItem} from "./DebloatingPage";
+import {FeatureListItem, supportsReasoningGraphStages} from "./DebloatingPage";
 
 describe("FeatureListItem", () => {
+    test("supports reasoning stages only for add and edit operations", () => {
+        expect(supportsReasoningGraphStages("edit")).toBe(true);
+        expect(supportsReasoningGraphStages("add")).toBe(true);
+        expect(supportsReasoningGraphStages("delete")).toBe(false);
+        expect(supportsReasoningGraphStages("select")).toBe(false);
+    });
+
     test("keeps the complete editor visible in the minimal compressed layout", () => {
         const feature = {
             featureId: 7,

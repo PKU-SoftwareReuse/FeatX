@@ -9,27 +9,20 @@ import cn.edu.pku.lixutian.service.code.ModifyAgentService;
 import cn.edu.pku.lixutian.service.code.PythonModifyAgentService;
 import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.ProjectState;
-import cn.edu.pku.lixutian.dao.Feature;
 import cn.edu.pku.lixutian.dto.request.AddOrModifyRequest;
-import cn.edu.pku.lixutian.dto.result.FeatureGraphResult;
 import cn.edu.pku.lixutian.dto.result.FeatureResult;
 import cn.edu.pku.lixutian.dto.result.FocusGraphContextResult;
 import cn.edu.pku.lixutian.dto.result.AgentRunStartResult;
 import cn.edu.pku.lixutian.dto.result.AgentRunSnapshotResult;
-import cn.edu.pku.lixutian.graph.SKG;
-import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
-import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
-import cn.edu.pku.lixutian.helper.graphAggregationHelper.ContextHelper;
-import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.FocusGraphContextService;
+import cn.edu.pku.lixutian.service.JavaGraphContextService;
 import cn.edu.pku.lixutian.service.OperationProgressService;
 import cn.edu.pku.lixutian.service.llm.LlmClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -39,12 +32,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/llm")
@@ -60,6 +50,9 @@ public class LlmController {
 
     @Autowired
     private FocusGraphContextService focusGraphContextService;
+
+    @Autowired
+    private JavaGraphContextService javaGraphContextService;
 
     @Autowired
     private OperationProgressService progressService;
@@ -86,10 +79,17 @@ public class LlmController {
             return modifyPythonFeature(request);
         }
 
+        progressService.start(
+                "java-modify",
+                8,
+                "start",
+                "Preparing Java Modify Feature request."
+        );
         AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
         ClusterState state = ClusterState.getInstance();
         FeatureResult candidateFeature = state.getCandidateFeature();
         if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
+            progressService.fail("Please select a Java feature before modifying it.");
             throw new IllegalStateException("Please select a Java feature before modifying it.");
         }
         state.setAgentLanguage(requestLanguage);
@@ -100,38 +100,42 @@ public class LlmController {
                 candidateFeature.getFeatureDescriptionCn(),
                 requestLanguage
         );
-
-        StringBuilder relatedCodes = new StringBuilder();
-        SKG maxGraph = SKG.getInstance().getMaxGraph();
-        VertexMap vertexMap = VertexMap.getInstance();
-        new FeatureGraphResult(maxGraph).getNodes().forEach(node -> {
-            Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(node.getId());
-            GraphAggregationHelper contextHelper = new ContextHelper(
-                    maxGraph,
-                    classVertex,
-                    state.getClusterIds()
+        try {
+            progressService.update(
+                    "delta-query",
+                    "Extracting the Java feature delta query with LLM.",
+                    2,
+                    8
             );
-            relatedCodes.append(node.getId()).append(":\n")
-                    .append(contextHelper.generateCode())
-                    .append("\n=======================\n");
-        });
-
-        ProjectState project = ProjectState.getInstance();
-        AgentRunContext context = agentRunRegistry.prepare(
-                "modify",
-                newRequest,
-                oldRequest,
-                relatedCodes.toString(),
-                String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
-                requestLanguage,
-                project.getSrcPath(),
-                project.getProjectPath(),
-                project.getRepoId(),
-                candidateFeature.getFeatureId(),
-                null,
-                List.of()
-        );
-        return new AgentRunStartResult(context.runId());
+            String deltaQuery = buildDeltaQuery(oldRequest, newRequest);
+            FocusGraphContextResult graphContext = javaGraphContextService.buildModifyContext(
+                    candidateFeature,
+                    oldRequest,
+                    newRequest,
+                    deltaQuery,
+                    requestLanguage
+            );
+            ProjectState project = ProjectState.getInstance();
+            AgentRunContext context = agentRunRegistry.prepare(
+                    "modify",
+                    newRequest,
+                    oldRequest,
+                    graphContext.getContextPrompt(),
+                    String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                    requestLanguage,
+                    project.getSrcPath(),
+                    project.getProjectPath(),
+                    project.getRepoId(),
+                    candidateFeature.getFeatureId(),
+                    null,
+                    graphContext.getGraphStages()
+            );
+            progressService.complete("Java reasoning graph context is ready. Starting Java Agent code generation.");
+            return new AgentRunStartResult(context.runId());
+        } catch (IOException | InterruptedException | RuntimeException exception) {
+            progressService.fail(exception.getMessage());
+            throw exception;
+        }
     }
 
     private AgentRunStartResult modifyPythonFeature(AddOrModifyRequest request)
@@ -233,6 +237,12 @@ public class LlmController {
             return addPythonFeature(request);
         }
 
+        progressService.start(
+                "java-add",
+                8,
+                "start",
+                "Preparing Java Add Feature request."
+        );
         AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
         String newRequest = request.getFeatureDescription();
         ClusterState state = ClusterState.getInstance();
@@ -240,64 +250,30 @@ public class LlmController {
         state.setNewFeatureDescription(newRequest);
 
         state.setCandidateModuleId(request.getModuleId());
-        List<Feature> features = codeMapService.getFeaturesByModuleId(request.getModuleId());
-
-        StringBuilder relatedCodes = new StringBuilder();
-        List<Feature> referenceFeatures = features.stream()
-                .sorted(java.util.Comparator.comparingInt(
-                        (Feature feature) -> relevanceScore(
-                                newRequest,
-                                localizedDescription(feature.getFeatureDesc(), feature.getFeatureDescCN(), requestLanguage)
-                        )
-                ).reversed())
-                .limit(4)
-                .toList();
+        codeMapService.selectFeature(null);
         try {
-            for (Feature feature : referenceFeatures) {
-                String featureDescription = localizedDescription(
-                        feature.getFeatureDesc(),
-                        feature.getFeatureDescCN(),
-                        requestLanguage
-                );
-                relatedCodes.append(requestLanguage.featureLabel()).append("\n\"")
-                        .append(featureDescription).append("\": \n\n");
-                codeMapService.selectFeature(feature.getId());
-                SKG maxGraph = SKG.getInstance().getMaxGraph();
-                VertexMap vertexMap = VertexMap.getInstance();
-
-                new FeatureGraphResult(maxGraph).getNodes().forEach(node -> {
-                    Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(node.getId());
-                    GraphAggregationHelper contextHelper = new ContextHelper(
-                            maxGraph,
-                            classVertex,
-                            state.getClusterIds()
-                    );
-                    relatedCodes.append(node.getId()).append(":\n")
-                            .append(contextHelper.generateCode())
-                            .append("\n-----------------------\n");
-                });
-                relatedCodes.append("\n=======================\n\n");
-            }
-        } finally {
-            codeMapService.selectFeature(null);
+            FocusGraphContextResult graphContext = javaGraphContextService.buildAddContext(newRequest, requestLanguage);
+            ProjectState project = ProjectState.getInstance();
+            AgentRunContext context = agentRunRegistry.prepare(
+                    "add",
+                    newRequest,
+                    "",
+                    graphContext.getContextPrompt(),
+                    String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                    requestLanguage,
+                    project.getSrcPath(),
+                    project.getProjectPath(),
+                    project.getRepoId(),
+                    null,
+                    request.getModuleId(),
+                    graphContext.getGraphStages()
+            );
+            progressService.complete("Java reasoning graph context is ready. Starting Java Agent code generation.");
+            return new AgentRunStartResult(context.runId());
+        } catch (IOException | InterruptedException | RuntimeException exception) {
+            progressService.fail(exception.getMessage());
+            throw exception;
         }
-
-        ProjectState project = ProjectState.getInstance();
-        AgentRunContext context = agentRunRegistry.prepare(
-                "add",
-                newRequest,
-                "",
-                relatedCodes.toString(),
-                String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
-                requestLanguage,
-                project.getSrcPath(),
-                project.getProjectPath(),
-                project.getRepoId(),
-                null,
-                request.getModuleId(),
-                List.of()
-        );
-        return new AgentRunStartResult(context.runId());
     }
 
     private AgentRunStartResult addPythonFeature(AddOrModifyRequest request)
@@ -536,21 +512,6 @@ public class LlmController {
         if (requireModule && request.getModuleId() == null) {
             throw new IllegalArgumentException("Module id is required when adding a feature.");
         }
-    }
-
-    private int relevanceScore(String request, String candidate) {
-        if (!hasText(request) || !hasText(candidate)) {
-            return 0;
-        }
-        Set<String> requestTerms = new HashSet<>(Arrays.asList(
-                request.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}_]+")
-        ));
-        Set<String> candidateTerms = new HashSet<>(Arrays.asList(
-                candidate.toLowerCase(java.util.Locale.ROOT).split("[^\\p{L}\\p{N}_]+")
-        ));
-        requestTerms.removeIf(term -> term.length() < 2);
-        candidateTerms.retainAll(requestTerms);
-        return candidateTerms.size();
     }
 
     private String buildDeltaQuery(String oldDescription, String newDescription) {

@@ -366,8 +366,11 @@ public class SKG extends SoftwareGraph<Arc> {
 //    }
 
     public SKG getMaxGraph() {
+        return getMaxGraph(ClusterState.getInstance().getClusterIds());
+    }
+
+    public SKG getMaxGraph(Set<Integer> candidateClusterIds) {
         SKG maxGraph = new SKG();
-        Set<Integer> candidateClusterIds = ClusterState.getInstance().getClusterIds();
         if (candidateClusterIds == null) {
             return maxGraph;
         } else {
@@ -377,6 +380,7 @@ public class SKG extends SoftwareGraph<Arc> {
 
             edgeSet().stream()
                     .filter(edge -> !Collections.disjoint(candidateClusterIds, edge.getClusterIds()))
+                    .filter(edge -> maxGraph.containsVertex(edge.getSource()) && maxGraph.containsVertex(edge.getTarget()))
                     .forEach(edge -> maxGraph.addEdge(edge.getSource(), edge.getTarget(), edge));
             return maxGraph;
         }

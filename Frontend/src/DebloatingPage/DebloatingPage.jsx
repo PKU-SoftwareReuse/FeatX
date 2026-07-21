@@ -65,6 +65,10 @@ const EMPTY_GIT_STATUS = {
     unstagedCandidatePaths: [],
 };
 
+export const supportsReasoningGraphStages = (operationType) => (
+    operationType === "edit" || operationType === "add"
+);
+
 const getWorkspaceSideGap = (viewportWidth) => (
     viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
         ? 0
@@ -228,8 +232,8 @@ const DEBLOATING_COPY = {
         restoringAgentRun: "正在恢复刷新前的 Agent 任务……",
         failedRestoreAgentRun: "无法恢复刷新前的 Agent 任务，请重新提交需求。",
         pythonDeleteReady: "Python 删除差异已准备好。请检查受影响文件后确认或放弃。",
-        focusGraphReady: "查看 Python FocusGraph 的初始、扩展和推理阶段。",
-        focusGraphPending: "Python 新增/修改提交后可查看 FocusGraph 阶段。",
+        focusGraphReady: "查看代码检索的初始图、扩展图和推理图。",
+        focusGraphPending: "Java/Python 新增或修改提交后可查看三阶段图。",
         failedFetchFeatureSummary: "获取功能摘要失败。",
         failedFetchCodeMap: "获取代码图谱失败。",
         failedFetchGeneratedGraph: "获取生成后的图谱失败。",
@@ -318,8 +322,8 @@ const DEBLOATING_COPY = {
         restoringAgentRun: "Restoring the Agent run from before the refresh...",
         failedRestoreAgentRun: "The Agent run from before the refresh could not be restored. Submit the request again.",
         pythonDeleteReady: "Deterministic Python delete diff is ready. Review the affected files and confirm or drop it.",
-        focusGraphReady: "Show Python FocusGraph initial, expanded, and reasoning graphs.",
-        focusGraphPending: "FocusGraph stages are available after Python Add/Modify submit.",
+        focusGraphReady: "Show the initial, expanded, and reasoning code graphs.",
+        focusGraphPending: "Graph stages are available after Java/Python Add or Modify submit.",
         failedFetchFeatureSummary: "Failed to fetch feature summary.",
         failedFetchCodeMap: "Failed to fetch CodeMap.",
         failedFetchGeneratedGraph: "Failed to fetch generated graph.",
@@ -1402,16 +1406,17 @@ const DebloatingPage = () => {
         setChatContent("");
         setChatMode(true)
         setModeTrans(true)
+        const progressOperation = `${isPythonProject ? "python" : "java"}-${
+            operationType === 'add' ? "add" : "modify"
+        }`
         setOperationProgress({
-            operation: isPythonProject
-                ? operationType === 'add' ? "python-add" : "python-modify"
-                : operationType,
+            operation: progressOperation,
             stage: "agent-stream",
             message: restoring
                 ? copy.restoringAgentRun
                 : isPythonProject ? copy.streamingPythonAgent : copy.streamingAgent,
-            currentStep: isPythonProject ? 8 : 0,
-            totalSteps: isPythonProject ? 8 : 1,
+            currentStep: 8,
+            totalSteps: 8,
             running: true,
             failed: false
         })
@@ -1441,13 +1446,11 @@ const DebloatingPage = () => {
             eventSourceRef.current = null
             stopProgressPolling()
             setOperationProgress({
-                operation: isPythonProject
-                    ? operationType === 'add' ? "python-add" : "python-modify"
-                    : operationType,
+                operation: progressOperation,
                 stage: "complete",
                 message: copy.codeGenerationFinished,
-                currentStep: isPythonProject ? 8 : 1,
-                totalSteps: isPythonProject ? 8 : 1,
+                currentStep: 8,
+                totalSteps: 8,
                 running: false,
                 failed: false
             })
@@ -1573,8 +1576,8 @@ const DebloatingPage = () => {
                     snapshot.runId
                 )
 
-                if (isPythonProject) {
-                    await loadFocusGraphStages(snapshot.runId).catch(() => [])
+                if (supportsReasoningGraphStages(operationType)) {
+                    await loadFocusGraphStages(snapshot.runId, operationType).catch(() => [])
                 }
                 handleChat(
                     API.getLlmResponse(
@@ -1723,6 +1726,8 @@ const DebloatingPage = () => {
         return operationProgress?.operation === "python-modify"
             || operationProgress?.operation === "python-add"
             || operationProgress?.operation === "python-delete"
+            || operationProgress?.operation === "java-modify"
+            || operationProgress?.operation === "java-add"
             || operationProgress?.stage === "submit"
             || operationProgress?.stage === "agent-stream";
     }
@@ -1777,8 +1782,8 @@ const DebloatingPage = () => {
         progressTimerRef.current = setInterval(() => fetchOperationProgress(expectedOperation), 1000)
     }
 
-    const loadFocusGraphStages = (runId) => {
-        if (!isPythonProject || (selectedType !== "edit" && selectedType !== "add")) {
+    const loadFocusGraphStages = (runId, operationType = selectedType) => {
+        if (!supportsReasoningGraphStages(operationType)) {
             clearFocusGraphStages()
             return Promise.resolve([])
         }
@@ -1870,19 +1875,19 @@ const DebloatingPage = () => {
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         clearFocusGraphStages()
-        const expectedOperation = selectedType === 'add' ? "python-add" : "python-modify";
-        if (isPythonProject) {
-            setOperationProgress({
-                operation: expectedOperation,
-                stage: "submit",
-                message: selectedType === 'add' ? copy.submittingFeatureAddition : copy.submittingFeatureModification,
-                currentStep: 0,
-                totalSteps: 8,
-                running: true,
-                failed: false
-            })
-            startProgressPolling(expectedOperation)
-        }
+        const expectedOperation = `${isPythonProject ? "python" : "java"}-${
+            selectedType === 'add' ? "add" : "modify"
+        }`;
+        setOperationProgress({
+            operation: expectedOperation,
+            stage: "submit",
+            message: selectedType === 'add' ? copy.submittingFeatureAddition : copy.submittingFeatureModification,
+            currentStep: 0,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
+        startProgressPolling(expectedOperation)
 
         if (selectedType == 'edit') {
             // console.log(editedText);
@@ -1893,28 +1898,24 @@ const DebloatingPage = () => {
                     setRequestDraftDirty(false)
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
-                    if (isPythonProject) {
-                        await loadFocusGraphStages(runId)
-                    }
+                    await loadFocusGraphStages(runId, "edit")
                     handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Modify Feature:', error)
-                    if (isPythonProject) {
-                        stopProgressPolling()
-                        const msg = errorMessage(error, copy.failedPrepareModification)
-                        setOperationProgress({
-                            operation: expectedOperation,
-                            stage: "failed",
-                            message: msg,
-                            currentStep: operationProgress?.currentStep || 0,
-                            totalSteps: operationProgress?.totalSteps || 8,
-                            running: false,
-                            failed: true,
-                            error: msg
-                        })
-                        message.error(msg)
-                    }
+                    stopProgressPolling()
+                    const msg = errorMessage(error, copy.failedPrepareModification)
+                    setOperationProgress({
+                        operation: expectedOperation,
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                     setLoadingFeatureList(false)
                     setSubmitEnabled(true)
                 });
@@ -1933,28 +1934,24 @@ const DebloatingPage = () => {
                     setRequestDraftDirty(false)
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
-                    if (isPythonProject) {
-                        await loadFocusGraphStages(runId)
-                    }
+                    await loadFocusGraphStages(runId, "add")
                     handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
-                    if (isPythonProject) {
-                        stopProgressPolling()
-                        const msg = errorMessage(error, copy.failedAddFeature)
-                        setOperationProgress({
-                            operation: "python-add",
-                            stage: "failed",
-                            message: msg,
-                            currentStep: operationProgress?.currentStep || 0,
-                            totalSteps: operationProgress?.totalSteps || 8,
-                            running: false,
-                            failed: true,
-                            error: msg
-                        })
-                        message.error(msg)
-                    }
+                    stopProgressPolling()
+                    const msg = errorMessage(error, copy.failedAddFeature)
+                    setOperationProgress({
+                        operation: expectedOperation,
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                     setLoadingFeatureList(false)
                     setSubmitEnabled(true)
                 });
@@ -2034,8 +2031,7 @@ const DebloatingPage = () => {
         });
     };
 
-    const hasFocusGraphStages = isPythonProject
-        && (selectedType === "edit" || selectedType === "add")
+    const hasFocusGraphStages = supportsReasoningGraphStages(selectedType)
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
     const stagedFileCount = gitStatus.stagedPaths?.length || 0;
