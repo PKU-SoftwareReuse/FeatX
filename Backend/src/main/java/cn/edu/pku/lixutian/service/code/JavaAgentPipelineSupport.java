@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicReference;
 abstract class JavaAgentPipelineSupport extends AgentService {
     private static final int MAX_ADDITIONAL_FILES = 12;
     private static final int MAX_MODIFIED_FILES = 20;
-    private static final int MAX_CORE_CONTEXT_CHARS = 120_000;
-    private static final int MAX_REFERENCE_CONTEXT_CHARS = 100_000;
+    private static final int MAX_CORE_CONTEXT_CHARS = contextLimit("JAVA_AGENT_MAX_CORE_CONTEXT_CHARS", 0);
+    private static final int MAX_REFERENCE_CONTEXT_CHARS = contextLimit("JAVA_AGENT_MAX_REFERENCE_CONTEXT_CHARS", 0);
     private static final int MAX_PRIOR_GENERATION_CHARS = 80_000;
     private static final int MAX_AGENT3_RETRIES = 5;
     private static final int MAX_RETRY_RESPONSE_CHARS = 20_000;
@@ -740,6 +740,19 @@ abstract class JavaAgentPipelineSupport extends AgentService {
     private void ensureNotInterrupted() throws IOException {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("Agent pipeline was cancelled.");
+        }
+    }
+
+    private static int contextLimit(String name, int defaultValue) {
+        String raw = System.getenv(name);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return value >= 0 ? value : defaultValue;
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
         }
     }
 }

@@ -52,8 +52,11 @@ public class AgentService {
         if (content == null) {
             return "";
         }
-        if (content.length() <= maxCharacters) {
+        if (maxCharacters == 0 || content.length() <= maxCharacters) {
             return content;
+        }
+        if (maxCharacters < 0) {
+            throw new IllegalArgumentException("Prompt section limit cannot be negative.");
         }
         int head = maxCharacters * 2 / 3;
         int tail = maxCharacters - head;
