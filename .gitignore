@@ -23,3 +23,6 @@ out/
 
 # Runtime repositories created/imported by FeatX.
 /repos/
+
+code-workspace/
+experiments/
