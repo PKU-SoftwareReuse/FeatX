@@ -61,6 +61,7 @@ public class RepositoryGitService {
     }
 
     public synchronized GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
+        repositoryRoot();
         CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
         stagePaths(List.of(candidate.path()));
         return status();
@@ -103,9 +104,12 @@ public class RepositoryGitService {
             throw new IllegalStateException("No project is currently selected.");
         }
         Path expectedRoot = Path.of(projectPath).toAbsolutePath().normalize();
+        if (!Files.isDirectory(expectedRoot)) {
+            throw new IllegalStateException("The selected project directory does not exist.");
+        }
         Path gitMetadata = expectedRoot.resolve(".git");
         if (!Files.isDirectory(gitMetadata) && !Files.isRegularFile(gitMetadata)) {
-            throw new IllegalStateException("The current project is not backed by a Git repository.");
+            initializeLegacyRepository(expectedRoot);
         }
         Path actualRoot = Path.of(runGit(
                 expectedRoot,
@@ -116,6 +120,39 @@ public class RepositoryGitService {
             throw new IllegalStateException("Git repository root does not match the selected project directory.");
         }
         return actualRoot;
+    }
+
+    private void initializeLegacyRepository(Path repository) throws IOException, InterruptedException {
+        runGit(repository, List.of("git", "init", "-b", "main"), 0);
+        Path excludeFile = repository.resolve(".git/info/exclude");
+        Files.createDirectories(excludeFile.getParent());
+        List<String> existingLines = Files.exists(excludeFile)
+                ? Files.readAllLines(excludeFile, StandardCharsets.UTF_8)
+                : new ArrayList<>();
+        List<String> generatedPatterns = List.of("/preprocess1/", "/delombok/", "/preprocess2/");
+        StringBuilder additions = new StringBuilder();
+        for (String pattern : generatedPatterns) {
+            if (!existingLines.contains(pattern)) {
+                additions.append(pattern).append('\n');
+            }
+        }
+        if (!additions.isEmpty()) {
+            Files.writeString(
+                    excludeFile,
+                    additions,
+                    StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND
+            );
+        }
+        runGit(repository, List.of("git", "add", "-A", "--", "."), 0);
+        runGit(repository, List.of(
+                "git",
+                "-c", "user.name=FeatX",
+                "-c", "user.email=featx@localhost",
+                "commit", "--allow-empty", "-m", "FeatX legacy import baseline"
+        ), 0);
+        runGit(repository, List.of("git", "checkout", "-B", "featx-dev/main"), 0);
     }
 
     private List<String> listPaths(Path repository, List<String> command) throws IOException, InterruptedException {

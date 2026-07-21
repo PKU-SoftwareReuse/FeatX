@@ -63,6 +63,8 @@ public class FocusGraphContextResult {
         private String srcType;
         private String methodSignature;
         private String funcFile;
+        private String ownerClass;
+        private List<String> sourceFeatureIds = new ArrayList<>();
         private Double score;
     }
 

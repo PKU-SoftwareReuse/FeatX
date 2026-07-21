@@ -62,6 +62,12 @@ const EMPTY_GIT_STATUS = {
     unstagedCandidatePaths: [],
 };
 
+export const supportsReasoningGraphStages = (isPythonProject, operationType) => (
+    operationType === "edit"
+    || operationType === "add"
+    || (!isPythonProject && operationType === "delete")
+);
+
 const getWorkspaceSideGap = (viewportWidth) => (
     viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
         ? 0
@@ -165,11 +171,12 @@ const DEBLOATING_COPY = {
         submittingFeatureAddition: "正在提交新增功能。",
         submittingFeatureModification: "正在提交功能修改。",
         preparingModification: "正在准备修改。",
-        streamingPythonAgent: "正在流式生成 Python 代码。",
+        streamingAgent: "正在流式生成代码。",
         codeGenerationFinished: "代码生成已完成。请检查差异后确认或放弃。",
         pythonDeleteReady: "Python 删除差异已准备好。请检查受影响文件后确认或放弃。",
-        focusGraphReady: "查看 Python FocusGraph 的初始、扩展和推理阶段。",
-        focusGraphPending: "Python 新增/修改提交后可查看 FocusGraph 阶段。",
+        javaDeleteReady: "Java 确定性删除差异和三阶段推理图已准备好。",
+        focusGraphReady: "查看代码检索的初始图、扩展图和推理图。",
+        focusGraphPending: "提交新增/修改操作后可查看图阶段；Java 删除也支持。",
         failedFetchFeatureSummary: "获取功能摘要失败。",
         failedFetchCodeMap: "获取代码图谱失败。",
         failedFetchGeneratedGraph: "获取生成后的图谱失败。",
@@ -251,11 +258,12 @@ const DEBLOATING_COPY = {
         submittingFeatureAddition: "Submitting feature addition.",
         submittingFeatureModification: "Submitting feature modification.",
         preparingModification: "Preparing modification.",
-        streamingPythonAgent: "Streaming Python Agent code generation.",
+        streamingAgent: "Streaming Agent code generation.",
         codeGenerationFinished: "Code generation finished. Review the diff and confirm or drop it.",
         pythonDeleteReady: "Deterministic Python delete diff is ready. Review the affected files and confirm or drop it.",
-        focusGraphReady: "Show Python FocusGraph initial, expanded, and reasoning graphs.",
-        focusGraphPending: "FocusGraph stages are available after Python Add/Modify submit.",
+        javaDeleteReady: "The deterministic Java delete diff and three reasoning graph stages are ready.",
+        focusGraphReady: "Show the initial, expanded, and reasoning code graphs.",
+        focusGraphPending: "Graph stages are available after Add/Modify submit and Java Delete preparation.",
         failedFetchFeatureSummary: "Failed to fetch feature summary.",
         failedFetchCodeMap: "Failed to fetch CodeMap.",
         failedFetchGeneratedGraph: "Failed to fetch generated graph.",
@@ -1003,11 +1011,7 @@ const DebloatingPage = () => {
         setSelectedFeatureItem(item)
         setSelectedType("delete")
         getFeatureGraphData(item.featureId, "delete")
-        if (isPythonProject) {
-            preparePythonDelete(item)
-        } else {
-            setConfirmEnabled(true)
-        }
+        prepareFeatureDelete(item)
     }
 
     const handleEdit = (item) => {
@@ -1231,17 +1235,16 @@ const DebloatingPage = () => {
         setChatContent("");
         setChatMode(true)
         setModeTrans(true)
-        if (isPythonProject) {
-            setOperationProgress({
-                operation: selectedType === 'add' ? "python-add" : "python-modify",
-                stage: "agent-stream",
-                message: copy.streamingPythonAgent,
-                currentStep: 8,
-                totalSteps: 8,
-                running: true,
-                failed: false
-            })
-        }
+        const operationPrefix = isPythonProject ? "python" : "java";
+        setOperationProgress({
+            operation: `${operationPrefix}-${selectedType === 'add' ? "add" : "modify"}`,
+            stage: "agent-stream",
+            message: copy.streamingAgent,
+            currentStep: 8,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
         eventSource.onmessage = (event) => {
             const decoded = decodeURIComponent(escape(atob(event.data)));
             setChatContent(prev => prev + decoded);
@@ -1250,18 +1253,16 @@ const DebloatingPage = () => {
 
             eventSource.close(); // 关闭连接
             eventSourceRef.current = null
-            if (isPythonProject) {
-                stopProgressPolling()
-                setOperationProgress({
-                    operation: selectedType === 'add' ? "python-add" : "python-modify",
-                    stage: "complete",
-                    message: copy.codeGenerationFinished,
-                    currentStep: 8,
-                    totalSteps: 8,
-                    running: false,
-                    failed: false
-                })
-            }
+            stopProgressPolling()
+            setOperationProgress({
+                operation: `${operationPrefix}-${selectedType === 'add' ? "add" : "modify"}`,
+                stage: "complete",
+                message: copy.codeGenerationFinished,
+                currentStep: 8,
+                totalSteps: 8,
+                running: false,
+                failed: false
+            })
             setLoadingFeatureList(false);
             setConfirmEnabled(true)
 
@@ -1399,6 +1400,9 @@ const DebloatingPage = () => {
         return operationProgress?.operation === "python-modify"
             || operationProgress?.operation === "python-add"
             || operationProgress?.operation === "python-delete"
+            || operationProgress?.operation === "java-modify"
+            || operationProgress?.operation === "java-add"
+            || operationProgress?.operation === "java-delete"
             || operationProgress?.stage === "submit"
             || operationProgress?.stage === "agent-stream";
     }
@@ -1453,8 +1457,9 @@ const DebloatingPage = () => {
         progressTimerRef.current = setInterval(() => fetchOperationProgress(expectedOperation), 1000)
     }
 
-    const loadFocusGraphStages = () => {
-        if (!isPythonProject || (selectedType !== "edit" && selectedType !== "add")) {
+    const loadFocusGraphStages = (operationType = selectedType) => {
+        const supportedOperation = supportsReasoningGraphStages(isPythonProject, operationType);
+        if (!supportedOperation) {
             clearFocusGraphStages()
             return Promise.resolve([])
         }
@@ -1478,26 +1483,30 @@ const DebloatingPage = () => {
         }
     }, [])
 
-    const preparePythonDelete = (item) => {
+    const prepareFeatureDelete = (item) => {
+        const operation = isPythonProject ? "python-delete" : "java-delete";
+        const totalSteps = isPythonProject ? 4 : 8;
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         setConfirmEnabled(false)
         setOperationProgress({
-            operation: "python-delete",
+            operation,
             stage: "submit",
             message: copy.submittingFeatureDeletion,
             currentStep: 0,
-            totalSteps: 4,
+            totalSteps,
             running: true,
             failed: false
         })
-        startProgressPolling("python-delete")
+        startProgressPolling(operation)
         API.deleteFeature({
             featureId: item.featureId,
-            featureDescription: item.featureDescription
+            featureDescription: item.featureDescription,
+            language: apiLanguage,
         })
-            .then(() => {
+            .then(async () => {
                 stopProgressPolling()
+                await loadFocusGraphStages("delete")
                 setLoadingFeatureList(false)
                 setConfirmEnabled(true)
                 setChatMode(false)
@@ -1508,16 +1517,18 @@ const DebloatingPage = () => {
                     })
                     .catch(() => {
                         setOperationProgress({
-                            operation: "python-delete",
+                            operation,
                             stage: "complete",
-                            message: copy.pythonDeleteReady,
-                            currentStep: 4,
-                            totalSteps: 4,
+                            message: isPythonProject ? copy.pythonDeleteReady : copy.javaDeleteReady,
+                            currentStep: totalSteps,
+                            totalSteps,
                             running: false,
                             failed: false
                         })
                     })
-                getFeatureGraphData(0, "new")
+                if (isPythonProject) {
+                    getFeatureGraphData(0, "new")
+                }
             })
             .catch((error) => {
                 console.error('Error Delete Feature:', error)
@@ -1525,11 +1536,11 @@ const DebloatingPage = () => {
                 setLoadingFeatureList(false)
                 const msg = errorMessage(error, copy.failedPrepareDeletion)
                 setOperationProgress({
-                    operation: "python-delete",
+                    operation,
                     stage: "failed",
                     message: msg,
                     currentStep: operationProgress?.currentStep || 0,
-                    totalSteps: operationProgress?.totalSteps || 4,
+                    totalSteps: operationProgress?.totalSteps || totalSteps,
                     running: false,
                     failed: true,
                     error: msg
@@ -1544,50 +1555,45 @@ const DebloatingPage = () => {
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         clearFocusGraphStages()
-        const expectedOperation = selectedType === 'add' ? "python-add" : "python-modify";
-        if (isPythonProject) {
-            setOperationProgress({
-                operation: expectedOperation,
-                stage: "submit",
-                message: selectedType === 'add' ? copy.submittingFeatureAddition : copy.submittingFeatureModification,
-                currentStep: 0,
-                totalSteps: 8,
-                running: true,
-                failed: false
-            })
-            startProgressPolling(expectedOperation)
-        }
+        const operationPrefix = isPythonProject ? "python" : "java";
+        const expectedOperation = `${operationPrefix}-${selectedType === 'add' ? "add" : "modify"}`;
+        setOperationProgress({
+            operation: expectedOperation,
+            stage: "submit",
+            message: selectedType === 'add' ? copy.submittingFeatureAddition : copy.submittingFeatureModification,
+            currentStep: 0,
+            totalSteps: 8,
+            running: true,
+            failed: false
+        })
+        startProgressPolling(expectedOperation)
 
-        if (selectedType == 'edit') {
+        if (selectedType === 'edit') {
             // console.log(editedText);
             API.modifyFeature(editedText, apiLanguage)
                 .then(async (data) => {
-                    if (isPythonProject) {
-                        await loadFocusGraphStages()
-                    }
+                    await loadFocusGraphStages("edit")
                     handleChat(API.getLlmResponse(apiLanguage, selectedModel))
                 })
                 .catch((error) => {
                     console.error('Error Modify Feature:', error)
-                    if (isPythonProject) {
-                        stopProgressPolling()
-                        const msg = errorMessage(error, copy.failedPrepareModification)
-                        setOperationProgress({
-                            operation: expectedOperation,
-                            stage: "failed",
-                            message: msg,
-                            currentStep: operationProgress?.currentStep || 0,
-                            totalSteps: operationProgress?.totalSteps || 8,
-                            running: false,
-                            failed: true,
-                            error: msg
-                        })
-                        message.error(msg)
-                    }
+                    stopProgressPolling()
+                    const msg = errorMessage(error, copy.failedPrepareModification)
+                    setOperationProgress({
+                        operation: expectedOperation,
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                     setLoadingFeatureList(false)
                     setSubmitEnabled(true)
                 });
-        } else if (selectedType == 'add') {
+        } else if (selectedType === 'add') {
             // 构建请求参数，包含moduleId
             const requestData = {
                 featureDescription: editedText,
@@ -1597,28 +1603,24 @@ const DebloatingPage = () => {
 
             API.addFeature(requestData)
                 .then(async (data) => {
-                    if (isPythonProject) {
-                        await loadFocusGraphStages()
-                    }
+                    await loadFocusGraphStages("add")
                     handleChat(API.getLlmResponse(apiLanguage, selectedModel))
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
-                    if (isPythonProject) {
-                        stopProgressPolling()
-                        const msg = errorMessage(error, copy.failedAddFeature)
-                        setOperationProgress({
-                            operation: "python-add",
-                            stage: "failed",
-                            message: msg,
-                            currentStep: operationProgress?.currentStep || 0,
-                            totalSteps: operationProgress?.totalSteps || 8,
-                            running: false,
-                            failed: true,
-                            error: msg
-                        })
-                        message.error(msg)
-                    }
+                    stopProgressPolling()
+                    const msg = errorMessage(error, copy.failedAddFeature)
+                    setOperationProgress({
+                        operation: expectedOperation,
+                        stage: "failed",
+                        message: msg,
+                        currentStep: operationProgress?.currentStep || 0,
+                        totalSteps: operationProgress?.totalSteps || 8,
+                        running: false,
+                        failed: true,
+                        error: msg
+                    })
+                    message.error(msg)
                     setLoadingFeatureList(false)
                     setSubmitEnabled(true)
                 });
@@ -1695,8 +1697,7 @@ const DebloatingPage = () => {
         });
     };
 
-    const hasFocusGraphStages = isPythonProject
-        && (selectedType === "edit" || selectedType === "add")
+    const hasFocusGraphStages = supportsReasoningGraphStages(isPythonProject, selectedType)
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
     const stagedFileCount = gitStatus.stagedPaths?.length || 0;
