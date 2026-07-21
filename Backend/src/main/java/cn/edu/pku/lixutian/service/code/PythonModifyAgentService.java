@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.service.code;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -81,9 +82,10 @@ public class PythonModifyAgentService extends AgentService {
         };
         Future<?> future;
         try {
-            future = agentPipelineExecutor.submit(() -> {
+            ProjectState.CapturedContext projectContext = ProjectState.capture();
+            future = agentPipelineExecutor.submit(() -> projectContext.run(() -> {
             try {
-                pythonModifiedMethods = Collections.emptySet();
+                ProjectState.getInstance().setPythonModifiedMethods(Collections.emptySet());
                 AgentLanguage language = context.language();
                 Set<String> existingPythonFiles = new HashSet<>(
                         ListFileHelper.findPythonFiles(context.sourceRoot())
@@ -180,7 +182,7 @@ public class PythonModifyAgentService extends AgentService {
                 } catch (IOException ignored) {
                 }
             }
-        });
+        }));
         } catch (RuntimeException exception) {
             terminal.set(true);
             agentRunRegistry.fail(runId, exception);

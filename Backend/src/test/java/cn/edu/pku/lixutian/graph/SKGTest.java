@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.graph;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.ClassArc;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
@@ -9,8 +10,27 @@ import org.junit.jupiter.api.Test;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class SKGTest {
+    @Test
+    void graphInstancesAreStableAndSeparatedByRepository() {
+        ProjectState first = ProjectState.selectWorkspace("graph-a", 201, "/tmp/graph-a", "JAVA");
+        ProjectState second = ProjectState.selectWorkspace("graph-b", 202, "/tmp/graph-b", "JAVA");
+
+        SKG firstGraph;
+        try (ProjectState.Scope ignored = ProjectState.bindProject("graph-a", first)) {
+            firstGraph = SKG.getNewInstance();
+            assertSame(firstGraph, SKG.getInstance());
+        }
+        try (ProjectState.Scope ignored = ProjectState.bindProject("graph-b", second)) {
+            SKG secondGraph = SKG.getNewInstance();
+            assertSame(secondGraph, SKG.getInstance());
+            assertNotSame(firstGraph, secondGraph);
+        }
+    }
+
     @Test
     void getMaxGraphFiltersByExplicitClusterIdsWithoutClusterState() {
         SKG graph = new SKG();

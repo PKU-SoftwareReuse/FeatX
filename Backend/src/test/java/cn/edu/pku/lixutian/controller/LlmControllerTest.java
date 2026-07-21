@@ -24,8 +24,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -123,6 +129,7 @@ class LlmControllerTest {
     @Test
     void javaDeleteDoesNotBuildReasoningStages(@TempDir Path projectRoot) throws Exception {
         prepareProject(projectRoot, "JAVA");
+        selectedFeature(8, "Delete this Java feature");
         JavaGraphContextService javaGraphService = mock(JavaGraphContextService.class);
         FocusGraphContextService pythonGraphService = mock(FocusGraphContextService.class);
         LlmController controller = controller(
@@ -162,6 +169,95 @@ class LlmControllerTest {
         verifyNoInteractions(javaGraphService, pythonGraphService);
         verify(codeMapService).preparePythonDeleteFeature(anyInt(), anyList());
         verify(codeMapService, never()).getFeaturesByModuleId(anyInt());
+    }
+
+    @Test
+    void differentProjectsBuildReasoningContextsConcurrently(
+            @TempDir Path firstRoot,
+            @TempDir Path secondRoot
+    ) throws Exception {
+        Files.writeString(firstRoot.resolve("First.java"), "class First {}\n");
+        Files.writeString(secondRoot.resolve("Second.java"), "class Second {}\n");
+        ProjectState firstProject = ProjectState.selectWorkspace(
+                "llm-parallel-a", 701, firstRoot.toString(), "JAVA"
+        );
+        ProjectState secondProject = ProjectState.selectWorkspace(
+                "llm-parallel-b", 702, secondRoot.toString(), "JAVA"
+        );
+
+        CountDownLatch bothInsideReasoning = new CountDownLatch(2);
+        JavaGraphContextService javaGraphService = mock(JavaGraphContextService.class);
+        when(javaGraphService.buildModifyContext(
+                any(FeatureResult.class),
+                anyString(),
+                anyString(),
+                anyString(),
+                any(AgentLanguage.class)
+        )).thenAnswer(invocation -> {
+            bothInsideReasoning.countDown();
+            assertTrue(
+                    bothInsideReasoning.await(5, TimeUnit.SECONDS),
+                    "Both repositories must enter reasoning-context preparation at the same time."
+            );
+            FocusGraphContextResult result = new FocusGraphContextResult();
+            result.setContextPrompt("parallel context");
+            result.setGraphStages(List.of());
+            return result;
+        });
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.generateWithSinglePrompt(anyString()))
+                .thenReturn("{\"deltaQuery\":\"parallel change\"}");
+        AgentRunRegistry registry = new AgentRunRegistry();
+        LlmController controller = controller(
+                registry,
+                javaGraphService,
+                mock(FocusGraphContextService.class),
+                llmClient
+        );
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<AgentRunStartResult> firstRun = executor.submit(
+                    () -> prepareModifyInWorkspace(controller, "llm-parallel-a", firstProject, 71)
+            );
+            Future<AgentRunStartResult> secondRun = executor.submit(
+                    () -> prepareModifyInWorkspace(controller, "llm-parallel-b", secondProject, 72)
+            );
+
+            AgentRunStartResult firstResult = firstRun.get(10, TimeUnit.SECONDS);
+            AgentRunStartResult secondResult = secondRun.get(10, TimeUnit.SECONDS);
+            try (ProjectState.Scope ignored = ProjectState.bindProject("llm-parallel-a", firstProject)) {
+                assertEquals(701, registry.requireActiveContext(firstResult.runId()).repositoryId());
+            }
+            try (ProjectState.Scope ignored = ProjectState.bindProject("llm-parallel-b", secondProject)) {
+                assertEquals(702, registry.requireActiveContext(secondResult.runId()).repositoryId());
+            }
+            assertTrue(registry.hasActiveOperation(701));
+            assertTrue(registry.hasActiveOperation(702));
+        } finally {
+            executor.shutdownNow();
+            registry.clearRepository(701);
+            registry.clearRepository(702);
+        }
+    }
+
+    private AgentRunStartResult prepareModifyInWorkspace(
+            LlmController controller,
+            String workspaceId,
+            ProjectState project,
+            int featureId
+    ) throws Exception {
+        try (ProjectState.Scope ignored = ProjectState.bindProject(workspaceId, project)) {
+            FeatureResult feature = new FeatureResult();
+            feature.setFeatureId(featureId);
+            feature.setFeatureDescription("Old feature " + featureId);
+            ClusterState.getInstance().setCandidateFeature(feature);
+
+            AddOrModifyRequest request = new AddOrModifyRequest();
+            request.setFeatureDescription("New feature " + featureId);
+            request.setLanguage(AgentLanguage.EN);
+            return controller.modifyFeature(request);
+        }
     }
 
     private LlmController controller(

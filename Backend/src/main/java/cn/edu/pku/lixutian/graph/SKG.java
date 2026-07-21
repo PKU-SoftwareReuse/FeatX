@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.graph;
 
 import cn.edu.pku.lixutian.config.ClusterState;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.SoftwareGraph;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.CallArc;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.ClassArc;
@@ -18,16 +19,24 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class SKG extends SoftwareGraph<Arc> {
-    private static SKG instance;
+    private static final Map<Integer, SKG> INSTANCES = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static SKG getInstance() {
+        SKG instance = INSTANCES.get(ProjectState.currentRepositoryKey());
         assert instance != null;
         return instance;
     }
 
     public static SKG getNewInstance() {
-        instance = new SKG();
+        SKG instance = new SKG();
+        INSTANCES.put(ProjectState.currentRepositoryKey(), instance);
         return instance;
+    }
+
+    public static void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            INSTANCES.remove(repositoryId);
+        }
     }
 
     private VertexMap vertexMap = null;

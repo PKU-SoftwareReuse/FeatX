@@ -5,74 +5,159 @@ import axios from "axios";
 const BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8080";
 // const BASE_URL = "http://10.7.1.126:8080";
 
+const WORKSPACE_ID_KEY = "featx.workspaceId";
+const REPOSITORY_ID_KEY = "featx.repositoryId";
+
+const readSessionValue = (key) => {
+    try {
+        return window.sessionStorage.getItem(key);
+    } catch (error) {
+        return null;
+    }
+};
+
+const writeSessionValue = (key, value) => {
+    try {
+        if (value == null || value === "") {
+            window.sessionStorage.removeItem(key);
+        } else {
+            window.sessionStorage.setItem(key, String(value));
+        }
+    } catch (error) {
+        // Requests still work through the backend's legacy workspace when storage is unavailable.
+    }
+};
+
+const createWorkspaceId = () => {
+    if (typeof window.crypto?.randomUUID === "function") {
+        return window.crypto.randomUUID();
+    }
+    return `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const claimWorkspaceId = (storedWorkspaceId) => {
+    let claimedWorkspaceId = storedWorkspaceId || createWorkspaceId();
+    const documentId = createWorkspaceId();
+    try {
+        const claimKey = `featx.workspaceClaim.${claimedWorkspaceId}`;
+        if (window.localStorage.getItem(claimKey)) {
+            claimedWorkspaceId = createWorkspaceId();
+        }
+        const activeClaimKey = `featx.workspaceClaim.${claimedWorkspaceId}`;
+        window.localStorage.setItem(activeClaimKey, documentId);
+        window.addEventListener("unload", () => {
+            if (window.localStorage.getItem(activeClaimKey) === documentId) {
+                window.localStorage.removeItem(activeClaimKey);
+            }
+        });
+    } catch (error) {
+        // sessionStorage still isolates normal tabs when shared storage is unavailable.
+    }
+    return claimedWorkspaceId;
+};
+
+const workspaceId = (() => {
+    const claimed = claimWorkspaceId(readSessionValue(WORKSPACE_ID_KEY));
+    writeSessionValue(WORKSPACE_ID_KEY, claimed);
+    return claimed;
+})();
+
+const http = axios.create();
+http.interceptors.request.use((config) => {
+    const repositoryId = readSessionValue(REPOSITORY_ID_KEY);
+    config.headers = config.headers || {};
+    config.headers["X-FeatX-Workspace-Id"] = workspaceId;
+    if (repositoryId) {
+        config.headers["X-FeatX-Repo-Id"] = repositoryId;
+    }
+    return config;
+});
+
+const eventSourceQuery = (params) => {
+    const query = new URLSearchParams(params);
+    query.set("workspaceId", workspaceId);
+    const repositoryId = readSessionValue(REPOSITORY_ID_KEY);
+    if (repositoryId) query.set("repoId", repositoryId);
+    return query;
+};
 
 const API = {
+    getSelectedRepositoryId: () => readSessionValue(REPOSITORY_ID_KEY),
     testConnect: () => {
-        return axios.get(`${BASE_URL}/connect/test`);
+        return http.get(`${BASE_URL}/connect/test`);
     },
     uploadProject: (projectData) => {
-        return axios.post(`${BASE_URL}/project/upload`, projectData)
+        return http.post(`${BASE_URL}/project/upload`, projectData)
     },
     getProjectsInfo: () => {
-        return axios.get(`${BASE_URL}/project/getList`)
+        return http.get(`${BASE_URL}/project/getList`)
             .then(response => response.data);
     },
     postProjectPath: (repoId) => {
-        return axios.post(`${BASE_URL}/project/select`, {
+        return http.post(`${BASE_URL}/project/select`, {
             repoId: repoId,
+        }).then(response => {
+            writeSessionValue(REPOSITORY_ID_KEY, repoId);
+            return response;
         })
     },
     getCurrentProject: () => {
-        return axios.get(`${BASE_URL}/project/current`)
+        return http.get(`${BASE_URL}/project/current`)
             .then(response => response.data);
     },
     postResummary: (repoId) => {
-        return axios.post(`${BASE_URL}/project/resummary`, {
+        return http.post(`${BASE_URL}/project/resummary`, {
             repoId: repoId,
         })
     },
     getSummaryProgressAll: () => {
-        return axios.get(`${BASE_URL}/project/summary/progress/all`)
+        return http.get(`${BASE_URL}/project/summary/progress/all`)
             .then(response => response.data);
     },
     postDropRepo: (repoId) => {
-        return axios.post(`${BASE_URL}/project/drop`, {
+        return http.post(`${BASE_URL}/project/drop`, {
             repoId: repoId,
+        }).then(response => {
+            if (String(readSessionValue(REPOSITORY_ID_KEY)) === String(repoId)) {
+                writeSessionValue(REPOSITORY_ID_KEY, null);
+            }
+            return response;
         })
     },
     updateProject: (projectId, projectData) => {
-        return axios.put(`${BASE_URL}/project/${projectId}`, projectData)
+        return http.put(`${BASE_URL}/project/${projectId}`, projectData)
             .then(response => response.data);
     },
     gitDownRepo: (gitName, commitId) => {
-        return axios.post(`${BASE_URL}/project/gitdown`, {
+        return http.post(`${BASE_URL}/project/gitdown`, {
             gitRepoName: gitName,
             commitId: commitId,
         }).then(response => response.data);
     },
     gitClear: (gitName, commitId) => {
-        return axios.post(`${BASE_URL}/project/gitclear`, {
+        return http.post(`${BASE_URL}/project/gitclear`, {
             gitRepoName: gitName,
             commitId: commitId,
         });
     },
     gitRepo: (gitName, commitId, folderName) => {
-        return axios.post(`${BASE_URL}/project/gitrepo`, {
+        return http.post(`${BASE_URL}/project/gitrepo`, {
             gitRepoName: gitName,
             commitId: commitId,
             repoName: folderName,
         }).then(response => response.data);
     },
-    getMinGraphData: (featureId) => {
-        return axios.get(`${BASE_URL}/graph/feature/debloatGraph`, {
+    getMinGraphData: (featureId, runId) => {
+        return http.get(`${BASE_URL}/graph/feature/debloatGraph`, {
             params: {
-                featureId: featureId
+                featureId: featureId,
+                runId: runId,
             }
         })
             .then(response => response.data);
     },
     getMaxGraphData: (featureId) => {
-        return axios.get(`${BASE_URL}/graph/feature/maxGraph`, {
+        return http.get(`${BASE_URL}/graph/feature/maxGraph`, {
             params: {
                 featureId: featureId
             }
@@ -80,7 +165,7 @@ const API = {
             .then(response => response.data);
     },
     getNewGraphData: (runId) => {
-        return axios.get(`${BASE_URL}/graph/feature/newGraph`, {params: {runId}})
+        return http.get(`${BASE_URL}/graph/feature/newGraph`, {params: {runId}})
             .then(response => response.data);
     },
 
@@ -100,41 +185,41 @@ const API = {
     //     return fetch(`${BASE_URL}/template/download/json`);
     // },
     getFeatures: () => {
-        return axios.get(`${BASE_URL}/feature/get`)
+        return http.get(`${BASE_URL}/feature/get`)
             .then(response => response.data);
     },
     getDeleteDiffByClass: (classId) => {
-        return axios.get(`${BASE_URL}/code/deleteDiffByClass`, {
+        return http.get(`${BASE_URL}/code/deleteDiffByClass`, {
             params: {
                 classId: classId
             }
         }).then(response => response.data);
     },
     getContextByClass: (classId) => {
-        return axios.get(`${BASE_URL}/code/contextByClass`, {
+        return http.get(`${BASE_URL}/code/contextByClass`, {
             params: {
                 classId: classId
             }
         }).then(response => response.data);
     },
     getNewDiffByClass: (classId) => {
-        return axios.get(`${BASE_URL}/code/newDiffByClass`, {
+        return http.get(`${BASE_URL}/code/newDiffByClass`, {
             params: {
                 classId: classId
             }
         }).then(response => response.data);
     },
     getRepositoryDiff: () => {
-        return axios.get(`${BASE_URL}/code/repositoryDiff`)
+        return http.get(`${BASE_URL}/code/repositoryDiff`)
             .then(response => response.data);
     },
     getCandidateDiff: (classId, operation, runId) => {
-        return axios.get(`${BASE_URL}/code/candidateDiff`, {
+        return http.get(`${BASE_URL}/code/candidateDiff`, {
             params: {classId, operation, runId}
         }).then(response => response.data);
     },
     updateCandidateDiff: (key, operation, content, runId) => {
-        return axios.put(`${BASE_URL}/code/candidateDiff`, {
+        return http.put(`${BASE_URL}/code/candidateDiff`, {
             key,
             operation,
             content,
@@ -142,77 +227,78 @@ const API = {
         }).then(response => response.data);
     },
     getGitWorkspaceStatus: () => {
-        return axios.get(`${BASE_URL}/code/git/status`)
+        return http.get(`${BASE_URL}/code/git/status`)
             .then(response => response.data);
     },
     stageCandidateFile: (key, runId) => {
-        return axios.post(`${BASE_URL}/code/git/stage`, {key, runId})
+        return http.post(`${BASE_URL}/code/git/stage`, {key, runId})
             .then(response => response.data);
     },
     commitFeatureChanges: (operation, commitMessage, runId) => {
-        return axios.post(`${BASE_URL}/code/git/commit`, {
+        return http.post(`${BASE_URL}/code/git/commit`, {
             operation,
             message: commitMessage,
             runId,
         }).then(response => response.data);
     },
     discardFeatureChanges: () => {
-        return axios.post(`${BASE_URL}/code/git/discard`)
+        return http.post(`${BASE_URL}/code/git/discard`)
             .then(response => response.data);
     },
 
-    confirmDelete: () => {
-        return axios.post(`${BASE_URL}/feature/confirm/delete`)
+    confirmDelete: (runId) => {
+        return http.post(`${BASE_URL}/feature/confirm/delete`, null, {params: {runId}})
     },
     deleteFeature: (requestData) => {
-        return axios.post(`${BASE_URL}/feature/delete`, requestData)
+        return http.post(`${BASE_URL}/feature/delete`, requestData)
+            .then(response => response.data)
     },
 
     modifyFeature: (featureDescription, language) => {
-        return axios.post(`${BASE_URL}/feature/modify`, {
+        return http.post(`${BASE_URL}/feature/modify`, {
             featureDescription: featureDescription,
             language: language,
         }).then(response => response.data)
     },
     confirmModify: (runId) => {
-        return axios.post(`${BASE_URL}/feature/confirm/modify`, null, {params: {runId}})
+        return http.post(`${BASE_URL}/feature/confirm/modify`, null, {params: {runId}})
             .then(response => response.data);
     },
 
     addFeature: (requestData) => {
-        return axios.post(`${BASE_URL}/feature/add`, requestData)
+        return http.post(`${BASE_URL}/feature/add`, requestData)
             .then(response => response.data)
     },
     confirmAdd: (runId) => {
-        return axios.post(`${BASE_URL}/feature/confirm/add`, null, {params: {runId}})
+        return http.post(`${BASE_URL}/feature/confirm/add`, null, {params: {runId}})
             .then(response => response.data);
     },
     getLlmModels: () => {
-        return axios.get(`${BASE_URL}/llm/models`)
+        return http.get(`${BASE_URL}/llm/models`)
             .then(response => response.data);
     },
     getLlmResponse: (runId, language, model) => {
-        const query = new URLSearchParams({runId});
+        const query = eventSourceQuery({runId});
         if (language) query.set('language', language);
         if (model) query.set('model', model);
         return new EventSource(`${BASE_URL}/llm/get?${query.toString()}`)
     },
     getAgentRun: (runId) => {
-        return axios.get(`${BASE_URL}/llm/run`, {params: {runId}})
+        return http.get(`${BASE_URL}/llm/run`, {params: {runId}})
             .then(response => response.data);
     },
     getLlmProgress: () => {
-        return axios.get(`${BASE_URL}/llm/progress`)
+        return http.get(`${BASE_URL}/llm/progress`)
             .then(response => response.data);
     },
     getFocusGraphStages: (runId) => {
-        return axios.get(`${BASE_URL}/llm/focusgraph/stages`, {params: {runId}})
+        return http.get(`${BASE_URL}/llm/focusgraph/stages`, {params: {runId}})
             .then(response => response.data);
     },
 
 
     getNewFeatureCode: (classId) => {
-        return axios.get(`${BASE_URL}/code/newFeatureCode`, {
+        return http.get(`${BASE_URL}/code/newFeatureCode`, {
             params: {
                 classId: classId
             }

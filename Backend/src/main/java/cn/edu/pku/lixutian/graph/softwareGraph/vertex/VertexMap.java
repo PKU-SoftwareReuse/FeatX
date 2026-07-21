@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.graph.softwareGraph.vertex;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.Buildable;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.NodeList;
@@ -11,16 +12,22 @@ import java.util.*;
 import static cn.edu.pku.lixutian.graph.softwareGraph.vertex.MapKeyUtils.mapKey;
 
 public class VertexMap implements Buildable<NodeList<CompilationUnit>> {
-    private static VertexMap instance = null;
+    private static final Map<Integer, VertexMap> INSTANCES = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static VertexMap getNewInstance() {
-        instance = new VertexMap();
+        VertexMap instance = new VertexMap();
+        INSTANCES.put(ProjectState.currentRepositoryKey(), instance);
         return instance;
     }
 
     public static VertexMap getInstance() {
-//        assert instance != null;
-        return instance;
+        return INSTANCES.get(ProjectState.currentRepositoryKey());
+    }
+
+    public static void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            INSTANCES.remove(repositoryId);
+        }
     }
 
     private VertexMap() {

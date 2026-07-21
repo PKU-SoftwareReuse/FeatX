@@ -6,15 +6,20 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
+/** Workspace-local feature selection and request state. */
 public class ClusterState {
-    private static ClusterState instance = null;
+    private static final ConcurrentHashMap<String, ClusterState> WORKSPACE_STATES = new ConcurrentHashMap<>();
 
     public static ClusterState getInstance() {
-        if (instance == null) {
-            instance = new ClusterState();
+        return WORKSPACE_STATES.computeIfAbsent(ProjectState.currentWorkspaceId(), ignored -> new ClusterState());
+    }
+
+    public static void clearWorkspace(String workspaceId) {
+        if (workspaceId != null && !workspaceId.isBlank()) {
+            WORKSPACE_STATES.remove(workspaceId);
         }
-        return instance;
     }
 
     private ClusterState() {

@@ -49,20 +49,22 @@ public class FeatureController {
     }
 
     @PostMapping("/delete")
-    public void delete(@RequestBody AddOrModifyRequest request) throws IOException, InterruptedException {
-        llmController.deleteFeature(request);
+    public AgentRunStartResult delete(@RequestBody AddOrModifyRequest request) throws IOException, InterruptedException {
+        return llmController.deleteFeature(request);
     }
 
     @PostMapping("/confirm/delete")
-    public void deleteConfirm() throws ParseException, IOException, InterruptedException {
-        Integer featureId = ClusterState.getInstance().getCandidateFeature().getFeatureId();
+    public void deleteConfirm(@RequestParam String runId) throws ParseException, IOException, InterruptedException {
+        AgentRunContext run = agentRunRegistry.requireCompletedOperation(runId, "delete");
+        Integer featureId = run.featureId();
         codemapService.deleteFeatureFromMemoryAndDatabase(featureId);
+        agentRunRegistry.clear();
     }
 
     @PostMapping("/confirm/modify")
     public void modifyConfirm(@RequestParam String runId)
             throws ParseException, IOException, InterruptedException {
-        AgentRunContext run = agentRunRegistry.requireCompleted(runId);
+        AgentRunContext run = agentRunRegistry.requireCompletedOperation(runId, "edit");
         codemapService.modifyFeatureFromMemoryAndDatabase(run.featureId(), run.newRequest(), run.language());
         agentRunRegistry.clear();
     }
@@ -70,7 +72,7 @@ public class FeatureController {
     @PostMapping("/confirm/add")
     public Integer addConfirm(@RequestParam String runId)
             throws ParseException, IOException, InterruptedException {
-        AgentRunContext run = agentRunRegistry.requireCompleted(runId);
+        AgentRunContext run = agentRunRegistry.requireCompletedOperation(runId, "add");
         Integer featureId = codemapService.addFeatureFromMemoryAndDatabase(
                 run.moduleId(),
                 run.newRequest(),

@@ -33,7 +33,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +45,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -85,14 +85,7 @@ public class CodeMapService {
         }
     }
 
-    // store
-    @Getter
-    private static List<ModuleResult> moduleResults;
-
-    public static boolean isBuilt = false;
-
-    // 新增缓存字段
-    public static Map<Integer, List<CodeMap>> codeMapCache = new HashMap<>();
+    private final Map<Integer, List<ModuleResult>> moduleResultsByRepository = new ConcurrentHashMap<>();
 
     @Autowired
     private ModuleRepository moduleRepository;
@@ -120,12 +113,33 @@ public class CodeMapService {
 
 
     public List<ModuleResult> readFeatureFromDatabase(Integer repoId) {
-        if (!isBuilt) {
-            List<Module> modules = moduleRepository.findByRepo_Id(repoId);
-            moduleResults = modules.stream().map(ModuleResult::new).collect(Collectors.toCollection(ArrayList::new));
-            isBuilt = true;
+        if (repoId == null) {
+            throw new IllegalStateException("No project is currently selected.");
         }
-        return moduleResults;
+        return moduleResultsByRepository.computeIfAbsent(repoId, repositoryId -> {
+            List<Module> modules = moduleRepository.findByRepo_Id(repositoryId);
+            return modules.stream()
+                    .map(ModuleResult::new)
+                    .collect(Collectors.toCollection(ArrayList::new));
+        });
+    }
+
+    public List<ModuleResult> getModuleResults() {
+        return currentModuleResults();
+    }
+
+    public void invalidateRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            moduleResultsByRepository.remove(repositoryId);
+        }
+    }
+
+    private void invalidateCurrentRepository() {
+        invalidateRepository(ProjectState.getInstance().getRepoId());
+    }
+
+    private List<ModuleResult> currentModuleResults() {
+        return readFeatureFromDatabase(ProjectState.getInstance().getRepoId());
     }
 
     public FeatureGraphResult getMaxGraph() {
@@ -245,9 +259,7 @@ public class CodeMapService {
         Map<String, String> methodFileMap = loadPythonMethodFileMap();
         Set<String> result = new LinkedHashSet<>();
 
-        Set<String> explicitMethods = AgentService.pythonModifiedMethods == null
-                ? Collections.emptySet()
-                : AgentService.pythonModifiedMethods;
+        Set<String> explicitMethods = ProjectState.getInstance().getPythonModifiedMethods();
         if (!explicitMethods.isEmpty()) {
             for (String methodName : explicitMethods) {
                 PythonMethodContainer container = resolvePythonMethodContainer(methodName, methodContainerMap, methodFileMap);
@@ -307,8 +319,8 @@ public class CodeMapService {
                 .distinct()
                 .collect(Collectors.toCollection(ArrayList::new));
         if (featureMethods.isEmpty()) {
-            AgentService.modificationMap = Collections.emptyMap();
-            AgentService.pythonModifiedMethods = Collections.emptySet();
+            ProjectState.getInstance().setModifications(Collections.emptyMap());
+            ProjectState.getInstance().setPythonModifiedMethods(Collections.emptySet());
             throw new UnsupportedOperationException("The selected Python feature has no CodeMap methods to delete.");
         }
 
@@ -334,7 +346,7 @@ public class CodeMapService {
                 modifications.put(normalizePythonPath(filePath), modificationNode.path(filePath).asText(""));
             }
         }
-        AgentService.modificationMap = modifications;
+        ProjectState.getInstance().setModifications(modifications);
         Set<String> deletedMethods = new LinkedHashSet<>();
         for (JsonNode methodNode : result.path("deletedMethods")) {
             String methodName = methodNode.asText("");
@@ -342,7 +354,7 @@ public class CodeMapService {
                 deletedMethods.add(methodName);
             }
         }
-        AgentService.pythonModifiedMethods = deletedMethods;
+        ProjectState.getInstance().setPythonModifiedMethods(deletedMethods);
 
         if (modifications.isEmpty() || result.path("deletedMethods").size() == 0) {
             StringBuilder message = new StringBuilder("No uniquely owned Python functions/methods can be deleted for this feature.");
@@ -362,14 +374,8 @@ public class CodeMapService {
     }
 
     public FeatureResult getFeature(Integer featureId) {
-        if (!isBuilt && ProjectState.getInstance().getRepoId() != null) {
-            readFeatureFromDatabase(ProjectState.getInstance().getRepoId());
-        }
-        if (moduleResults == null) {
-            return null;
-        }
         FeatureResult candidateFeature = null;
-        for (ModuleResult moduleResult : moduleResults) {
+        for (ModuleResult moduleResult : currentModuleResults()) {
             for (FeatureResult featureResult : moduleResult.getFeatureList()) {
                 if (featureResult.getFeatureId().equals(featureId)) {
                     candidateFeature = featureResult;
@@ -438,12 +444,12 @@ public class CodeMapService {
     }
 
     public Map<String, String> getCodeByModuleId(Integer moduleId) {
-        if (moduleId == null || moduleResults == null) {
+        if (moduleId == null) {
             return Collections.emptyMap();
         }
 
         Map<String, String> merged = new LinkedHashMap<>();
-        moduleResults.stream()
+        currentModuleResults().stream()
                 .filter(m -> m.getModuleId().equals(moduleId))
                 .findFirst()
                 .map(m -> m.getFeatureList())
@@ -474,6 +480,7 @@ public class CodeMapService {
         // 2. 删数据库
         ModuleResult candidateModule = null;
         FeatureResult candidateFeature = null;
+        List<ModuleResult> moduleResults = currentModuleResults();
         for (ModuleResult moduleResult : moduleResults) {
             for (FeatureResult featureResult : moduleResult.getFeatureList()) {
                 if (featureResult.getFeatureId().equals(featureId)) {
@@ -520,7 +527,7 @@ public class CodeMapService {
         ProjectState.getInstance().setForcePreprocessOption(true);
         processService.process();
 
-        isBuilt = false;
+        invalidateCurrentRepository();
 
         return true;
     }
@@ -578,7 +585,7 @@ public class CodeMapService {
         if (type.equals("modify")) {
             // 1. 改内存表
             FeatureResult candidateFeature = null;
-            for (ModuleResult moduleResult : moduleResults) {
+            for (ModuleResult moduleResult : currentModuleResults()) {
                 for (FeatureResult featureResult : moduleResult.getFeatureList()) {
                     if (featureResult.getFeatureId().equals(featureOrModuleId)) {
                         candidateFeature = featureResult;
@@ -605,7 +612,7 @@ public class CodeMapService {
         } else if (type.equals("add")) {
             // 1. 改内存表
             FeatureResult candidateFeature = null;
-            for (ModuleResult moduleResult : moduleResults) {
+            for (ModuleResult moduleResult : currentModuleResults()) {
                 if (moduleResult.getModuleId() == featureOrModuleId) {
                     candidateFeature = new FeatureResult();
                     if (descriptionLanguage == AgentLanguage.CN) {
@@ -635,7 +642,7 @@ public class CodeMapService {
 
 
         // 3. 从已确认的完整候选代码更新邻接表并重写文件
-        for (Map.Entry<String, String> entry : AgentService.modificationMap.entrySet()) {
+        for (Map.Entry<String, String> entry : ProjectState.getInstance().getModifications().entrySet()) {
             try {
                 String javaFilePath = JavaFilePath.normalize(entry.getKey());
                 String currentFile = JavaFilePath.toClassName(javaFilePath);
@@ -751,24 +758,22 @@ public class CodeMapService {
         ProjectState.getInstance().setForcePreprocessOption(true);
         processService.process();
 
-        isBuilt = false;
+        invalidateCurrentRepository();
 
         return featureId;
     }
 
     private Integer modifyPythonFeatureFromMemoryAndDatabase(Integer featureId, String newFeatureDescription) throws IOException, InterruptedException {
         FeatureResult candidateFeature = null;
-        if (moduleResults != null) {
-            for (ModuleResult moduleResult : moduleResults) {
-                for (FeatureResult featureResult : moduleResult.getFeatureList()) {
-                    if (featureResult.getFeatureId().equals(featureId)) {
-                        candidateFeature = featureResult;
-                        break;
-                    }
-                }
-                if (candidateFeature != null) {
+        for (ModuleResult moduleResult : currentModuleResults()) {
+            for (FeatureResult featureResult : moduleResult.getFeatureList()) {
+                if (featureResult.getFeatureId().equals(featureId)) {
+                    candidateFeature = featureResult;
                     break;
                 }
+            }
+            if (candidateFeature != null) {
+                break;
             }
         }
         if (candidateFeature != null) {
@@ -788,7 +793,7 @@ public class CodeMapService {
                 .collect(Collectors.toCollection(ArrayList::new));
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
 
-        isBuilt = false;
+        invalidateCurrentRepository();
         return featureId;
     }
 
@@ -813,7 +818,7 @@ public class CodeMapService {
                 .collect(Collectors.toCollection(ArrayList::new));
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
 
-        isBuilt = false;
+        invalidateCurrentRepository();
         return featureId;
     }
 
@@ -828,18 +833,17 @@ public class CodeMapService {
         ModuleResult candidateModule = null;
         FeatureResult candidateFeature = null;
         Integer emptyModuleId = null;
-        if (moduleResults != null) {
-            for (ModuleResult moduleResult : moduleResults) {
-                for (FeatureResult featureResult : moduleResult.getFeatureList()) {
-                    if (featureResult.getFeatureId().equals(featureId)) {
-                        candidateModule = moduleResult;
-                        candidateFeature = featureResult;
-                        break;
-                    }
-                }
-                if (candidateFeature != null) {
+        List<ModuleResult> moduleResults = currentModuleResults();
+        for (ModuleResult moduleResult : moduleResults) {
+            for (FeatureResult featureResult : moduleResult.getFeatureList()) {
+                if (featureResult.getFeatureId().equals(featureId)) {
+                    candidateModule = moduleResult;
+                    candidateFeature = featureResult;
                     break;
                 }
+            }
+            if (candidateFeature != null) {
+                break;
             }
         }
         if (candidateModule != null && candidateFeature != null) {
@@ -856,7 +860,7 @@ public class CodeMapService {
             moduleRepository.deleteById(emptyModuleId);
         }
 
-        isBuilt = false;
+        invalidateCurrentRepository();
         return true;
     }
 
@@ -918,9 +922,7 @@ public class CodeMapService {
     }
 
     private Map<String, String> currentPythonModifications() {
-        return AgentService.modificationMap == null
-                ? Collections.emptyMap()
-                : AgentService.modificationMap;
+        return ProjectState.getInstance().getModifications();
     }
 
     private void applyPythonModifications(Map<String, String> modifications) throws IOException {

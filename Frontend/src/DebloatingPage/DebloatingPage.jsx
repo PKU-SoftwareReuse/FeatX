@@ -603,7 +603,14 @@ const DebloatingPage = () => {
 
     useEffect(() => {
         const fetchData = async () => {
-            const project = await API.getCurrentProject().catch(() => null)
+            let project = await API.getCurrentProject().catch(() => null)
+            if (!project?.repoId) {
+                const storedRepositoryId = API.getSelectedRepositoryId()
+                if (storedRepositoryId) {
+                    await API.postProjectPath(storedRepositoryId)
+                    project = await API.getCurrentProject().catch(() => null)
+                }
+            }
             setCurrentProject(project)
             await refreshGitStatus()
             const res = await getFeatureData()
@@ -701,7 +708,7 @@ const DebloatingPage = () => {
         setCandidateDirty(false);
         setStagingCandidate(false);
         if (selectedType === 'delete') {
-            API.getMinGraphData(featureId).then((data) => {
+            API.getMinGraphData(featureId, runId).then((data) => {
                 setGraphData(data)
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
@@ -761,7 +768,13 @@ const DebloatingPage = () => {
     const [loadingConfirm, setLoadingConfirm] = useState(false);
 
     useEffect(() => {
-        const shouldWarn = Boolean(activeRunId || candidateDirty || savingCandidate || requestDraftDirty);
+        const shouldWarn = Boolean(
+            activeRunId
+            || candidateDirty
+            || savingCandidate
+            || requestDraftDirty
+            || operationProgress?.running
+        );
         if (!shouldWarn) return undefined;
         const warnBeforeUnload = (event) => {
             event.preventDefault();
@@ -769,7 +782,7 @@ const DebloatingPage = () => {
         };
         window.addEventListener('beforeunload', warnBeforeUnload);
         return () => window.removeEventListener('beforeunload', warnBeforeUnload);
-    }, [activeRunId, candidateDirty, requestDraftDirty, savingCandidate]);
+    }, [activeRunId, candidateDirty, operationProgress?.running, requestDraftDirty, savingCandidate]);
 
     useEffect(() => {
         if (!activeRunId || !candidateFile?.key) return;
@@ -1151,12 +1164,7 @@ const DebloatingPage = () => {
 
         setSelectedFeatureItem(item)
         setSelectedType("delete")
-        getFeatureGraphData(item.featureId, "delete")
-        if (isPythonProject) {
-            preparePythonDelete(item)
-        } else {
-            setConfirmEnabled(true)
-        }
+        prepareDelete(item)
     }
 
     const handleEdit = (item) => {
@@ -1531,7 +1539,9 @@ const DebloatingPage = () => {
 
         API.getAgentRun(activeRunId)
             .then(async (snapshot) => {
-                const operationType = snapshot.mode?.startsWith('add') ? 'add' : 'edit'
+                const operationType = snapshot.mode === 'delete'
+                    ? 'delete'
+                    : snapshot.mode?.startsWith('add') ? 'add' : 'edit'
                 let targetFeature = null
                 let targetModule = null
 
@@ -1571,24 +1581,28 @@ const DebloatingPage = () => {
                 setConfirmEnabled(snapshot.status === 'COMPLETED')
                 setLoadingFeatureList(snapshot.status === 'PREPARED' || snapshot.status === 'RUNNING')
                 getFeatureGraphData(
-                    operationType === 'edit' ? targetFeature.featureId : null,
-                    operationType,
+                    operationType === 'add' || (operationType === 'delete' && isPythonProject)
+                        ? null
+                        : targetFeature.featureId,
+                    operationType === 'delete' && isPythonProject ? 'new' : operationType,
                     snapshot.runId
                 )
 
                 if (supportsReasoningGraphStages(operationType)) {
                     await loadFocusGraphStages(snapshot.runId, operationType).catch(() => [])
                 }
-                handleChat(
-                    API.getLlmResponse(
+                if (operationType !== 'delete') {
+                    handleChat(
+                        API.getLlmResponse(
+                            snapshot.runId,
+                            snapshot.language || apiLanguage,
+                            snapshot.model || selectedModel
+                        ),
                         snapshot.runId,
-                        snapshot.language || apiLanguage,
-                        snapshot.model || selectedModel
-                    ),
-                    snapshot.runId,
-                    operationType,
-                    true
-                )
+                        operationType,
+                        true
+                    )
+                }
             })
             .catch((error) => {
                 console.error('Failed to restore Agent run:', error)
@@ -1809,7 +1823,7 @@ const DebloatingPage = () => {
         }
     }, [])
 
-    const preparePythonDelete = (item) => {
+    const prepareDelete = (item) => {
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         setConfirmEnabled(false)
@@ -1822,33 +1836,41 @@ const DebloatingPage = () => {
             running: true,
             failed: false
         })
-        startProgressPolling("python-delete")
+        if (isPythonProject) {
+            startProgressPolling("python-delete")
+        }
         API.deleteFeature({
             featureId: item.featureId,
             featureDescription: item.featureDescription
         })
-            .then(() => {
+            .then((result) => {
+                setActiveRunId(result.runId)
                 stopProgressPolling()
                 setLoadingFeatureList(false)
                 setConfirmEnabled(true)
                 setChatMode(false)
                 setModeTrans(false)
-                API.getLlmProgress()
-                    .then((progress) => {
-                        setOperationProgress(progress)
-                    })
-                    .catch(() => {
-                        setOperationProgress({
-                            operation: "python-delete",
-                            stage: "complete",
-                            message: copy.pythonDeleteReady,
-                            currentStep: 4,
-                            totalSteps: 4,
-                            running: false,
-                            failed: false
+                if (isPythonProject) {
+                    API.getLlmProgress()
+                        .then((progress) => {
+                            setOperationProgress(progress)
                         })
-                    })
-                getFeatureGraphData(0, "new")
+                        .catch(() => {
+                            setOperationProgress({
+                                operation: "python-delete",
+                                stage: "complete",
+                                message: copy.pythonDeleteReady,
+                                currentStep: 4,
+                                totalSteps: 4,
+                                running: false,
+                                failed: false
+                            })
+                        })
+                    getFeatureGraphData(0, "new", result.runId)
+                } else {
+                    setOperationProgress(null)
+                    getFeatureGraphData(item.featureId, "delete", result.runId)
+                }
             })
             .catch((error) => {
                 console.error('Error Delete Feature:', error)

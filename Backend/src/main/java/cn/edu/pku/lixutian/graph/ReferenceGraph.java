@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.graph;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.SoftwareGraph;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
@@ -23,16 +24,24 @@ import java.util.*;
 import static cn.edu.pku.lixutian.graph.softwareGraph.vertex.MapKeyUtils.mapKey;
 
 public class ReferenceGraph extends SoftwareGraph<ReferenceArc> {
-    private static ReferenceGraph instance;
+    private static final Map<Integer, ReferenceGraph> INSTANCES = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static ReferenceGraph getNewInstance() {
-        instance = new ReferenceGraph();
+        ReferenceGraph instance = new ReferenceGraph();
+        INSTANCES.put(ProjectState.currentRepositoryKey(), instance);
         return instance;
     }
 
     public static ReferenceGraph getInstance() {
+        ReferenceGraph instance = INSTANCES.get(ProjectState.currentRepositoryKey());
         assert instance != null;
         return instance;
+    }
+
+    public static void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            INSTANCES.remove(repositoryId);
+        }
     }
 
     private final VertexMap vertexMap;

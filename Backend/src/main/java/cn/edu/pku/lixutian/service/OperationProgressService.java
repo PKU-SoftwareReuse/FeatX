@@ -1,19 +1,21 @@
 package cn.edu.pku.lixutian.service;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class OperationProgressService {
-    private final Object lock = new Object();
-    private ProgressSnapshot snapshot = ProgressSnapshot.idle();
+    private final ConcurrentHashMap<Integer, ProgressSnapshot> snapshots = new ConcurrentHashMap<>();
 
     public void start(String operation, int totalSteps, String stage, String message) {
-        synchronized (lock) {
-            snapshot = new ProgressSnapshot(
+        snapshots.put(
+                ProjectState.currentRepositoryKey(),
+                new ProgressSnapshot(
                     operation,
                     stage,
                     message,
@@ -24,8 +26,8 @@ public class OperationProgressService {
                     null,
                     Instant.now().toString(),
                     new LinkedHashMap<>()
-            );
-        }
+                )
+        );
     }
 
     public void update(String stage, String message, int step, int totalSteps) {
@@ -33,8 +35,9 @@ public class OperationProgressService {
     }
 
     public void update(String stage, String message, int step, int totalSteps, Map<String, Object> details) {
-        synchronized (lock) {
-            snapshot = snapshot.withUpdate(
+        snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
+            ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
+            return snapshot.withUpdate(
                     stage,
                     message,
                     Math.max(step, 0),
@@ -44,12 +47,13 @@ public class OperationProgressService {
                     null,
                     details
             );
-        }
+        });
     }
 
     public void complete(String message) {
-        synchronized (lock) {
-            snapshot = snapshot.withUpdate(
+        snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
+            ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
+            return snapshot.withUpdate(
                     "complete",
                     message,
                     snapshot.totalSteps,
@@ -59,12 +63,13 @@ public class OperationProgressService {
                     null,
                     snapshot.details
             );
-        }
+        });
     }
 
     public void fail(String message) {
-        synchronized (lock) {
-            snapshot = snapshot.withUpdate(
+        snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
+            ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
+            return snapshot.withUpdate(
                     "failed",
                     message,
                     snapshot.currentStep,
@@ -74,12 +79,16 @@ public class OperationProgressService {
                     message,
                     snapshot.details
             );
-        }
+        });
     }
 
     public ProgressSnapshot getSnapshot() {
-        synchronized (lock) {
-            return snapshot;
+        return snapshots.getOrDefault(ProjectState.currentRepositoryKey(), ProgressSnapshot.idle());
+    }
+
+    public void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            snapshots.remove(repositoryId);
         }
     }
 

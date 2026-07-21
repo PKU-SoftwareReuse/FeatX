@@ -2,9 +2,10 @@ package cn.edu.pku.lixutian.helper;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import com.github.javaparser.ParseException;
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.Problem;
-import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.NodeList;
@@ -92,8 +93,11 @@ public class PreprocessHelper {
             return oldParseAllFiles();
         } else {
             System.out.println("==========1. Finally Parse Preprocessed Files==========");
-            setTypeSolver(ProjectState.getInstance().getPreprocess2Path());
-            NodeList<CompilationUnit> units = finallyParseAllFiles(ProjectState.getInstance().getPreprocess2Path());
+            ParserConfiguration configuration = parserConfiguration(ProjectState.getInstance().getPreprocess2Path());
+            NodeList<CompilationUnit> units = finallyParseAllFiles(
+                    ProjectState.getInstance().getPreprocess2Path(),
+                    configuration
+            );
             return units;
         }
     }
@@ -101,7 +105,7 @@ public class PreprocessHelper {
     private static NodeList<CompilationUnit> onlyParseAllFiles(String srcPath) throws ParseException, IOException {
         // Use the same filtered file walk as the final parser so retained
         // build/dependency/cache directories never enter preprocessing.
-        return finallyParseAllFiles(srcPath);
+        return finallyParseAllFiles(srcPath, baseParserConfiguration());
     }
 
     private static void preprocess1(NodeList<CompilationUnit> nodeList) {
@@ -241,22 +245,29 @@ public class PreprocessHelper {
         }
     }
 
-    private static void setTypeSolver(String preprocessPath) {
+    private static ParserConfiguration parserConfiguration(String preprocessPath) {
         CombinedTypeSolver combinedTypeSolver = new CombinedTypeSolver();
         TypeSolver javaParserTypeSolver = new JavaParserTypeSolver(preprocessPath);
         combinedTypeSolver.add(javaParserTypeSolver);
         combinedTypeSolver.add(new ReflectionTypeSolver());
 
         JavaSymbolSolver symbolSolver = new JavaSymbolSolver(combinedTypeSolver);
-        StaticJavaParser.getParserConfiguration().setSymbolResolver(symbolSolver);
-        StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+        return baseParserConfiguration().setSymbolResolver(symbolSolver);
     }
 
-    private static NodeList<CompilationUnit> finallyParseAllFiles(String srcPath) throws ParseException, IOException {
+    private static ParserConfiguration baseParserConfiguration() {
+        return new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+    }
+
+    private static NodeList<CompilationUnit> finallyParseAllFiles(
+            String srcPath,
+            ParserConfiguration configuration
+    ) throws ParseException, IOException {
         NodeList<CompilationUnit> units = new NodeList<>();
         List<Problem> problems = new LinkedList<>();
+        JavaParser parser = new JavaParser(configuration);
         for (File file : (Iterable<File>) findAllJavaFiles(new File(srcPath))::iterator)
-            parse(file, units, problems);
+            parse(parser, file, units, problems);
         if (!problems.isEmpty()) {
             for (Problem p : problems)
                 System.out.println(" * " + p.getVerboseMessage());
@@ -265,10 +276,16 @@ public class PreprocessHelper {
         return units;
     }
 
-    private static void parse(File file, NodeList<CompilationUnit> units, List<Problem> problems) {
+    private static void parse(
+            JavaParser parser,
+            File file,
+            NodeList<CompilationUnit> units,
+            List<Problem> problems
+    ) {
         try {
-            StaticJavaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
-            units.add(StaticJavaParser.parse(file));
+            ParseResult<CompilationUnit> result = parser.parse(file);
+            problems.addAll(result.getProblems());
+            result.getResult().ifPresent(units::add);
         } catch (FileNotFoundException e) {
             problems.add(new Problem(e.getLocalizedMessage(), null, e));
         }

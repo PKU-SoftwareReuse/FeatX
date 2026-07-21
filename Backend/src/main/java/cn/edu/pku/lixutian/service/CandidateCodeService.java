@@ -32,29 +32,28 @@ import java.util.stream.Stream;
 public class CandidateCodeService {
     private static final long MAX_EDITABLE_FILE_BYTES = 2 * 1024 * 1024;
 
-    private final Map<String, CandidateDocument> candidateDocuments = new ConcurrentHashMap<>();
-    private final Set<String> expectedCandidateKeys = ConcurrentHashMap.newKeySet();
-    private final Set<String> committedCandidateKeys = ConcurrentHashMap.newKeySet();
-    private String operationId;
+    private final Map<Integer, CandidateState> states = new ConcurrentHashMap<>();
 
-    public synchronized void clear() {
-        candidateDocuments.clear();
-        expectedCandidateKeys.clear();
-        committedCandidateKeys.clear();
-        operationId = null;
+    public void clear() {
+        CandidateState state = state();
+        state.candidateDocuments.clear();
+        state.expectedCandidateKeys.clear();
+        state.committedCandidateKeys.clear();
+        state.operationId = null;
     }
 
-    public synchronized void beginOperation(String nextOperationId, Collection<String> candidateKeys) {
-        if (!Objects.equals(operationId, nextOperationId)) {
+    public void beginOperation(String nextOperationId, Collection<String> candidateKeys) {
+        CandidateState state = state();
+        if (!Objects.equals(state.operationId, nextOperationId)) {
             clear();
-            operationId = nextOperationId;
+            state.operationId = nextOperationId;
         }
-        expectedCandidateKeys.clear();
+        state.expectedCandidateKeys.clear();
         if (candidateKeys != null) {
             candidateKeys.stream()
                     .filter(Objects::nonNull)
                     .filter(key -> !key.isBlank())
-                    .forEach(expectedCandidateKeys::add);
+                    .forEach(state.expectedCandidateKeys::add);
         }
     }
 
@@ -65,22 +64,23 @@ public class CandidateCodeService {
         candidateKeys.stream()
                 .filter(Objects::nonNull)
                 .filter(key -> !key.isBlank())
-                .forEach(expectedCandidateKeys::add);
+                .forEach(state().expectedCandidateKeys::add);
     }
 
     public Set<String> pendingModificationKeys() {
         Set<String> keys = allCandidateKeys();
-        keys.removeAll(committedCandidateKeys);
+        keys.removeAll(state().committedCandidateKeys);
         return keys;
     }
 
     public Map<String, String> pendingModificationMap() {
-        if (AgentService.modificationMap == null || AgentService.modificationMap.isEmpty()) {
+        Map<String, String> modifications = ProjectState.getInstance().getModifications();
+        if (modifications.isEmpty()) {
             return Collections.emptyMap();
         }
         Map<String, String> pending = new LinkedHashMap<>();
-        AgentService.modificationMap.forEach((key, value) -> {
-            if (!committedCandidateKeys.contains(key)) {
+        modifications.forEach((key, value) -> {
+            if (!state().committedCandidateKeys.contains(key)) {
                 pending.put(key, value);
             }
         });
@@ -96,7 +96,7 @@ public class CandidateCodeService {
     }
 
     public List<String> committedCandidateProjectPaths() {
-        return projectPathsForKeys(committedCandidateKeys);
+        return projectPathsForKeys(state().committedCandidateKeys);
     }
 
     public void markCommittedPaths(Collection<String> projectPaths) {
@@ -110,14 +110,14 @@ public class CandidateCodeService {
         for (String key : allCandidateKeys()) {
             candidateProjectPath(key)
                     .filter(normalizedPaths::contains)
-                    .ifPresent(ignored -> committedCandidateKeys.add(key));
+                    .ifPresent(ignored -> state().committedCandidateKeys.add(key));
         }
     }
 
     public void discardCandidateState() {
         clear();
-        AgentService.modificationMap = Collections.emptyMap();
-        AgentService.pythonModifiedMethods = Collections.emptySet();
+        ProjectState.getInstance().setModifications(Map.of());
+        ProjectState.getInstance().setPythonModifiedMethods(Set.of());
     }
 
     public CodeFileDiffResult prepareJavaCandidate(
@@ -126,7 +126,7 @@ public class CandidateCodeService {
             String candidateBody
     ) throws IOException, InterruptedException {
         String filePath = JavaFilePath.normalize(classId);
-        CandidateDocument cached = candidateDocuments.get(filePath);
+        CandidateDocument cached = state().candidateDocuments.get(filePath);
         if (cached != null) {
             return toResult(cached);
         }
@@ -154,7 +154,7 @@ public class CandidateCodeService {
                 true,
                 null
         );
-        candidateDocuments.put(filePath, document);
+        state().candidateDocuments.put(filePath, document);
         return toResult(document);
     }
 
@@ -162,7 +162,7 @@ public class CandidateCodeService {
             throws IOException, InterruptedException {
         Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
         Path sourceFile = safeResolve(sourceRoot, relativePath);
-        CandidateDocument cached = candidateDocuments.get(key);
+        CandidateDocument cached = state().candidateDocuments.get(key);
         boolean originalExists = cached == null ? Files.isRegularFile(sourceFile) : cached.originalExists;
         String originalContent = cached == null
                 ? originalExists ? readEditableFile(sourceFile) : ""
@@ -178,7 +178,7 @@ public class CandidateCodeService {
                 true,
                 null
         );
-        candidateDocuments.put(key, document);
+        state().candidateDocuments.put(key, document);
         return toResult(document);
     }
 
@@ -197,12 +197,12 @@ public class CandidateCodeService {
             modifications.put(key, updatedContent.isEmpty() && "delete".equalsIgnoreCase(operation)
                     ? AgentService.DELETE_FILE_SENTINEL
                     : updatedContent);
-            AgentService.modificationMap = modifications;
+            ProjectState.getInstance().setModifications(modifications);
             return preparePythonCandidate(key, key, modifications.get(key));
         }
 
         String normalizedKey = JavaFilePath.normalize(key);
-        CandidateDocument document = candidateDocuments.get(normalizedKey);
+        CandidateDocument document = state().candidateDocuments.get(normalizedKey);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before saving it.");
         }
@@ -219,12 +219,12 @@ public class CandidateCodeService {
         Map<String, String> modifications = mutableModifications();
         modifications.remove(key);
         modifications.put(normalizedKey, updatedContent);
-        AgentService.modificationMap = modifications;
+        ProjectState.getInstance().setModifications(modifications);
         return toResult(document);
     }
 
     public Optional<String> authoritativeJavaContent(String classId) {
-        CandidateDocument document = candidateDocuments.get(JavaFilePath.normalize(classId));
+        CandidateDocument document = state().candidateDocuments.get(JavaFilePath.normalize(classId));
         if (document == null || !document.authoritative) {
             return Optional.empty();
         }
@@ -238,14 +238,14 @@ public class CandidateCodeService {
      * compiler. It only validates the candidate state already held by FeatX
      * and parses Java source with the JavaParser bundled with this service.</p>
      */
-    public synchronized void validateCompleteCandidateSet() {
+    public void validateCompleteCandidateSet() {
         Set<String> keys = allCandidateKeys();
         if (keys.isEmpty()) {
             throw new IllegalStateException("There are no generated candidates to commit.");
         }
 
         for (String key : keys.stream().sorted().toList()) {
-            CandidateDocument document = candidateDocuments.get(key);
+            CandidateDocument document = state().candidateDocuments.get(key);
             if (document == null) {
                 throw new IllegalStateException(
                         "Candidate " + key + " has not been reviewed in the Diff Panel."
@@ -308,10 +308,10 @@ public class CandidateCodeService {
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("Candidate file key is required.");
         }
-        if (committedCandidateKeys.contains(key)) {
+        if (state().committedCandidateKeys.contains(key)) {
             throw new IllegalStateException("This candidate file has already been committed.");
         }
-        CandidateDocument document = candidateDocuments.get(key);
+        CandidateDocument document = state().candidateDocuments.get(key);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before confirming the file.");
         }
@@ -338,17 +338,14 @@ public class CandidateCodeService {
     }
 
     private Map<String, String> mutableModifications() {
-        return AgentService.modificationMap == null
-                ? new LinkedHashMap<>()
-                : new LinkedHashMap<>(AgentService.modificationMap);
+        return new LinkedHashMap<>(ProjectState.getInstance().getModifications());
     }
 
     private Set<String> allCandidateKeys() {
-        Set<String> keys = new LinkedHashSet<>(expectedCandidateKeys);
-        if (AgentService.modificationMap != null) {
-            keys.addAll(AgentService.modificationMap.keySet());
-        }
-        keys.addAll(candidateDocuments.keySet());
+        CandidateState state = state();
+        Set<String> keys = new LinkedHashSet<>(state.expectedCandidateKeys);
+        keys.addAll(ProjectState.getInstance().getModifications().keySet());
+        keys.addAll(state.candidateDocuments.keySet());
         keys.removeIf(key -> key == null || key.isBlank());
         return keys;
     }
@@ -365,7 +362,7 @@ public class CandidateCodeService {
         if (key == null || key.isBlank()) {
             return Optional.empty();
         }
-        CandidateDocument document = candidateDocuments.get(key);
+        CandidateDocument document = state().candidateDocuments.get(key);
         if (document != null) {
             return Optional.of(normalizeProjectPath(document.path));
         }
@@ -389,6 +386,16 @@ public class CandidateCodeService {
             throw new IllegalStateException("No project is currently selected.");
         }
         return Path.of(projectPath).toAbsolutePath().normalize();
+    }
+
+    public void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            states.remove(repositoryId);
+        }
+    }
+
+    private CandidateState state() {
+        return states.computeIfAbsent(ProjectState.currentRepositoryKey(), ignored -> new CandidateState());
     }
 
     private String normalizeProjectPath(String path) {
@@ -539,5 +546,12 @@ public class CandidateCodeService {
             this.authoritative = authoritative;
             this.warning = warning;
         }
+    }
+
+    private static final class CandidateState {
+        private final Map<String, CandidateDocument> candidateDocuments = new ConcurrentHashMap<>();
+        private final Set<String> expectedCandidateKeys = ConcurrentHashMap.newKeySet();
+        private final Set<String> committedCandidateKeys = ConcurrentHashMap.newKeySet();
+        private volatile String operationId;
     }
 }

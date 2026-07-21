@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.graph;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.softwareGraph.SoftwareGraph;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.CallArc;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.ClassArc;
@@ -26,17 +27,25 @@ import java.util.stream.Collectors;
 import static cn.edu.pku.lixutian.graph.softwareGraph.vertex.MapKeyUtils.mapKey;
 
 public class CallGraph extends SoftwareGraph<CallArc> {
-    public static CallGraph instance = null;
+    private static final Map<Integer, CallGraph> INSTANCES = new java.util.concurrent.ConcurrentHashMap<>();
 
 
     public static CallGraph getNewInstance() {
-        instance = new CallGraph();
+        CallGraph instance = new CallGraph();
+        INSTANCES.put(ProjectState.currentRepositoryKey(), instance);
         return instance;
     }
 
     public static CallGraph getInstance() {
+        CallGraph instance = INSTANCES.get(ProjectState.currentRepositoryKey());
         assert instance != null;
         return instance;
+    }
+
+    public static void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            INSTANCES.remove(repositoryId);
+        }
     }
 
     private final VertexMap vertexMap;

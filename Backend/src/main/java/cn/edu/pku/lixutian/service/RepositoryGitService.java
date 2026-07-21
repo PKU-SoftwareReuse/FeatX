@@ -14,6 +14,8 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -23,12 +25,19 @@ public class RepositoryGitService {
     );
 
     private final CandidateCodeService candidateCodeService;
+    private final Map<Integer, Object> repositoryLocks = new ConcurrentHashMap<>();
 
     public RepositoryGitService(CandidateCodeService candidateCodeService) {
         this.candidateCodeService = candidateCodeService;
     }
 
-    public synchronized GitWorkspaceStatusResult status() throws IOException, InterruptedException {
+    public GitWorkspaceStatusResult status() throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            return statusLocked();
+        }
+    }
+
+    private GitWorkspaceStatusResult statusLocked() throws IOException, InterruptedException {
         Path repository = repositoryRoot();
         List<String> stagedPaths = listPaths(repository,
                 List.of("git", "diff", "--cached", "--name-only", "-z", "--"));
@@ -60,17 +69,23 @@ public class RepositoryGitService {
         return result;
     }
 
-    public synchronized GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
-        repositoryRoot();
-        CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
-        stagePaths(List.of(candidate.path()));
-        return status();
+    public GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            repositoryRoot();
+            CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
+            stagePathsLocked(List.of(candidate.path()));
+            return statusLocked();
+        }
     }
 
-    public synchronized void stagePaths(Collection<String> relativePaths) throws IOException, InterruptedException {
-        if (relativePaths == null) {
-            return;
+    public void stagePaths(Collection<String> relativePaths) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            stagePathsLocked(relativePaths);
         }
+    }
+
+    private void stagePathsLocked(Collection<String> relativePaths) throws IOException, InterruptedException {
+        if (relativePaths == null) return;
         Path repository = repositoryRoot();
         for (String relativePath : new LinkedHashSet<>(relativePaths)) {
             validateRepositoryPath(repository, relativePath);
@@ -78,24 +93,36 @@ public class RepositoryGitService {
         }
     }
 
-    public synchronized String commit(String message) throws IOException, InterruptedException {
-        Path repository = repositoryRoot();
-        String normalizedMessage = normalizeCommitMessage(message);
-        runGit(repository, List.of(
-                "git",
-                "-c", "user.name=FeatX",
-                "-c", "user.email=featx@localhost",
-                "commit", "-m", normalizedMessage
-        ), 0);
-        return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+    public String commit(String message) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            String normalizedMessage = normalizeCommitMessage(message);
+            runGit(repository, List.of(
+                    "git",
+                    "-c", "user.name=FeatX",
+                    "-c", "user.email=featx@localhost",
+                    "commit", "-m", normalizedMessage
+            ), 0);
+            return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+        }
     }
 
-    public synchronized GitWorkspaceStatusResult discardUncommittedChanges() throws IOException, InterruptedException {
-        Path repository = repositoryRoot();
-        runGit(repository, List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "."), 0);
-        runGit(repository, List.of("git", "clean", "-fd", "--", "."), 0);
-        candidateCodeService.discardCandidateState();
-        return status();
+    public GitWorkspaceStatusResult discardUncommittedChanges() throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            runGit(repository, List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "."), 0);
+            runGit(repository, List.of("git", "clean", "-fd", "--", "."), 0);
+            candidateCodeService.discardCandidateState();
+            return statusLocked();
+        }
+    }
+
+    private Object currentRepositoryLock() {
+        Integer repositoryId = ProjectState.getInstance().getRepoId();
+        if (repositoryId == null) {
+            throw new IllegalStateException("No project is currently selected.");
+        }
+        return repositoryLocks.computeIfAbsent(repositoryId, ignored -> new Object());
     }
 
     private Path repositoryRoot() throws IOException, InterruptedException {

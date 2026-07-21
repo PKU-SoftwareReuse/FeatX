@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.service;
 
 import cn.edu.pku.lixutian.config.ClusterState;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.GitCommitResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
@@ -12,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class FeatureGitWorkflowService {
@@ -19,6 +22,7 @@ public class FeatureGitWorkflowService {
     private final CandidateCodeService candidateCodeService;
     private final CodeMapService codeMapService;
     private final AgentRunRegistry agentRunRegistry;
+    private final Map<Integer, Object> commitLocks = new ConcurrentHashMap<>();
 
     public FeatureGitWorkflowService(
             RepositoryGitService repositoryGitService,
@@ -42,13 +46,21 @@ public class FeatureGitWorkflowService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    public synchronized GitCommitResult commit(String operation, String requestedMessage, String runId)
+    public GitCommitResult commit(String operation, String requestedMessage, String runId)
+            throws IOException, InterruptedException, ParseException {
+        Integer repositoryId = ProjectState.getInstance().getRepoId();
+        if (repositoryId == null) {
+            throw new IllegalStateException("No project is currently selected.");
+        }
+        synchronized (commitLocks.computeIfAbsent(repositoryId, ignored -> new Object())) {
+            return commitLocked(operation, requestedMessage, runId);
+        }
+    }
+
+    private GitCommitResult commitLocked(String operation, String requestedMessage, String runId)
             throws IOException, InterruptedException, ParseException {
         String normalizedOperation = normalizeOperation(operation);
-        AgentRunContext agentRun = null;
-        if ("edit".equals(normalizedOperation) || "add".equals(normalizedOperation)) {
-            agentRun = agentRunRegistry.requireCompleted(runId);
-        }
+        AgentRunContext agentRun = agentRunRegistry.requireCompletedOperation(runId, normalizedOperation);
         GitWorkspaceStatusResult before = repositoryGitService.status();
         if (before.getStagedPaths().isEmpty()) {
             throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");

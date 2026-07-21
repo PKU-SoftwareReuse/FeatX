@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.service.code;
 
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -71,13 +72,14 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         };
 
         try {
-            Future<?> future = agentPipelineExecutor.submit(() -> executePipeline(
+            ProjectState.CapturedContext projectContext = ProjectState.capture();
+            Future<?> future = agentPipelineExecutor.submit(() -> projectContext.run(() -> executePipeline(
                     context,
                     model,
                     addition,
                     eventStream,
                     terminal
-            ));
+            )));
             futureRef.set(future);
             agentRunRegistry.registerCancellation(runId, cancel);
             CompletableFuture.delayedExecutor(PIPELINE_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)

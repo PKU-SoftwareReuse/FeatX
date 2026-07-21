@@ -1,6 +1,6 @@
 package cn.edu.pku.lixutian.helper;
 
-import cn.edu.pku.lixutian.service.code.ModifyAgentService;
+import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.graph.SKG;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
@@ -18,16 +18,16 @@ import java.util.*;
 
 public class CodeDiffHelper {
 
-    // 静态缓存，用于存储新生成的代码
-    private static final Map<String, String> newFeatureCodeCache = new HashMap<>();
+    private static final Map<Integer, Map<String, String>> NEW_FEATURE_CODE_BY_REPOSITORY =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 添加新生成的代码到缓存
      */
     public static void addNewFeatureCode(String classId, String code) {
         System.out.println("=== Debug: Adding to cache - classId: " + classId + ", code length: " + (code != null ? code.length() : 0) + " ===");
-        newFeatureCodeCache.put(classId, code);
-        System.out.println("✓ Cache now contains: " + newFeatureCodeCache.keySet());
+        currentNewFeatureCodeCache().put(classId, code);
+        System.out.println("✓ Cache now contains: " + currentNewFeatureCodeCache().keySet());
     }
 
     /**
@@ -35,13 +35,14 @@ public class CodeDiffHelper {
      */
     public static String getNewFeatureCode(String classId) {
         // 首先尝试直接匹配
-        String cachedCode = newFeatureCodeCache.get(classId);
+        Map<String, String> cache = currentNewFeatureCodeCache();
+        String cachedCode = cache.get(classId);
         if (cachedCode != null) {
             return cachedCode;
         }
 
         // 如果直接匹配失败，尝试模糊匹配（查找以classId结尾的完整类名）
-        for (Map.Entry<String, String> entry : newFeatureCodeCache.entrySet()) {
+        for (Map.Entry<String, String> entry : cache.entrySet()) {
             String fullClassName = entry.getKey();
             if (fullClassName.endsWith("." + classId) || fullClassName.equals(classId)) {
                 System.out.println("=== Debug: Found fuzzy match - " + fullClassName + " for " + classId + " ===");
@@ -56,7 +57,20 @@ public class CodeDiffHelper {
      * 清空新生成代码的缓存
      */
     public static void clearNewFeatureCodeCache() {
-        newFeatureCodeCache.clear();
+        NEW_FEATURE_CODE_BY_REPOSITORY.remove(ProjectState.currentRepositoryKey());
+    }
+
+    public static void clearRepository(Integer repositoryId) {
+        if (repositoryId != null) {
+            NEW_FEATURE_CODE_BY_REPOSITORY.remove(repositoryId);
+        }
+    }
+
+    private static Map<String, String> currentNewFeatureCodeCache() {
+        return NEW_FEATURE_CODE_BY_REPOSITORY.computeIfAbsent(
+                ProjectState.currentRepositoryKey(),
+                ignored -> new java.util.concurrent.ConcurrentHashMap<>()
+        );
     }
 
     public static String generateDeleteDiff(SKG skg, Vertex<TypeDeclaration<?>> topVertex, Set<Integer> clusterIds) {
@@ -129,9 +143,10 @@ public class CodeDiffHelper {
             originalCode = "";
         }
 
-        String newCode = ModifyAgentService.modificationMap.get(JavaFilePath.fromClassName(classId));
+        Map<String, String> modifications = ProjectState.getInstance().getModifications();
+        String newCode = modifications.get(JavaFilePath.fromClassName(classId));
         if (newCode == null) {
-            newCode = ModifyAgentService.modificationMap.get(classId);
+            newCode = modifications.get(classId);
         }
         if (newCode == null) {
             newCode = originalCode;
@@ -168,7 +183,7 @@ public class CodeDiffHelper {
         }
 
         System.out.println("✗ Not found in any cache");
-        System.out.println("=== Debug: CodeDiffHelper cache keys: " + newFeatureCodeCache.keySet() + " ===");
+        System.out.println("=== Debug: CodeDiffHelper cache keys: " + currentNewFeatureCodeCache().keySet() + " ===");
         // 返回diff格式的错误信息
         return generateDiffByCode("", "// Class not found in memory structures: " + classId, classId);
     }

@@ -53,9 +53,10 @@ public class CodeDiffController {
         if (ProjectState.getInstance().isPython()) {
             String filePath = CodeMapService.resolvePythonNodeToFile(classId);
             String content = ListFileHelper.getPythonFileContent(ProjectState.getInstance().getSrcPath(), filePath);
-            String newCode = AgentService.modificationMap == null ? null : AgentService.modificationMap.get(filePath);
-            if (newCode == null && AgentService.modificationMap != null) {
-                newCode = AgentService.modificationMap.get(classId);
+            Map<String, String> modifications = ProjectState.getInstance().getModifications();
+            String newCode = modifications.get(filePath);
+            if (newCode == null) {
+                newCode = modifications.get(classId);
             }
             if (AgentService.DELETE_FILE_SENTINEL.equals(newCode)) {
                 newCode = "";
@@ -111,9 +112,10 @@ public class CodeDiffController {
         if (ProjectState.getInstance().isPython()) {
             String filePath = CodeMapService.resolvePythonNodeToFile(classId);
             String originalCode = ListFileHelper.getPythonFileContent(ProjectState.getInstance().getSrcPath(), filePath);
-            String newCode = AgentService.modificationMap == null ? null : AgentService.modificationMap.get(filePath);
-            if (newCode == null && AgentService.modificationMap != null) {
-                newCode = AgentService.modificationMap.get(classId);
+            Map<String, String> modifications = ProjectState.getInstance().getModifications();
+            String newCode = modifications.get(filePath);
+            if (newCode == null) {
+                newCode = modifications.get(classId);
             }
             if (newCode == null) {
                 newCode = originalCode;
@@ -130,9 +132,10 @@ public class CodeDiffController {
     public String newFeatureCode(@RequestParam String classId) throws IOException {
         if (ProjectState.getInstance().isPython()) {
             String filePath = CodeMapService.resolvePythonNodeToFile(classId);
-            String newCode = AgentService.modificationMap == null ? "" : AgentService.modificationMap.getOrDefault(filePath, "");
-            if ((newCode == null || newCode.isBlank()) && AgentService.modificationMap != null) {
-                newCode = AgentService.modificationMap.getOrDefault(classId, "");
+            Map<String, String> modifications = ProjectState.getInstance().getModifications();
+            String newCode = modifications.getOrDefault(filePath, "");
+            if (newCode == null || newCode.isBlank()) {
+                newCode = modifications.getOrDefault(classId, "");
             }
             if (newCode == null) {
                 newCode = "";
@@ -157,9 +160,7 @@ public class CodeDiffController {
         }
 
         try {
-            if (!"delete".equalsIgnoreCase(operation)) {
-                agentRunRegistry.requireCompleted(runId);
-            }
+            agentRunRegistry.requireCompletedOperation(runId, operation);
             if (ProjectState.getInstance().isPython()) {
                 String filePath = CodeMapService.resolvePythonNodeToFile(classId);
                 Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
@@ -198,17 +199,16 @@ public class CodeDiffController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate file key is required.");
         }
         try {
-            if (!"delete".equalsIgnoreCase(request.getOperation())) {
-                agentRunRegistry.requireCompleted(request.getRunId());
-            }
+            agentRunRegistry.requireCompletedOperation(request.getRunId(), request.getOperation());
             CodeFileDiffResult result = candidateCodeService.updateCandidate(
                     request.getKey(),
                     request.getOperation(),
                     request.getContent()
             );
-            if (!"delete".equalsIgnoreCase(request.getOperation())) {
-                agentRunRegistry.replaceCompletedModifications(request.getRunId(), AgentService.modificationMap);
-            }
+            agentRunRegistry.replaceCompletedModifications(
+                    request.getRunId(),
+                    ProjectState.getInstance().getModifications()
+            );
             return result;
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
@@ -218,19 +218,20 @@ public class CodeDiffController {
     }
 
     private Map.Entry<String, String> findCandidateEntry(String primaryKey, String fallbackKey) {
-        if (AgentService.modificationMap == null) {
+        Map<String, String> modifications = ProjectState.getInstance().getModifications();
+        if (modifications.isEmpty()) {
             return null;
         }
-        String candidate = AgentService.modificationMap.get(primaryKey);
+        String candidate = modifications.get(primaryKey);
         String candidateKey = primaryKey;
         if (candidate == null && fallbackKey != null) {
-            candidate = AgentService.modificationMap.get(fallbackKey);
+            candidate = modifications.get(fallbackKey);
             candidateKey = fallbackKey;
         }
         if (candidate != null) {
             return Map.entry(candidateKey, candidate);
         }
-        for (var entry : AgentService.modificationMap.entrySet()) {
+        for (var entry : modifications.entrySet()) {
             if (!ProjectState.getInstance().isPython()) {
                 try {
                     if (JavaFilePath.normalize(entry.getKey()).equals(JavaFilePath.normalize(primaryKey))) {

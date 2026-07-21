@@ -128,8 +128,13 @@ public class FocusGraphContextService {
         environment.putIfAbsent("LOTM_REPO_PATH", LtmConfig.getRepoPath());
 
         Process process = processBuilder.start();
-        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(() -> readStream(process.getInputStream()));
-        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(() -> readProgressStream(process.getErrorStream()));
+        ProjectState.CapturedContext projectContext = ProjectState.capture();
+        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
+                () -> projectContext.call(() -> readStream(process.getInputStream()))
+        );
+        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
+                () -> projectContext.call(() -> readProgressStream(process.getErrorStream()))
+        );
 
         try (OutputStream stdin = process.getOutputStream()) {
             objectMapper.writeValue(stdin, requestJson);

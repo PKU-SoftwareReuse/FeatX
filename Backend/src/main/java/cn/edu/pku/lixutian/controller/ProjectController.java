@@ -1,5 +1,6 @@
 package cn.edu.pku.lixutian.controller;
 
+import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.dao.ProjectInfo;
@@ -16,6 +17,8 @@ import cn.edu.pku.lixutian.helper.GitRemoteHelper;
 import cn.edu.pku.lixutian.helper.RepoSummaryHelper;
 import cn.edu.pku.lixutian.service.ProcessService;
 import cn.edu.pku.lixutian.service.CodeMapService;
+import cn.edu.pku.lixutian.service.CandidateCodeService;
+import cn.edu.pku.lixutian.service.OperationProgressService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.helper.StatisticHelper;
 import com.github.javaparser.ParseException;
@@ -62,6 +65,12 @@ public class ProjectController {
     @Autowired
     AgentRunRegistry agentRunRegistry;
 
+    @Autowired
+    CandidateCodeService candidateCodeService;
+
+    @Autowired
+    OperationProgressService progressService;
+
     @GetMapping("/getList")
     public List<ProjectInfoResult> getProjectList() {
         return projectInfoRepository.findAll()
@@ -102,22 +111,30 @@ public class ProjectController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found."));
         ProjectType type = extractProjectType(projectInfo);
 
-        ProjectState state = ProjectState.getInstance();
-        if (Objects.equals(state.getRepoId(), request.getRepoId())) {
+        String workspaceId = ProjectState.currentWorkspaceId();
+        ProjectState previousProject = ProjectState.currentProject().orElse(null);
+        if (previousProject != null && Objects.equals(previousProject.getRepoId(), request.getRepoId())) {
             // Opening the workspace that already owns the active Agent run is
             // navigation, not a project switch. Reprocessing it would also
             // invalidate the in-memory candidate the user is returning to.
             return;
         }
 
-        ensureWorkspaceCanChange();
-        state.setRepoId(request.getRepoId());
-        state.setProjectPath(repoId2Path(request.getRepoId()), type.name());
+        ensureWorkspaceCanChange(previousProject);
+        ProjectState state = ProjectState.loadRepository(
+                request.getRepoId(),
+                repoId2Path(request.getRepoId()),
+                type.name()
+        );
 
-        if (type == ProjectType.JAVA) {
-            processService.process();
+        try (ProjectState.Scope ignored = ProjectState.bindProject(workspaceId, state)) {
+            if (type == ProjectType.JAVA) {
+                processService.process();
+            }
+            codeMapService.invalidateRepository(request.getRepoId());
         }
-        CodeMapService.isBuilt = false;
+        ProjectState.assignWorkspace(workspaceId, request.getRepoId());
+        ClusterState.clearWorkspace(workspaceId);
 
 //        // 初始化缓存 - 在数据处理完成后进行
 //        codeMapService.initializeCache(request.getRepoId());
@@ -125,11 +142,11 @@ public class ProjectController {
 
     @GetMapping("/current")
     public Map<String, Object> currentProject() {
-        ProjectState state = ProjectState.getInstance();
+        ProjectState state = ProjectState.currentProject().orElse(null);
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("repoId", state.getRepoId());
-        result.put("projectType", state.getProjectType());
-        result.put("sourceRoot", state.getSrcPath());
+        result.put("repoId", state == null ? null : state.getRepoId());
+        result.put("projectType", state == null ? null : state.getProjectType());
+        result.put("sourceRoot", state == null ? null : state.getSrcPath());
         return result;
     }
 
@@ -147,11 +164,15 @@ public class ProjectController {
         return LtmConfig.getRepoPath() + "/" + repoId;
     }
 
-    private void ensureWorkspaceCanChange() {
-        try {
-            agentRunRegistry.ensureCanPrepare();
-        } catch (IllegalStateException exception) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+    private void ensureWorkspaceCanChange(ProjectState currentProject) {
+        if (currentProject == null || currentProject.getRepoId() == null) {
+            return;
+        }
+        if (agentRunRegistry.hasActiveOperation(currentProject.getRepoId())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "The current project still has an unfinished or unconfirmed Agent operation."
+            );
         }
     }
 
@@ -161,8 +182,11 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Project id is required.");
         }
         Integer repoId = request.getRepoId();
-        if (java.util.Objects.equals(ProjectState.getInstance().getRepoId(), repoId)) {
-            ensureWorkspaceCanChange();
+        if (agentRunRegistry.hasActiveOperation(repoId)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This project still has an unfinished or unconfirmed Agent operation."
+            );
         }
         if (!projectInfoRepository.existsById(repoId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found.");
@@ -172,6 +196,12 @@ public class ProjectController {
         moduleRepository.deleteAll(moduleRepository.findByRepo_Id(repoId));
         projectInfoRepository.deleteById(repoId);
         deleteDirectoryIfExists(repoPath(repoId));
+        agentRunRegistry.clearRepository(repoId);
+        processService.clearRepository(repoId);
+        codeMapService.invalidateRepository(repoId);
+        candidateCodeService.clearRepository(repoId);
+        progressService.clearRepository(repoId);
+        ProjectState.removeRepository(repoId);
     }
 
     @PostMapping("/upload")

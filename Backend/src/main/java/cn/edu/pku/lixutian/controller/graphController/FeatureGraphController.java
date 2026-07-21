@@ -40,7 +40,17 @@ public class FeatureGraphController {
     }
 
     @GetMapping("/debloatGraph")
-    public FeatureGraphResult getDebloatOnMaxGraph(@RequestParam Integer featureId) {
+    public FeatureGraphResult getDebloatOnMaxGraph(
+            @RequestParam Integer featureId,
+            @RequestParam String runId
+    ) {
+        try {
+            agentRunRegistry.requireCompletedOperation(runId, "delete");
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+        }
         featureController.select(featureId);
         if (ProjectState.getInstance().isPython()) {
             return codemapService.getPythonFeatureGraph(featureId);

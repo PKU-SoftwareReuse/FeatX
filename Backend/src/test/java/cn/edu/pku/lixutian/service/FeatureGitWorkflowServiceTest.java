@@ -5,7 +5,6 @@ import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.FeatureResult;
 import cn.edu.pku.lixutian.dto.result.GitCommitResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
-import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
@@ -18,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -30,8 +31,8 @@ import static org.mockito.Mockito.when;
 class FeatureGitWorkflowServiceTest {
     @AfterEach
     void resetGlobalState() {
-        AgentService.modificationMap = null;
-        AgentService.pythonModifiedMethods = null;
+        ProjectState.getInstance().setModifications(Map.of());
+        ProjectState.getInstance().setPythonModifiedMethods(Set.of());
         ClusterState state = ClusterState.getInstance();
         state.setCandidateFeature(null);
         state.setCandidateModuleId(null);
@@ -77,7 +78,7 @@ class FeatureGitWorkflowServiceTest {
         assertEquals(7, complete.getFeatureId());
         assertTrue(complete.getStatus().getStagedPaths().isEmpty());
         assertTrue(complete.getStatus().getPendingCandidatePaths().isEmpty());
-        assertTrue(AgentService.modificationMap.isEmpty());
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
         assertEquals("3", runGit(repository, "rev-list", "--count", "HEAD").trim());
         verify(codeMapService).modifyFeatureFromMemoryAndDatabase(
                 7,
@@ -129,14 +130,14 @@ class FeatureGitWorkflowServiceTest {
         Files.createDirectories(generatedOutput.getParent());
         Files.writeString(generatedOutput, "generated\n");
         ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
+        ProjectState.getInstance().setRepoId(51);
 
         CandidateCodeService candidateService = new CandidateCodeService();
-        AgentService.modificationMap = new LinkedHashMap<>();
-        AgentService.modificationMap.put("feature.py", "print('candidate')\n");
+        ProjectState.getInstance().setModifications(Map.of("feature.py", "print('candidate')\n"));
         candidateService.preparePythonCandidate(
                 "feature.py",
                 "feature.py",
-                AgentService.modificationMap.get("feature.py")
+                ProjectState.getInstance().getModifications().get("feature.py")
         );
         FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
                 new RepositoryGitService(candidateService),
@@ -158,12 +159,14 @@ class FeatureGitWorkflowServiceTest {
 
     private CandidateCodeService prepareTwoPythonCandidates(Path repository) throws Exception {
         ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
+        ProjectState.getInstance().setRepoId(52);
         CandidateCodeService candidateService = new CandidateCodeService();
-        AgentService.modificationMap = new LinkedHashMap<>();
-        AgentService.modificationMap.put("first.py", "print('first changed')\n");
-        AgentService.modificationMap.put("second.py", "print('second changed')\n");
-        candidateService.preparePythonCandidate("first.py", "first.py", AgentService.modificationMap.get("first.py"));
-        candidateService.preparePythonCandidate("second.py", "second.py", AgentService.modificationMap.get("second.py"));
+        Map<String, String> modifications = new LinkedHashMap<>();
+        modifications.put("first.py", "print('first changed')\n");
+        modifications.put("second.py", "print('second changed')\n");
+        ProjectState.getInstance().setModifications(modifications);
+        candidateService.preparePythonCandidate("first.py", "first.py", modifications.get("first.py"));
+        candidateService.preparePythonCandidate("second.py", "second.py", modifications.get("second.py"));
         return candidateService;
     }
 
@@ -185,7 +188,7 @@ class FeatureGitWorkflowServiceTest {
                 java.util.List.of()
         );
         registry.claim(context.runId());
-        registry.complete(context.runId(), AgentService.modificationMap);
+        registry.complete(context.runId(), ProjectState.getInstance().getModifications());
         return new TestRun(registry, context.runId());
     }
 

@@ -9,15 +9,21 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentRunRegistryTest {
     @AfterEach
     void clearGlobalCandidateMap() {
-        AgentService.modificationMap = null;
+        ProjectState.getInstance().setModifications(Map.of());
     }
 
     @Test
@@ -92,6 +98,114 @@ class AgentRunRegistryTest {
         assertEquals("test-model", registry.snapshot(context.runId()).model());
         assertEquals("new requirement", registry.snapshot(context.runId()).request());
         assertEquals("class Foo {}", registry.modifications(context.runId()).get("cn/edu/pku/Foo.java"));
+    }
+
+    @Test
+    void differentRepositoriesCanPrepareConcurrently(@TempDir Path first, @TempDir Path second) {
+        ProjectState firstProject = ProjectState.selectWorkspace("workspace-a", 101, first.toString(), "JAVA");
+        ProjectState secondProject = ProjectState.selectWorkspace("workspace-b", 102, second.toString(), "JAVA");
+        AgentRunRegistry registry = new AgentRunRegistry();
+
+        AgentRunContext firstRun;
+        try (ProjectState.Scope ignored = ProjectState.bindProject("workspace-a", firstProject)) {
+            firstRun = prepare(registry, firstProject);
+        }
+        AgentRunContext secondRun;
+        try (ProjectState.Scope ignored = ProjectState.bindProject("workspace-b", secondProject)) {
+            secondRun = prepare(registry, secondProject);
+        }
+
+        assertNotEquals(firstRun.runId(), secondRun.runId());
+        assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(firstRun.runId()));
+        assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(secondRun.runId()));
+        assertTrue(registry.hasActiveOperation(101));
+        assertTrue(registry.hasActiveOperation(102));
+    }
+
+    @Test
+    void preparingRunImmediatelyBlocksTheSameRepository(@TempDir Path projectRoot) {
+        ProjectState firstWorkspace = ProjectState.selectWorkspace(
+                "same-project-a", 103, projectRoot.toString(), "JAVA"
+        );
+        ProjectState secondWorkspace = ProjectState.selectWorkspace(
+                "same-project-b", 103, projectRoot.toString(), "JAVA"
+        );
+        AgentRunRegistry registry = new AgentRunRegistry();
+
+        String runId;
+        try (ProjectState.Scope ignored = ProjectState.bindProject("same-project-a", firstWorkspace)) {
+            runId = registry.reservePreparation();
+        }
+
+        try (ProjectState.Scope ignored = ProjectState.bindProject("same-project-b", secondWorkspace)) {
+            assertThrows(IllegalStateException.class, registry::reservePreparation);
+        }
+        assertEquals(AgentRunRegistry.Status.PREPARING, registry.status(runId));
+    }
+
+    @Test
+    void concurrentReservationsForTheSameRepositoryHaveExactlyOneWinner(@TempDir Path projectRoot)
+            throws Exception {
+        ProjectState firstWorkspace = ProjectState.selectWorkspace(
+                "race-a", 104, projectRoot.toString(), "JAVA"
+        );
+        ProjectState secondWorkspace = ProjectState.selectWorkspace(
+                "race-b", 104, projectRoot.toString(), "JAVA"
+        );
+        AgentRunRegistry registry = new AgentRunRegistry();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<Boolean> first = executor.submit(
+                    () -> reserveAfterSignal(registry, "race-a", firstWorkspace, start)
+            );
+            Future<Boolean> second = executor.submit(
+                    () -> reserveAfterSignal(registry, "race-b", secondWorkspace, start)
+            );
+            start.countDown();
+
+            int winners = (first.get(5, TimeUnit.SECONDS) ? 1 : 0)
+                    + (second.get(5, TimeUnit.SECONDS) ? 1 : 0);
+            assertEquals(1, winners);
+            assertTrue(registry.hasActiveOperation(104));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void completedRunCannotBeReusedForAnotherOperation(@TempDir Path projectRoot) {
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(105);
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = prepare(registry, project);
+        registry.claim(context.runId());
+        registry.complete(context.runId(), Map.of("cn/edu/pku/Foo.java", "class Foo {}"));
+
+        assertEquals(context, registry.requireCompletedOperation(context.runId(), "edit"));
+        assertThrows(
+                IllegalStateException.class,
+                () -> registry.requireCompletedOperation(context.runId(), "delete")
+        );
+        assertThrows(IllegalArgumentException.class, () -> registry.requireCompletedIfActive(null));
+    }
+
+    private boolean reserveAfterSignal(
+            AgentRunRegistry registry,
+            String workspaceId,
+            ProjectState project,
+            CountDownLatch start
+    ) throws InterruptedException {
+        start.await();
+        try (ProjectState.Scope ignored = ProjectState.bindProject(workspaceId, project)) {
+            try {
+                registry.reservePreparation();
+                return true;
+            } catch (IllegalStateException conflict) {
+                return false;
+            }
+        }
     }
 
     private AgentRunContext prepare(AgentRunRegistry registry, ProjectState project) {

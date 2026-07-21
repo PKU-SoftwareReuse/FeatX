@@ -1,7 +1,6 @@
 package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.service.code.AddAgentService;
-import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
@@ -70,37 +69,37 @@ public class LlmController {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    public synchronized AgentRunStartResult modifyFeature(AddOrModifyRequest request)
+    public AgentRunStartResult modifyFeature(AddOrModifyRequest request)
             throws IOException, InterruptedException {
         validateFeatureRequest(request, false);
-        agentRunRegistry.ensureCanPrepare();
-        resetCandidateState();
-        if (ProjectState.getInstance().isPython()) {
-            return modifyPythonFeature(request);
-        }
-
-        progressService.start(
-                "java-modify",
-                8,
-                "start",
-                "Preparing Java Modify Feature request."
-        );
-        AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
-        ClusterState state = ClusterState.getInstance();
-        FeatureResult candidateFeature = state.getCandidateFeature();
-        if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
-            progressService.fail("Please select a Java feature before modifying it.");
-            throw new IllegalStateException("Please select a Java feature before modifying it.");
-        }
-        state.setAgentLanguage(requestLanguage);
-        String newRequest = request.getFeatureDescription();
-        state.setNewFeatureDescription(newRequest);
-        String oldRequest = localizedDescription(
-                candidateFeature.getFeatureDescription(),
-                candidateFeature.getFeatureDescriptionCn(),
-                requestLanguage
-        );
+        ProjectState project = ProjectState.getInstance();
+        String runId = agentRunRegistry.reservePreparation();
         try {
+            resetCandidateState(project);
+            if (project.isPython()) {
+                return modifyPythonFeature(request, runId, project);
+            }
+
+            progressService.start(
+                    "java-modify",
+                    8,
+                    "start",
+                    "Preparing Java Modify Feature request."
+            );
+            AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+            ClusterState state = ClusterState.getInstance();
+            FeatureResult candidateFeature = state.getCandidateFeature();
+            if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
+                throw new IllegalStateException("Please select a Java feature before modifying it.");
+            }
+            state.setAgentLanguage(requestLanguage);
+            String newRequest = request.getFeatureDescription();
+            state.setNewFeatureDescription(newRequest);
+            String oldRequest = localizedDescription(
+                    candidateFeature.getFeatureDescription(),
+                    candidateFeature.getFeatureDescriptionCn(),
+                    requestLanguage
+            );
             progressService.update(
                     "delta-query",
                     "Extracting the Java feature delta query with LLM.",
@@ -115,8 +114,8 @@ public class LlmController {
                     deltaQuery,
                     requestLanguage
             );
-            ProjectState project = ProjectState.getInstance();
             AgentRunContext context = agentRunRegistry.prepare(
+                    runId,
                     "modify",
                     newRequest,
                     oldRequest,
@@ -134,11 +133,16 @@ public class LlmController {
             return new AgentRunStartResult(context.runId());
         } catch (IOException | InterruptedException | RuntimeException exception) {
             progressService.fail(exception.getMessage());
+            agentRunRegistry.fail(runId, exception);
             throw exception;
         }
     }
 
-    private AgentRunStartResult modifyPythonFeature(AddOrModifyRequest request)
+    private AgentRunStartResult modifyPythonFeature(
+            AddOrModifyRequest request,
+            String runId,
+            ProjectState project
+    )
             throws IOException, InterruptedException {
         progressService.start(
                 "python-modify",
@@ -155,106 +159,102 @@ public class LlmController {
             throw new UnsupportedOperationException("Please select a Python feature before modifying it.");
         }
 
-        try {
-            String oldRequest = candidateFeature.getFeatureDescription();
+        String oldRequest = candidateFeature.getFeatureDescription();
 
-            progressService.update(
-                    "collect-code-map",
-                    "Collecting current feature CodeMap methods.",
-                    1,
-                    8
-            );
-            List<String> currentCodeMap = new ArrayList<>();
-            if (candidateFeature.getCandidateMethods() != null) {
-                candidateFeature.getCandidateMethods().forEach(candidate -> {
-                    if (candidate.getLxtFull() == null || candidate.getLxtFull().isEmpty()) {
-                        if (candidate.getZyfShortSignature() != null) {
-                            currentCodeMap.add(candidate.getZyfShortSignature());
-                        }
-                        return;
+        progressService.update(
+                "collect-code-map",
+                "Collecting current feature CodeMap methods.",
+                1,
+                8
+        );
+        List<String> currentCodeMap = new ArrayList<>();
+        if (candidateFeature.getCandidateMethods() != null) {
+            candidateFeature.getCandidateMethods().forEach(candidate -> {
+                if (candidate.getLxtFull() == null || candidate.getLxtFull().isEmpty()) {
+                    if (candidate.getZyfShortSignature() != null) {
+                        currentCodeMap.add(candidate.getZyfShortSignature());
                     }
-                    candidate.getLxtFull().forEach(full -> {
-                        if (full.getLxtFullSignature() != null) {
-                            currentCodeMap.add(full.getLxtFullSignature());
-                        }
-                    });
+                    return;
+                }
+                candidate.getLxtFull().forEach(full -> {
+                    if (full.getLxtFullSignature() != null) {
+                        currentCodeMap.add(full.getLxtFullSignature());
+                    }
                 });
-            }
-
-            progressService.update(
-                    "delta-query",
-                    "Extracting the feature delta query with LLM.",
-                    2,
-                    8
-            );
-            String deltaQuery = buildDeltaQuery(oldRequest, newRequest);
-
-            FocusGraphContextResult context = focusGraphContextService.buildModifyContext(
-                    candidateFeature.getFeatureId(),
-                    oldRequest,
-                    newRequest,
-                    deltaQuery,
-                    currentCodeMap
-            );
-            String relatedCodes = context.getContextPrompt();
-
-            progressService.update(
-                    "prepare-agent",
-                    "Preparing Python Agent inputs from the reasoning graph context.",
-                    7,
-                    8
-            );
-            String allFiles = projectFileList();
-            progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
-            ProjectState project = ProjectState.getInstance();
-            AgentRunContext run = agentRunRegistry.prepare(
-                    "modify-python",
-                    newRequest,
-                    oldRequest,
-                    relatedCodes,
-                    allFiles,
-                    AgentLanguage.orDefault(request.getLanguage()),
-                    project.getSrcPath(),
-                    project.getProjectPath(),
-                    project.getRepoId(),
-                    candidateFeature.getFeatureId(),
-                    null,
-                    context.getGraphStages()
-            );
-            return new AgentRunStartResult(run.runId());
-        } catch (IOException | InterruptedException | RuntimeException e) {
-            progressService.fail(e.getMessage());
-            throw e;
+            });
         }
+
+        progressService.update(
+                "delta-query",
+                "Extracting the feature delta query with LLM.",
+                2,
+                8
+        );
+        String deltaQuery = buildDeltaQuery(oldRequest, newRequest);
+
+        FocusGraphContextResult context = focusGraphContextService.buildModifyContext(
+                candidateFeature.getFeatureId(),
+                oldRequest,
+                newRequest,
+                deltaQuery,
+                currentCodeMap
+        );
+        String relatedCodes = context.getContextPrompt();
+
+        progressService.update(
+                "prepare-agent",
+                "Preparing Python Agent inputs from the reasoning graph context.",
+                7,
+                8
+        );
+        String allFiles = projectFileList(project);
+        progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+        AgentRunContext run = agentRunRegistry.prepare(
+                runId,
+                "modify-python",
+                newRequest,
+                oldRequest,
+                relatedCodes,
+                allFiles,
+                AgentLanguage.orDefault(request.getLanguage()),
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                candidateFeature.getFeatureId(),
+                null,
+                context.getGraphStages()
+        );
+        return new AgentRunStartResult(run.runId());
     }
 
-    public synchronized AgentRunStartResult addFeature(AddOrModifyRequest request)
+    public AgentRunStartResult addFeature(AddOrModifyRequest request)
             throws IOException, InterruptedException {
         validateFeatureRequest(request, true);
-        agentRunRegistry.ensureCanPrepare();
-        resetCandidateState();
-        if (ProjectState.getInstance().isPython()) {
-            return addPythonFeature(request);
-        }
-
-        progressService.start(
-                "java-add",
-                8,
-                "start",
-                "Preparing Java Add Feature request."
-        );
-        AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
-        String newRequest = request.getFeatureDescription();
-        ClusterState state = ClusterState.getInstance();
-        state.setAgentLanguage(requestLanguage);
-        state.setNewFeatureDescription(newRequest);
-
-        state.setCandidateModuleId(request.getModuleId());
-        codeMapService.selectFeature(null);
+        ProjectState project = ProjectState.getInstance();
+        String runId = agentRunRegistry.reservePreparation();
         try {
+            resetCandidateState(project);
+            if (project.isPython()) {
+                return addPythonFeature(request, runId, project);
+            }
+
+            progressService.start(
+                    "java-add",
+                    8,
+                    "start",
+                    "Preparing Java Add Feature request."
+            );
+            AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
+            String newRequest = request.getFeatureDescription();
+            ClusterState state = ClusterState.getInstance();
+            state.setAgentLanguage(requestLanguage);
+            state.setNewFeatureDescription(newRequest);
+
+            state.setCandidateModuleId(request.getModuleId());
+            codeMapService.selectFeature(null);
             FocusGraphContextResult graphContext = javaGraphContextService.buildAddContext(newRequest, requestLanguage);
-            ProjectState project = ProjectState.getInstance();
             AgentRunContext context = agentRunRegistry.prepare(
+                    runId,
                     "add",
                     newRequest,
                     "",
@@ -272,11 +272,16 @@ public class LlmController {
             return new AgentRunStartResult(context.runId());
         } catch (IOException | InterruptedException | RuntimeException exception) {
             progressService.fail(exception.getMessage());
+            agentRunRegistry.fail(runId, exception);
             throw exception;
         }
     }
 
-    private AgentRunStartResult addPythonFeature(AddOrModifyRequest request)
+    private AgentRunStartResult addPythonFeature(
+            AddOrModifyRequest request,
+            String runId,
+            ProjectState project
+    )
             throws IOException, InterruptedException {
         progressService.start(
                 "python-add",
@@ -289,74 +294,88 @@ public class LlmController {
         ClusterState.getInstance().setCandidateModuleId(request.getModuleId());
         codeMapService.selectFeature(null);
 
-        try {
-            progressService.update(
-                    "focusgraph-context",
-                    "Building FocusGraph context from similar features.",
-                    1,
-                    8
-            );
-            FocusGraphContextResult context = focusGraphContextService.buildAddContext(
-                    request.getModuleId(),
-                    newRequest
-            );
-            String relatedCodes = context.getContextPrompt();
+        progressService.update(
+                "focusgraph-context",
+                "Building FocusGraph context from similar features.",
+                1,
+                8
+        );
+        FocusGraphContextResult context = focusGraphContextService.buildAddContext(
+                request.getModuleId(),
+                newRequest
+        );
+        String relatedCodes = context.getContextPrompt();
 
-            progressService.update(
-                    "prepare-agent",
-                    "Preparing Python Agent inputs from the Add Feature reasoning graph context.",
-                    7,
-                    8
-            );
-            String allFiles = projectFileList();
-            progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
-            ProjectState project = ProjectState.getInstance();
-            AgentRunContext run = agentRunRegistry.prepare(
-                    "add-python",
-                    newRequest,
-                    "",
-                    relatedCodes,
-                    allFiles,
-                    AgentLanguage.orDefault(request.getLanguage()),
-                    project.getSrcPath(),
-                    project.getProjectPath(),
-                    project.getRepoId(),
-                    null,
-                    request.getModuleId(),
-                    context.getGraphStages()
-            );
-            return new AgentRunStartResult(run.runId());
-        } catch (IOException | InterruptedException | RuntimeException e) {
-            progressService.fail(e.getMessage());
-            throw e;
-        }
+        progressService.update(
+                "prepare-agent",
+                "Preparing Python Agent inputs from the Add Feature reasoning graph context.",
+                7,
+                8
+        );
+        String allFiles = projectFileList(project);
+        progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+        AgentRunContext run = agentRunRegistry.prepare(
+                runId,
+                "add-python",
+                newRequest,
+                "",
+                relatedCodes,
+                allFiles,
+                AgentLanguage.orDefault(request.getLanguage()),
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                null,
+                request.getModuleId(),
+                context.getGraphStages()
+        );
+        return new AgentRunStartResult(run.runId());
     }
 
-    public synchronized void deleteFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
-        agentRunRegistry.ensureCanPrepare();
-        agentRunRegistry.clear();
-        resetCandidateState();
-        if (!ProjectState.getInstance().isPython()) {
-            return;
-        }
-
-        progressService.start(
-                "python-delete",
-                4,
-                "start",
-                "Preparing deterministic Python Delete Feature diff."
-        );
-        if (request.getFeatureId() != null) {
-            codeMapService.selectFeature(request.getFeatureId());
-        }
-
-        FeatureResult candidateFeature = ClusterState.getInstance().getCandidateFeature();
-        if (candidateFeature == null) {
-            progressService.fail("Please select a Python feature before deleting it.");
-            throw new UnsupportedOperationException("Please select a Python feature before deleting it.");
-        }
-
+    public AgentRunStartResult deleteFeature(AddOrModifyRequest request) throws IOException, InterruptedException {
+        ProjectState project = ProjectState.getInstance();
+        String runId = agentRunRegistry.reservePreparation();
         try {
+            resetCandidateState(project);
+            if (request != null && request.getFeatureId() != null) {
+                codeMapService.selectFeature(request.getFeatureId());
+            }
+
+            FeatureResult candidateFeature = ClusterState.getInstance().getCandidateFeature();
+            if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
+                throw new UnsupportedOperationException("Please select a feature before deleting it.");
+            }
+
+            if (!project.isPython()) {
+                AgentRunContext run = agentRunRegistry.prepare(
+                        runId,
+                        "delete",
+                        "",
+                        localizedDescription(
+                                candidateFeature.getFeatureDescription(),
+                                candidateFeature.getFeatureDescriptionCn(),
+                                AgentLanguage.EN
+                        ),
+                        "",
+                        "",
+                        AgentLanguage.EN,
+                        project.getSrcPath(),
+                        project.getProjectPath(),
+                        project.getRepoId(),
+                        candidateFeature.getFeatureId(),
+                        null,
+                        List.of()
+                );
+                agentRunRegistry.completePrepared(runId, Map.of());
+                return new AgentRunStartResult(run.runId());
+            }
+
+            progressService.start(
+                    "python-delete",
+                    4,
+                    "start",
+                    "Preparing deterministic Python Delete Feature diff."
+            );
             progressService.update(
                     "collect-code-map",
                     "Collecting current feature CodeMap methods.",
@@ -383,14 +402,33 @@ public class LlmController {
                     currentCodeMap
             );
 
+            AgentRunContext run = agentRunRegistry.prepare(
+                    runId,
+                    "delete",
+                    "",
+                    candidateFeature.getFeatureDescription(),
+                    "",
+                    "",
+                    AgentLanguage.orDefault(request == null ? null : request.getLanguage()),
+                    project.getSrcPath(),
+                    project.getProjectPath(),
+                    project.getRepoId(),
+                    candidateFeature.getFeatureId(),
+                    null,
+                    List.of()
+            );
+            agentRunRegistry.completePrepared(runId, project.getModifications());
+
             int deletedCount = plan.path("deletedMethods").size();
             int skippedCount = plan.path("skippedMethods").size();
             int fileCount = plan.path("affectedFiles").size();
             progressService.complete("Python delete diff is ready. Deleted "
                     + deletedCount + " methods across " + fileCount
                     + " files; skipped " + skippedCount + " shared or unresolved methods.");
+            return new AgentRunStartResult(run.runId());
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
+            agentRunRegistry.fail(runId, e);
             throw e;
         }
     }
@@ -584,17 +622,17 @@ public class LlmController {
         return currentCodeMap;
     }
 
-    private String projectFileList() {
+    private String projectFileList(ProjectState project) {
         StringBuilder fileList = new StringBuilder();
-        for (String projectFile : ListFileHelper.findPythonFiles(ProjectState.getInstance().getSrcPath())) {
+        for (String projectFile : ListFileHelper.findPythonFiles(project.getSrcPath())) {
             fileList.append(projectFile).append("\n");
         }
         return fileList.toString();
     }
 
-    private void resetCandidateState() {
+    private void resetCandidateState(ProjectState project) {
         candidateCodeService.clear();
-        AgentService.modificationMap = Collections.emptyMap();
+        project.setModifications(Collections.emptyMap());
     }
 
 }
