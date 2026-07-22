@@ -74,6 +74,30 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void manualJavaCandidateBecomesPendingOnlyAfterItIsEdited(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        String original = "package demo;\n\nclass Example {}\n";
+        Files.writeString(sourceFile, original);
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        CodeFileDiffResult opened = service.prepareManualJavaCandidate("demo/Example.java");
+
+        assertTrue(opened.getDiff().isBlank());
+        assertTrue(service.pendingModificationKeys().isEmpty());
+
+        service.updateCandidate(
+                "demo/Example.java",
+                "edit",
+                "package demo;\n\nclass Example { int manuallyEdited; }\n"
+        );
+
+        assertEquals(java.util.Set.of("demo/Example.java"), service.pendingModificationKeys());
+        assertFalse(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
+    @Test
     void materializeJavaCandidateWritesOnlyTheConfirmedFile(@TempDir Path projectRoot) throws Exception {
         Path firstFile = projectRoot.resolve("src/main/java/demo/First.java");
         Path secondFile = projectRoot.resolve("src/main/java/demo/Second.java");

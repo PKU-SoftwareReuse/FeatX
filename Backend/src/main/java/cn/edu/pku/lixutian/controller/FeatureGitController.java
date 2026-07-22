@@ -42,6 +42,15 @@ public class FeatureGitController {
         return workflowService.stageCandidate(request.getKey(), request.getRunId());
     }
 
+    @PostMapping("/revert")
+    public GitWorkspaceStatusResult revert(@RequestBody StageCandidateRequest request)
+            throws IOException, InterruptedException {
+        if (request == null || request.getKey() == null || request.getKey().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Candidate file key is required.");
+        }
+        return workflowService.revertCandidate(request.getKey(), request.getRunId());
+    }
+
     @PostMapping("/commit")
     public GitCommitResult commit(@RequestBody GitCommitRequest request)
             throws IOException, InterruptedException, ParseException {

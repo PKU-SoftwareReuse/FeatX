@@ -30,7 +30,6 @@ import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
 const {Panel} = Collapse;
 const {TextArea} = Input;
 const loadGitDiffEditor = () => import("./GitDiffEditor/GitDiffEditor");
-const GitDiffEditor = React.lazy(loadGitDiffEditor);
 
 const DEBLOATING_THEME = {
     token: {
@@ -49,7 +48,8 @@ const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
 const WORKSPACE_MAX_WIDTH = 1600;
 const DIFF_DRAWER_LAYOUT_SETTLE_MS = 360;
-const ACTIVE_RUN_STORAGE_KEY = 'featx.activeRunId';
+const LEGACY_ACTIVE_RUN_STORAGE_KEY = 'featx.activeRunId';
+const ACTIVE_RUN_STORAGE_PREFIX = 'featx.activeRunId.';
 const CANDIDATE_DRAFT_STORAGE_PREFIX = 'featx.candidateDraft.';
 const FEATURE_REQUEST_DRAFT_KEY = 'featx.featureRequestDraft';
 
@@ -68,6 +68,18 @@ const EMPTY_GIT_STATUS = {
 export const supportsReasoningGraphStages = (operationType) => (
     operationType === "edit" || operationType === "add"
 );
+
+export const shouldShowCandidateDiff = (confirmEnabled, operationType, codeNode) => (
+    confirmEnabled
+    && (operationType === "delete" || operationType === "edit" || operationType === "add")
+    && Boolean(codeNode)
+);
+
+export const candidateNodeTypeForDraft = (candidateFile, draft, fullyStaged = false) => {
+    if (fullyStaged) return "Staged";
+    const originalContent = candidateFile?.originalContent ?? "";
+    return (draft ?? "") === originalContent ? "Default" : "Modify";
+};
 
 const getWorkspaceSideGap = (viewportWidth) => (
     viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
@@ -106,6 +118,82 @@ const getDefaultDiffDrawerWidth = () => {
 const candidateDraftStorageKey = (runId, candidateKey) => (
     `${CANDIDATE_DRAFT_STORAGE_PREFIX}${encodeURIComponent(runId || '')}.${encodeURIComponent(candidateKey || '')}`
 );
+
+export const activeRunStorageKey = (repositoryId) => (
+    `${ACTIVE_RUN_STORAGE_PREFIX}${encodeURIComponent(repositoryId ?? '')}`
+);
+
+const loadStoredActiveRunId = (repositoryId) => {
+    if (repositoryId == null || repositoryId === '') return null;
+    try {
+        return sessionStorage.getItem(activeRunStorageKey(repositoryId));
+    } catch (error) {
+        return null;
+    }
+};
+
+const storeActiveRunId = (repositoryId, runId) => {
+    if (repositoryId == null || repositoryId === '') return;
+    try {
+        const storageKey = activeRunStorageKey(repositoryId);
+        if (runId) {
+            sessionStorage.setItem(storageKey, runId);
+        } else {
+            sessionStorage.removeItem(storageKey);
+        }
+    } catch (error) {
+        // The backend remains authoritative when browser storage is unavailable.
+    }
+};
+
+const loadLegacyActiveRunId = () => {
+    try {
+        return sessionStorage.getItem(LEGACY_ACTIVE_RUN_STORAGE_KEY);
+    } catch (error) {
+        return null;
+    }
+};
+
+const clearLegacyActiveRunId = () => {
+    try {
+        sessionStorage.removeItem(LEGACY_ACTIVE_RUN_STORAGE_KEY);
+    } catch (error) {
+        // Ignore unavailable browser storage.
+    }
+};
+
+const isStaleActiveRunError = (error) => (
+    error?.response?.status === 404 || error?.response?.status === 409
+);
+
+export const resolveActiveRunIdForRepository = async (repositoryId, validateRun) => {
+    if (repositoryId == null || repositoryId === '') return null;
+
+    const scopedRunId = loadStoredActiveRunId(repositoryId);
+    if (scopedRunId) {
+        try {
+            await validateRun(scopedRunId);
+            clearLegacyActiveRunId();
+            return scopedRunId;
+        } catch (error) {
+            if (!isStaleActiveRunError(error)) return scopedRunId;
+            storeActiveRunId(repositoryId, null);
+        }
+    }
+
+    const legacyRunId = loadLegacyActiveRunId();
+    if (!legacyRunId) return null;
+    try {
+        await validateRun(legacyRunId);
+        storeActiveRunId(repositoryId, legacyRunId);
+        return legacyRunId;
+    } catch (error) {
+        if (!isStaleActiveRunError(error)) return legacyRunId;
+        return null;
+    } finally {
+        clearLegacyActiveRunId();
+    }
+};
 
 const loadCandidateDraft = (runId, candidate) => {
     if (!runId || !candidate?.key) return null;
@@ -200,13 +288,18 @@ const DEBLOATING_COPY = {
         fileStaged: "此文件已暂存",
         candidateStaged: "文件已写入项目并暂存。",
         failedStageCandidate: "暂存候选文件失败。",
+        noCandidateChanges: "当前文件没有可确认的修改。",
+        revertFile: "撤销此文件",
+        revertingFile: "正在撤销……",
+        candidateReverted: "此文件的候选修改已撤销。",
+        failedRevertCandidate: "撤销候选文件失败。",
         commitChanges: "提交已确认文件",
         noStagedFiles: "请先在 Diff Panel 中确认至少一个文件。",
         partialCommitTitle: "确认部分提交",
         completeCommitTitle: "确认全部提交",
-        partialCommitDescription: "本次只提交已暂存文件；剩余候选文件继续保留，功能数据与静态分析将在全部候选文件提交后统一更新。",
+        partialCommitDescription: "本次只提交已暂存文件，并同步更新功能数据、CodeMap 和静态分析；其余候选修改将被放弃。",
         completeCommitDescription: "所有候选文件均已确认；本次将提交剩余修改，并同步更新功能数据、CodeMap 和静态分析结果。",
-        partialCommitSuccess: "已完成部分提交，未确认文件仍保留在代码图谱中。",
+        partialCommitSuccess: "已提交确认的文件，其余候选修改已放弃。",
         completeCommitSuccess: "全部候选修改已提交。",
         failedCommitChanges: "提交代码变更失败。",
         discardAllChanges: "放弃全部未提交修改",
@@ -290,13 +383,18 @@ const DEBLOATING_COPY = {
         fileStaged: "File staged",
         candidateStaged: "The file was written to the project and staged.",
         failedStageCandidate: "Failed to stage the candidate file.",
+        noCandidateChanges: "This file has no changes to confirm.",
+        revertFile: "Revert this file",
+        revertingFile: "Reverting...",
+        candidateReverted: "The candidate change for this file was reverted.",
+        failedRevertCandidate: "Failed to revert the candidate file.",
         commitChanges: "Commit confirmed files",
         noStagedFiles: "Confirm at least one file in the Diff Panel first.",
         partialCommitTitle: "Confirm partial commit",
         completeCommitTitle: "Confirm complete commit",
-        partialCommitDescription: "Only staged files will be committed. Remaining candidates stay available; feature data and static analysis are updated after every candidate is committed.",
+        partialCommitDescription: "Only staged files will be committed and applied to feature data, CodeMap, and static analysis. All other candidates will be discarded.",
         completeCommitDescription: "All candidate files are confirmed. This commits the remaining changes and updates feature data, CodeMap, and static analysis.",
-        partialCommitSuccess: "Partial commit completed. Unconfirmed files remain in the code graph.",
+        partialCommitSuccess: "Confirmed files were committed; all other candidates were discarded.",
         completeCommitSuccess: "All candidate changes were committed.",
         failedCommitChanges: "Failed to commit code changes.",
         discardAllChanges: "Discard all uncommitted changes",
@@ -602,6 +700,7 @@ const DebloatingPage = () => {
     }, []);
 
     useEffect(() => {
+        let active = true;
         const fetchData = async () => {
             let project = await API.getCurrentProject().catch(() => null)
             if (!project?.repoId) {
@@ -611,10 +710,20 @@ const DebloatingPage = () => {
                     project = await API.getCurrentProject().catch(() => null)
                 }
             }
+            if (!active) return
             setCurrentProject(project)
             await refreshGitStatus()
             const res = await getFeatureData()
-            const requestDraft = !activeRunId
+            if (!active) return
+            const repositoryId = project?.repositoryId ?? project?.repoId
+            const restoredRunId = await resolveActiveRunIdForRepository(
+                repositoryId,
+                API.getAgentRun
+            )
+            if (!active) return
+            setActiveRunId(restoredRunId)
+            setActiveRunStorageReady(repositoryId != null)
+            const requestDraft = !restoredRunId
                 ? loadFeatureRequestDraft(project?.repositoryId ?? project?.repoId)
                 : null
             if (requestDraft?.operation === 'edit') {
@@ -639,12 +748,15 @@ const DebloatingPage = () => {
                     return
                 }
             }
-            if (!activeRunId && res.length > 0 && res[0].featureList.length > 0) {
+            if (!restoredRunId && res.length > 0 && res[0].featureList.length > 0) {
                 setActiveKey(res[0].moduleId)
                 handleSelect(res[0].featureList[0])
             }
         }
         fetchData()
+        return () => {
+            active = false;
+        }
         // This is a one-time bootstrap. The functions intentionally use the
         // initial session snapshot and would restart requests if dependencies changed.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -679,19 +791,14 @@ const DebloatingPage = () => {
     }
 
     const [graphData, setGraphData] = useState({nodes: [], edges: []});
-    const [activeRunId, setActiveRunId] = useState(() => sessionStorage.getItem(ACTIVE_RUN_STORAGE_KEY));
+    const [activeRunId, setActiveRunId] = useState(null);
+    const [activeRunStorageReady, setActiveRunStorageReady] = useState(false);
 
     useEffect(() => {
-        try {
-            if (activeRunId) {
-                sessionStorage.setItem(ACTIVE_RUN_STORAGE_KEY, activeRunId)
-            } else {
-                sessionStorage.removeItem(ACTIVE_RUN_STORAGE_KEY)
-            }
-        } catch (error) {
-            // The backend still owns the run; storage only enables automatic refresh recovery.
-        }
-    }, [activeRunId]);
+        const repositoryId = currentProject?.repositoryId ?? currentProject?.repoId;
+        if (!activeRunStorageReady || repositoryId == null) return;
+        storeActiveRunId(repositoryId, activeRunId);
+    }, [activeRunId, activeRunStorageReady, currentProject]);
 
     const getFeatureGraphData = (featureId, selectedType, runId = activeRunId) => {
         setLoadingFeatureGraph(true);
@@ -707,6 +814,7 @@ const DebloatingPage = () => {
         setCandidateDraft('');
         setCandidateDirty(false);
         setStagingCandidate(false);
+        setRevertingCandidate(false);
         if (selectedType === 'delete') {
             API.getMinGraphData(featureId, runId).then((data) => {
                 setGraphData(data)
@@ -764,6 +872,7 @@ const DebloatingPage = () => {
     const [requestDraftDirty, setRequestDraftDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
     const [stagingCandidate, setStagingCandidate] = useState(false);
+    const [revertingCandidate, setRevertingCandidate] = useState(false);
     const [gitStatus, setGitStatus] = useState(EMPTY_GIT_STATUS);
     const [loadingConfirm, setLoadingConfirm] = useState(false);
 
@@ -908,7 +1017,7 @@ const DebloatingPage = () => {
         return () => window.removeEventListener('keydown', handleEscape);
     }, [closeDiffDrawer, diffDrawerOpen]);
 
-    const getCodeDiff = (classNodeId) => {
+    const getCodeDiff = (classNodeId, codeNode) => {
         if (isCandidateDiff && candidateDirty) {
             message.warning(copy.saveBeforeClose);
             return false;
@@ -923,11 +1032,13 @@ const DebloatingPage = () => {
         setDiffDrawerOpen(true);
         setLoadingCode(true)
 
-        const candidateReady = confirmEnabled
-            && (selectedType === "delete" || selectedType === "edit" || selectedType === "add");
+        const candidateReady = shouldShowCandidateDiff(confirmEnabled, selectedType, codeNode);
 
         if (candidateReady) {
-            API.getCandidateDiff(classNodeId, selectedType, activeRunId)
+            const candidateRequest = codeNode?.type === "Modify" || codeNode?.type === "Staged"
+                ? API.getCandidateDiff(classNodeId, selectedType, activeRunId)
+                : API.getManualCandidate(classNodeId, selectedType, activeRunId);
+            candidateRequest
                 .then((data) => {
                     const restoredDraft = loadCandidateDraft(activeRunId, data);
                     setCandidateFile(data);
@@ -1031,6 +1142,14 @@ const DebloatingPage = () => {
                     return currentDraft;
                 });
                 setCodeDiff(data.diff || '');
+                setGraphData((current) => current ? {
+                    ...current,
+                    nodes: (current.nodes || []).map((node) => (
+                        String(node.id) === String(selectedCodeNodeId)
+                            ? {...node, type: data.diff?.trim() ? 'Modify' : 'Default'}
+                            : node
+                    )),
+                } : current);
                 setSavingCandidate(false);
                 removeCandidateDraft(activeRunId, candidateFile.key);
                 message.success(copy.candidateSaved);
@@ -1049,11 +1168,19 @@ const DebloatingPage = () => {
         }
 
         setStagingCandidate(true);
-            API.stageCandidateFile(candidateFile.key, activeRunId)
+        API.stageCandidateFile(candidateFile.key, activeRunId)
             .then((status) => {
                 setGitStatus(status || EMPTY_GIT_STATUS);
                 setStagingCandidate(false);
                 setCandidateFile((current) => current ? {...current, warning: null} : current);
+                setGraphData((current) => current ? {
+                    ...current,
+                    nodes: (current.nodes || []).map((node) => (
+                        String(node.id) === String(selectedCodeNodeId)
+                            ? {...node, type: 'Staged'}
+                            : node
+                    )),
+                } : current);
                 removeCandidateDraft(activeRunId, candidateFile.key);
                 message.success(copy.candidateStaged);
             })
@@ -1061,6 +1188,31 @@ const DebloatingPage = () => {
                 setStagingCandidate(false);
                 message.error(errorMessage(error, copy.failedStageCandidate));
             });
+    };
+
+    const revertCandidateDiff = () => {
+        if (!candidateFile || revertingCandidate || candidateDirty) return;
+
+        setRevertingCandidate(true);
+        API.revertCandidateFile(candidateFile.key, activeRunId)
+            .then((status) => {
+                setGitStatus(status || EMPTY_GIT_STATUS);
+                removeCandidateDraft(activeRunId, candidateFile.key);
+                resetGraphDiffDrawer();
+                message.success(copy.candidateReverted);
+                const graphRequest = selectedType === 'delete'
+                    ? API.getMinGraphData(selectedFeatureItem?.featureId, activeRunId)
+                    : API.getNewGraphData(activeRunId);
+                return graphRequest
+                    .then(setGraphData)
+                    .catch((error) => {
+                        message.error(errorMessage(error, copy.failedFetchGeneratedGraph));
+                    });
+            })
+            .catch((error) => {
+                message.error(errorMessage(error, copy.failedRevertCandidate));
+            })
+            .finally(() => setRevertingCandidate(false));
     };
 
     const [modal, contextHolder] = Modal.useModal();
@@ -1077,6 +1229,7 @@ const DebloatingPage = () => {
         setCandidateDraft('');
         setCandidateDirty(false);
         setStagingCandidate(false);
+        setRevertingCandidate(false);
     };
 
     const handleGraphBackgroundClick = (clearGraphSelection) => {
@@ -2001,9 +2154,11 @@ const DebloatingPage = () => {
             const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
             setGitStatus(result.status || EMPTY_GIT_STATUS);
             resetGraphDiffDrawer();
-            if (result.commitScope === 'COMPLETE') {
+            if (result.commitScope === 'COMPLETE' || selectedType === 'edit' || selectedType === 'add') {
                 await finishCompleteCommit(result);
-                message.success(copy.completeCommitSuccess);
+                message.success(result.commitScope === 'COMPLETE'
+                    ? copy.completeCommitSuccess
+                    : copy.partialCommitSuccess);
             } else {
                 if (selectedType === 'delete' && !isPythonProject) {
                     getFeatureGraphData(selectedFeatureItem?.featureId, 'delete');
@@ -2057,15 +2212,22 @@ const DebloatingPage = () => {
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
     const stagedFileCount = gitStatus.stagedPaths?.length || 0;
-    const candidateIsStaged = Boolean(
+    const candidateHasStagedChanges = Boolean(
         candidateFile?.path && gitStatus.stagedPaths?.includes(candidateFile.path)
     );
+    const candidateIsFullyStaged = candidateHasStagedChanges
+        && !gitStatus.unstagedPaths?.includes(candidateFile.path);
+    const candidateHasChanges = Boolean(candidateFile?.diff?.trim());
+    const candidateDiffFiles = useMemo(() => candidateFile ? [{
+        ...candidateFile,
+        status: candidateFile.newFile ? 'A' : candidateFile.deleted ? 'D' : 'M',
+    }] : [], [candidateFile]);
 
     useEffect(() => {
         const candidateReady = confirmEnabled
             && (selectedType === "delete" || selectedType === "edit" || selectedType === "add")
             && Array.isArray(graphData?.nodes)
-            && graphData.nodes.some((node) => node?.type === "Modify");
+            && graphData.nodes.length > 0;
         if (candidateReady) {
             loadGitDiffEditor();
         }
@@ -2431,7 +2593,7 @@ const DebloatingPage = () => {
                                             type="primary"
                                             icon={<SaveOutlined/>}
                                             loading={savingCandidate}
-                                            disabled={!candidateDirty || candidateIsStaged}
+                                            disabled={!candidateDirty || candidateHasStagedChanges}
                                             onClick={() => saveCandidateDiff()}
                                         >
                                             {savingCandidate ? copy.savingCandidate : copy.saveCandidate}
@@ -2453,28 +2615,33 @@ const DebloatingPage = () => {
                             <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
                                 {isCandidateDiff && candidateFile ? (
                                     <div className={styles.candidateDiffWorkspace}>
-                                        <div className={styles.gitDiffMeta}>
-                                            <DiffOutlined/>
-                                            <span>{copy.gitGeneratedDiff}</span>
-                                            {candidateFile.newFile && <span className={styles.diffStatus}>A</span>}
-                                            {candidateFile.deleted && <span className={styles.diffStatusDanger}>D</span>}
-                                        </div>
                                         {candidateFile.warning && (
                                             <Alert type="warning" showIcon message={candidateFile.warning}/>
                                         )}
                                         <div className={styles.candidateEditorView}>
-                                            <React.Suspense fallback={<div className={styles.emptyDiff}>{copy.fetchingCode}</div>}>
-                                                <GitDiffEditor
-                                                    file={candidateFile}
-                                                    value={candidateDraft}
-                                                    onChange={(value) => {
-                                                        setCandidateDraft(value);
-                                                        setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
-                                                    }}
-                                                    onSave={saveCandidateDiff}
-                                                    readOnly={candidateIsStaged}
-                                                />
-                                            </React.Suspense>
+                                            <CodeDiffComponent
+                                                files={candidateDiffFiles}
+                                                value={candidateDraft}
+                                                onChange={(value) => {
+                                                    const nodeType = candidateNodeTypeForDraft(
+                                                        candidateFile,
+                                                        value,
+                                                        candidateIsFullyStaged
+                                                    );
+                                                    setCandidateDraft(value);
+                                                    setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
+                                                    setGraphData((current) => current ? {
+                                                        ...current,
+                                                        nodes: (current.nodes || []).map((node) => (
+                                                            String(node.id) === String(selectedCodeNodeId)
+                                                                ? {...node, type: nodeType}
+                                                                : node
+                                                        )),
+                                                    } : current);
+                                                }}
+                                                onSave={saveCandidateDiff}
+                                                readOnly={candidateHasStagedChanges}
+                                            />
                                         </div>
                                     </div>
                                 ) : isRepositoryDiff && repositoryDiffError ? (
@@ -2491,7 +2658,8 @@ const DebloatingPage = () => {
                                     <Tooltip
                                         title={candidateDirty
                                             ? copy.saveBeforeApply
-                                            : !confirmEnabled ? copy.noSubmittedChanges : ""}
+                                            : !candidateHasChanges ? copy.noCandidateChanges
+                                                : !confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
                                         <div className={styles.centerButtonWrapper}>
                                             <Button
@@ -2501,13 +2669,27 @@ const DebloatingPage = () => {
                                                 disabled={!confirmEnabled
                                                     || candidateDirty
                                                     || savingCandidate
-                                                    || candidateIsStaged}
+                                                    || !candidateHasChanges
+                                                    || candidateIsFullyStaged}
                                                 onClick={stageCandidateDiff}
                                             >
-                                                {candidateIsStaged
+                                                {candidateIsFullyStaged
                                                     ? copy.fileStaged
                                                     : stagingCandidate ? copy.stagingFile : copy.confirmFile}
                                             </Button>
+                                            {(selectedType === 'delete' || selectedType === 'edit' || selectedType === 'add') && (
+                                                <Button
+                                                    danger
+                                                    icon={<UndoOutlined/>}
+                                                    loading={revertingCandidate}
+                                                    disabled={candidateDirty
+                                                        || savingCandidate
+                                                        || stagingCandidate}
+                                                    onClick={revertCandidateDiff}
+                                                >
+                                                    {revertingCandidate ? copy.revertingFile : copy.revertFile}
+                                                </Button>
+                                            )}
                                         </div>
                                     </Tooltip>
                                 )}

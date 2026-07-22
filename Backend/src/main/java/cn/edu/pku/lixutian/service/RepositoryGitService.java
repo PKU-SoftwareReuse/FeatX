@@ -50,8 +50,9 @@ public class RepositoryGitService {
         List<String> pendingCandidatePaths = candidateCodeService.pendingCandidateProjectPaths();
         List<String> committedCandidatePaths = candidateCodeService.committedCandidateProjectPaths();
         Set<String> stagedSet = new LinkedHashSet<>(stagedPaths);
+        Set<String> unstagedSet = new LinkedHashSet<>(unstagedPaths);
         List<String> unstagedCandidatePaths = pendingCandidatePaths.stream()
-                .filter(path -> !stagedSet.contains(path))
+                .filter(path -> !stagedSet.contains(path) || unstagedSet.contains(path))
                 .toList();
 
         GitWorkspaceStatusResult result = new GitWorkspaceStatusResult();
@@ -74,6 +75,34 @@ public class RepositoryGitService {
             repositoryRoot();
             CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
             stagePathsLocked(List.of(candidate.path()));
+            candidateCodeService.markStaged(candidate.key());
+            return statusLocked();
+        }
+    }
+
+    public GitWorkspaceStatusResult revertCandidate(String key) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            String relativePath = candidateCodeService.requireCandidateProjectPath(key);
+            validateRepositoryPath(repository, relativePath);
+            String normalizedPath = normalizePath(relativePath);
+
+            runGit(repository, List.of("git", "reset", "-q", "HEAD", "--", normalizedPath), 0);
+            int trackedAtHead = gitExitCode(
+                    repository,
+                    List.of("git", "cat-file", "-e", "HEAD:" + normalizedPath)
+            );
+            if (trackedAtHead == 0) {
+                runGit(repository, List.of(
+                        "git", "restore", "--source=HEAD", "--worktree", "--", normalizedPath
+                ), 0);
+            } else if (trackedAtHead == 1 || trackedAtHead == 128) {
+                Files.deleteIfExists(repository.resolve(normalizedPath).normalize());
+            } else {
+                throw new IOException("Unable to determine whether the candidate file exists at HEAD.");
+            }
+
+            candidateCodeService.discardCandidate(key);
             return statusLocked();
         }
     }
@@ -81,6 +110,37 @@ public class RepositoryGitService {
     public void stagePaths(Collection<String> relativePaths) throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
             stagePathsLocked(relativePaths);
+        }
+    }
+
+    public void replaceStagedPaths(Collection<String> relativePaths) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            runGit(repository, List.of("git", "reset", "-q", "HEAD", "--", "."), 0);
+            stagePathsLocked(relativePaths);
+        }
+    }
+
+    public Map<String, String> readIndexContents(Collection<String> relativePaths)
+            throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            Map<String, String> contents = new java.util.LinkedHashMap<>();
+            for (String relativePath : new LinkedHashSet<>(relativePaths)) {
+                validateRepositoryPath(repository, relativePath);
+                String normalizedPath = normalizePath(relativePath);
+                String indexEntry = runGit(repository, List.of(
+                        "git", "ls-files", "--stage", "--", normalizedPath
+                ), 0);
+                if (indexEntry.isBlank()) {
+                    contents.put(normalizedPath, null);
+                } else {
+                    contents.put(normalizedPath, runGit(repository, List.of(
+                            "git", "show", ":" + normalizedPath
+                    ), 0));
+                }
+            }
+            return contents;
         }
     }
 
@@ -253,4 +313,20 @@ public class RepositoryGitService {
         }
         return output;
     }
+
+    private int gitExitCode(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
+        Process process = new ProcessBuilder(command)
+                .directory(workingDirectory.toFile())
+                .redirectErrorStream(true)
+                .start();
+        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
+        if (!exited) {
+            process.destroyForcibly();
+            process.waitFor(10, TimeUnit.SECONDS);
+            throw new IOException("Git command timed out.");
+        }
+        process.getInputStream().readAllBytes();
+        return process.exitValue();
+    }
+
 }

@@ -49,6 +49,7 @@ const GraphOption = {
         // Interface: {background: '#F2FCF3', border: '#208A3C', highlight: '#C9E6CA'},
         // Field: {background: '#FEF3E6', border: '#FF9800', highlight: '#F5CBA5'},
         Modify: {background: '#FFEBEE', border: '#D32F2F', highlight: '#F5B7B1'},
+        Staged: {background: '#FFF4CC', border: '#D99A00', highlight: '#FFE08A'},
         // StaticInitializer: {background: '#E7E3FF', border: '#5E35B1', highlight: '#C2B7F0'},
     },
 }

@@ -44,6 +44,7 @@ test.each([false, true])("always uses the unified inline diff layout (readOnly=%
 
     expect(diffEditorProps.options.renderSideBySide).toBe(false);
     expect(diffEditorProps.options.enableSplitViewResizing).toBe(false);
+    expect(diffEditorProps.options.renderMarginRevertIcon).toBe(!readOnly);
     expect(diffEditorProps.options.readOnly).toBe(readOnly);
     expect(originalEditor.updateOptions).toHaveBeenCalledWith(expect.objectContaining({
         lineNumbers: "off",

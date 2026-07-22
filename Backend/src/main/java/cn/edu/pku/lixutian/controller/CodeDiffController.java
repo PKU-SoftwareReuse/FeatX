@@ -192,6 +192,32 @@ public class CodeDiffController {
         }
     }
 
+    @GetMapping("/manualCandidate")
+    public CodeFileDiffResult manualCandidate(
+            @RequestParam String classId,
+            @RequestParam String operation,
+            @RequestParam(required = false) String runId
+    ) throws IOException, InterruptedException {
+        if (classId == null || classId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Class or file id is required.");
+        }
+        try {
+            agentRunRegistry.requireCompletedOperation(runId, operation);
+            if (ProjectState.getInstance().isPython()) {
+                String filePath = CodeMapService.resolvePythonNodeToFile(classId);
+                return candidateCodeService.prepareManualPythonCandidate(filePath);
+            }
+            String javaFilePath = classId.endsWith(".java")
+                    ? JavaFilePath.normalize(classId)
+                    : JavaFilePath.fromClassName(classId);
+            return candidateCodeService.prepareManualJavaCandidate(javaFilePath);
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
+        } catch (IllegalStateException exception) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, exception.getMessage(), exception);
+        }
+    }
+
     @PutMapping("/candidateDiff")
     public CodeFileDiffResult updateCandidateDiff(@RequestBody UpdateCodeFileRequest request)
             throws IOException, InterruptedException {

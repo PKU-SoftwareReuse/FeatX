@@ -14,9 +14,12 @@ const normalizePath = (path) => {
 };
 
 const inferLanguage = (path, parsedLanguage) => {
+    const javaClassId = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/.test(path)
+        && /(?:^|\.)[A-Z_$][\w$]*$/.test(path);
+    if (javaClassId) return "java";
     if (parsedLanguage && parsedLanguage !== "plaintext") return parsedLanguage;
     const extension = path.split(".").pop()?.toLowerCase();
-    return {
+    const extensionLanguage = {
         java: "java",
         js: "javascript",
         jsx: "javascript",
@@ -29,7 +32,10 @@ const inferLanguage = (path, parsedLanguage) => {
         xml: "xml",
         yml: "yaml",
         yaml: "yaml",
-    }[extension] || "plaintext";
+    }[extension];
+    if (extensionLanguage) return extensionLanguage;
+
+    return "plaintext";
 };
 
 const buildFileContents = (file) => {
@@ -103,10 +109,24 @@ export const buildReadOnlyDiffFiles = (diffText, isPlainCode = false) => {
     }
 };
 
-const CodeDiffComponent = ({diffText, isPlainCode = false, showFileHeader = true}) => {
+const CodeDiffComponent = ({
+    diffText,
+    files: providedFiles,
+    isPlainCode = false,
+    showFileHeader = true,
+    value,
+    onChange,
+    onSave,
+    readOnly = true,
+}) => {
     const files = useMemo(
-        () => buildReadOnlyDiffFiles(diffText, isPlainCode),
-        [diffText, isPlainCode]
+        () => (providedFiles || buildReadOnlyDiffFiles(diffText, isPlainCode)).map((file, index) => ({
+            ...file,
+            key: file.key || `${index}:${file.path || "File"}`,
+            path: file.path || `File ${index + 1}`,
+            language: inferLanguage(file.path || "", file.language),
+        })),
+        [diffText, isPlainCode, providedFiles]
     );
     const [selectedKey, setSelectedKey] = useState(null);
 
@@ -153,8 +173,10 @@ const CodeDiffComponent = ({diffText, isPlainCode = false, showFileHeader = true
                 <React.Suspense fallback={<div className={styles.loading}>Loading preview...</div>}>
                     <GitDiffEditor
                         file={selectedFile}
-                        value={selectedFile.modifiedContent}
-                        readOnly
+                        value={files.length === 1 ? value : selectedFile.modifiedContent}
+                        onChange={files.length === 1 ? onChange : undefined}
+                        onSave={files.length === 1 ? onSave : undefined}
+                        readOnly={readOnly || files.length > 1}
                     />
                 </React.Suspense>
             </div>

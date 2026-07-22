@@ -218,6 +218,11 @@ const API = {
             params: {classId, operation, runId}
         }).then(response => response.data);
     },
+    getManualCandidate: (classId, operation, runId) => {
+        return http.get(`${BASE_URL}/code/manualCandidate`, {
+            params: {classId, operation, runId}
+        }).then(response => response.data);
+    },
     updateCandidateDiff: (key, operation, content, runId) => {
         return http.put(`${BASE_URL}/code/candidateDiff`, {
             key,
@@ -232,6 +237,10 @@ const API = {
     },
     stageCandidateFile: (key, runId) => {
         return http.post(`${BASE_URL}/code/git/stage`, {key, runId})
+            .then(response => response.data);
+    },
+    revertCandidateFile: (key, runId) => {
+        return http.post(`${BASE_URL}/code/git/revert`, {key, runId})
             .then(response => response.data);
     },
     commitFeatureChanges: (operation, commitMessage, runId) => {

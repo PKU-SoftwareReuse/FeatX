@@ -523,6 +523,14 @@ public class CodeMapService {
                     }
                 });
 
+        // Manual edits may add candidates outside the feature's original delete graph.
+        for (String candidateKey : ProjectState.getInstance().getModifications().keySet()) {
+            Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(candidateKey);
+            if (editedContent.isPresent()) {
+                RewriteFileHelper.rewriteJavaFileContent(JavaFilePath.normalize(candidateKey), editedContent.get());
+            }
+        }
+
         // 4. 重建SKG
         ProjectState.getInstance().setForcePreprocessOption(true);
         processService.process();

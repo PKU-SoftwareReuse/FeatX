@@ -9,6 +9,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -41,6 +42,19 @@ class FeatureGitControllerTest {
                         .contentType("application/json")
                         .content("{}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void revertReturnsUpdatedWorkspaceState() throws Exception {
+        GitWorkspaceStatusResult result = new GitWorkspaceStatusResult();
+        result.setCommitScope("NONE");
+        when(workflowService.revertCandidate(eq("src/Demo.java"), eq("run-1"))).thenReturn(result);
+
+        mockMvc.perform(post("/code/git/revert")
+                        .contentType("application/json")
+                        .content("{\"key\":\"src/Demo.java\",\"runId\":\"run-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commitScope").value("NONE"));
     }
 
     @Test

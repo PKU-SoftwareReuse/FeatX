@@ -31,7 +31,6 @@ import java.util.stream.Stream;
 @Service
 public class CandidateCodeService {
     private static final long MAX_EDITABLE_FILE_BYTES = 2 * 1024 * 1024;
-
     private final Map<Integer, CandidateState> states = new ConcurrentHashMap<>();
 
     public void clear() {
@@ -39,6 +38,7 @@ public class CandidateCodeService {
         state.candidateDocuments.clear();
         state.expectedCandidateKeys.clear();
         state.committedCandidateKeys.clear();
+        state.stagedCandidateKeys.clear();
         state.operationId = null;
     }
 
@@ -71,6 +71,10 @@ public class CandidateCodeService {
         Set<String> keys = allCandidateKeys();
         keys.removeAll(state().committedCandidateKeys);
         return keys;
+    }
+
+    public Set<String> stagedModificationKeys() {
+        return new LinkedHashSet<>(state().stagedCandidateKeys);
     }
 
     public Map<String, String> pendingModificationMap() {
@@ -114,6 +118,112 @@ public class CandidateCodeService {
         }
     }
 
+    public void markStaged(String key) {
+        String normalizedKey = normalizeCandidateKey(key);
+        state().stagedCandidateKeys.add(normalizedKey);
+    }
+
+    public Set<String> candidateKeysForProjectPaths(Collection<String> projectPaths) {
+        if (projectPaths == null || projectPaths.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> normalizedPaths = projectPaths.stream()
+                .filter(Objects::nonNull)
+                .map(this::normalizeProjectPath)
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> keys = new LinkedHashSet<>();
+        for (String key : allCandidateKeys()) {
+            candidateProjectPath(key)
+                    .filter(normalizedPaths::contains)
+                    .ifPresent(ignored -> keys.add(normalizeCandidateKey(key)));
+        }
+        return keys;
+    }
+
+    public List<String> projectPathsForCandidateKeys(Collection<String> keys) {
+        return projectPathsForKeys(keys);
+    }
+
+    public String requireCandidateProjectPath(String key) {
+        return candidateProjectPath(normalizeCandidateKey(key))
+                .orElseThrow(() -> new IllegalStateException("Candidate file path is unavailable for " + key + "."));
+    }
+
+    public Map<String, String> modificationsForKeys(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Set<String> normalizedKeys = keys.stream()
+                .filter(Objects::nonNull)
+                .map(this::normalizeCandidateKey)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Map<String, String> selected = new LinkedHashMap<>();
+        ProjectState.getInstance().getModifications().forEach((key, value) -> {
+            String normalizedKey = normalizeCandidateKey(key);
+            if (normalizedKeys.contains(normalizedKey)) {
+                selected.put(normalizedKey, value);
+            }
+        });
+        return selected;
+    }
+
+    public Map<String, String> adoptStagedCandidateContents(
+            Collection<String> keys,
+            Map<String, String> contentsByProjectPath
+    ) {
+        Map<String, String> selected = new LinkedHashMap<>();
+        for (String key : keys) {
+            String normalizedKey = normalizeCandidateKey(key);
+            CandidateDocument document = state().candidateDocuments.get(normalizedKey);
+            if (document == null) {
+                throw new IllegalStateException("Candidate " + normalizedKey + " has not been reviewed.");
+            }
+            String path = normalizeProjectPath(document.path);
+            if (!contentsByProjectPath.containsKey(path)) {
+                throw new IllegalStateException("The Git index has no staged version for " + path + ".");
+            }
+            String stagedContent = contentsByProjectPath.get(path);
+            document.modifiedContent = stagedContent == null ? "" : stagedContent;
+            document.pending = true;
+            document.authoritative = true;
+            String modification = ProjectState.getInstance().isPython() && stagedContent == null
+                    ? AgentService.DELETE_FILE_SENTINEL
+                    : document.modifiedContent;
+            selected.put(normalizedKey, modification);
+        }
+        ProjectState.getInstance().setModifications(selected);
+        return selected;
+    }
+
+    public void restoreCandidateModifications(Map<String, String> modifications) {
+        Map<String, String> restored = modifications == null
+                ? Collections.emptyMap()
+                : new LinkedHashMap<>(modifications);
+        restored.forEach((key, content) -> {
+            String normalizedKey = normalizeCandidateKey(key);
+            CandidateDocument document = state().candidateDocuments.get(normalizedKey);
+            if (document != null) {
+                document.modifiedContent = AgentService.DELETE_FILE_SENTINEL.equals(content) ? "" : content;
+                document.pending = true;
+                document.authoritative = true;
+            }
+        });
+        ProjectState.getInstance().setModifications(restored);
+    }
+
+    public void discardCandidate(String key) {
+        String normalizedKey = normalizeCandidateKey(key);
+        CandidateState state = state();
+        state.candidateDocuments.remove(normalizedKey);
+        state.expectedCandidateKeys.remove(normalizedKey);
+        state.committedCandidateKeys.remove(normalizedKey);
+        state.stagedCandidateKeys.remove(normalizedKey);
+
+        Map<String, String> modifications = mutableModifications();
+        modifications.entrySet().removeIf(entry -> normalizeCandidateKey(entry.getKey()).equals(normalizedKey));
+        ProjectState.getInstance().setModifications(modifications);
+    }
+
     public void discardCandidateState() {
         clear();
         ProjectState.getInstance().setModifications(Map.of());
@@ -152,7 +262,8 @@ public class CandidateCodeService {
                 modifiedContent,
                 originalExists,
                 true,
-                null
+                null,
+                true
         );
         state().candidateDocuments.put(filePath, document);
         return toResult(document);
@@ -168,6 +279,7 @@ public class CandidateCodeService {
                 ? originalExists ? readEditableFile(sourceFile) : ""
                 : cached.originalContent;
         String modifiedContent = AgentService.DELETE_FILE_SENTINEL.equals(candidateContent) ? "" : candidateContent;
+        boolean pending = !Objects.equals(originalContent, modifiedContent == null ? originalContent : modifiedContent);
         CandidateDocument document = new CandidateDocument(
                 key,
                 projectRelativePath(sourceFile),
@@ -176,9 +288,65 @@ public class CandidateCodeService {
                 modifiedContent == null ? originalContent : modifiedContent,
                 originalExists,
                 true,
-                null
+                null,
+                pending
         );
         state().candidateDocuments.put(key, document);
+        return toResult(document);
+    }
+
+    public CodeFileDiffResult prepareManualJavaCandidate(String classId)
+            throws IOException, InterruptedException {
+        String filePath = JavaFilePath.normalize(classId);
+        CandidateDocument cached = state().candidateDocuments.get(filePath);
+        if (cached != null) {
+            return toResult(cached);
+        }
+        Path sourceFile = RewriteFileHelper.resolveJavaFilePath(filePath).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(sourceFile)) {
+            throw new IllegalStateException("Source file does not exist for " + classId + ".");
+        }
+        String originalContent = readEditableFile(sourceFile);
+        CandidateDocument document = new CandidateDocument(
+                filePath,
+                projectRelativePath(sourceFile),
+                "java",
+                originalContent,
+                originalContent,
+                true,
+                true,
+                null,
+                false
+        );
+        state().candidateDocuments.put(filePath, document);
+        return toResult(document);
+    }
+
+    public CodeFileDiffResult prepareManualPythonCandidate(String relativePath)
+            throws IOException, InterruptedException {
+        String normalizedPath = normalizeProjectPath(relativePath);
+        CandidateDocument cached = state().candidateDocuments.get(normalizedPath);
+        if (cached != null) {
+            return toResult(cached);
+        }
+        Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
+        Path sourceFile = safeResolve(sourceRoot, normalizedPath);
+        if (!Files.isRegularFile(sourceFile)) {
+            throw new IllegalStateException("Source file does not exist for " + relativePath + ".");
+        }
+        String originalContent = readEditableFile(sourceFile);
+        CandidateDocument document = new CandidateDocument(
+                normalizedPath,
+                projectRelativePath(sourceFile),
+                "python",
+                originalContent,
+                originalContent,
+                true,
+                true,
+                null,
+                false
+        );
+        state().candidateDocuments.put(normalizedPath, document);
         return toResult(document);
     }
 
@@ -191,14 +359,29 @@ public class CandidateCodeService {
         if (updatedContent.getBytes(StandardCharsets.UTF_8).length > MAX_EDITABLE_FILE_BYTES) {
             throw new IllegalArgumentException("Candidate file is too large to edit online.");
         }
+        String normalizedInputKey = normalizeCandidateKey(key);
+        if (state().stagedCandidateKeys.contains(normalizedInputKey)) {
+            throw new IllegalStateException("Revert the staged changes for this file before editing it again.");
+        }
 
         if (ProjectState.getInstance().isPython()) {
+            CandidateDocument document = state().candidateDocuments.get(normalizedInputKey);
+            if (document == null) {
+                throw new IllegalStateException("Open the candidate diff before saving it.");
+            }
             Map<String, String> modifications = mutableModifications();
-            modifications.put(key, updatedContent.isEmpty() && "delete".equalsIgnoreCase(operation)
-                    ? AgentService.DELETE_FILE_SENTINEL
-                    : updatedContent);
+            if (Objects.equals(document.originalContent, updatedContent)) {
+                modifications.entrySet().removeIf(entry ->
+                        normalizeCandidateKey(entry.getKey()).equals(normalizedInputKey));
+                state().expectedCandidateKeys.remove(normalizedInputKey);
+            } else {
+                modifications.put(normalizedInputKey, updatedContent.isEmpty() && "delete".equalsIgnoreCase(operation)
+                        ? AgentService.DELETE_FILE_SENTINEL
+                        : updatedContent);
+            }
             ProjectState.getInstance().setModifications(modifications);
-            return preparePythonCandidate(key, key, modifications.get(key));
+            return preparePythonCandidate(normalizedInputKey, normalizedInputKey,
+                    modifications.getOrDefault(normalizedInputKey, updatedContent));
         }
 
         String normalizedKey = JavaFilePath.normalize(key);
@@ -213,12 +396,18 @@ public class CandidateCodeService {
             StaticJavaParser.parse(updatedContent);
         }
         document.modifiedContent = updatedContent;
+        document.pending = !Objects.equals(document.originalContent, updatedContent);
         document.authoritative = true;
         document.warning = null;
 
         Map<String, String> modifications = mutableModifications();
-        modifications.remove(key);
-        modifications.put(normalizedKey, updatedContent);
+        modifications.entrySet().removeIf(entry ->
+                normalizeCandidateKey(entry.getKey()).equals(normalizedKey));
+        if (document.pending) {
+            modifications.put(normalizedKey, updatedContent);
+        } else {
+            state().expectedCandidateKeys.remove(normalizedKey);
+        }
         ProjectState.getInstance().setModifications(modifications);
         return toResult(document);
     }
@@ -239,7 +428,16 @@ public class CandidateCodeService {
      * and parses Java source with the JavaParser bundled with this service.</p>
      */
     public void validateCompleteCandidateSet() {
-        Set<String> keys = allCandidateKeys();
+        validateCandidateSet(allCandidateKeys());
+    }
+
+    public void validateCandidateSet(Collection<String> candidateKeys) {
+        Set<String> keys = candidateKeys == null
+                ? Collections.emptySet()
+                : candidateKeys.stream()
+                .filter(Objects::nonNull)
+                .map(this::normalizeCandidateKey)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         if (keys.isEmpty()) {
             throw new IllegalStateException("There are no generated candidates to commit.");
         }
@@ -308,10 +506,11 @@ public class CandidateCodeService {
         if (key == null || key.isBlank()) {
             throw new IllegalArgumentException("Candidate file key is required.");
         }
-        if (state().committedCandidateKeys.contains(key)) {
+        String normalizedKey = normalizeCandidateKey(key);
+        if (state().committedCandidateKeys.contains(normalizedKey)) {
             throw new IllegalStateException("This candidate file has already been committed.");
         }
-        CandidateDocument document = state().candidateDocuments.get(key);
+        CandidateDocument document = state().candidateDocuments.get(normalizedKey);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before confirming the file.");
         }
@@ -319,6 +518,9 @@ public class CandidateCodeService {
             throw new IllegalStateException(
                     "This candidate is not ready. Review and save it before staging."
             );
+        }
+        if (!document.pending) {
+            throw new IllegalStateException("Edit and save this file before staging it.");
         }
 
         Path projectRoot = projectRoot();
@@ -345,9 +547,21 @@ public class CandidateCodeService {
         CandidateState state = state();
         Set<String> keys = new LinkedHashSet<>(state.expectedCandidateKeys);
         keys.addAll(ProjectState.getInstance().getModifications().keySet());
-        keys.addAll(state.candidateDocuments.keySet());
+        state.candidateDocuments.values().stream()
+                .filter(document -> document.pending)
+                .map(document -> document.key)
+                .forEach(keys::add);
         keys.removeIf(key -> key == null || key.isBlank());
         return keys;
+    }
+
+    private String normalizeCandidateKey(String key) {
+        if (key == null) {
+            return "";
+        }
+        return ProjectState.getInstance().isPython()
+                ? normalizeProjectPath(key)
+                : JavaFilePath.normalize(key);
     }
 
     private List<String> projectPathsForKeys(Collection<String> keys) {
@@ -526,6 +740,7 @@ public class CandidateCodeService {
         private final boolean originalExists;
         private boolean authoritative;
         private String warning;
+        private boolean pending;
 
         private CandidateDocument(
                 String key,
@@ -535,7 +750,8 @@ public class CandidateCodeService {
                 String modifiedContent,
                 boolean originalExists,
                 boolean authoritative,
-                String warning
+                String warning,
+                boolean pending
         ) {
             this.key = key;
             this.path = path;
@@ -545,6 +761,7 @@ public class CandidateCodeService {
             this.originalExists = originalExists;
             this.authoritative = authoritative;
             this.warning = warning;
+            this.pending = pending;
         }
     }
 
@@ -552,6 +769,7 @@ public class CandidateCodeService {
         private final Map<String, CandidateDocument> candidateDocuments = new ConcurrentHashMap<>();
         private final Set<String> expectedCandidateKeys = ConcurrentHashMap.newKeySet();
         private final Set<String> committedCandidateKeys = ConcurrentHashMap.newKeySet();
+        private final Set<String> stagedCandidateKeys = ConcurrentHashMap.newKeySet();
         private volatile String operationId;
     }
 }

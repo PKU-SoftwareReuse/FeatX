@@ -25,7 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class FeatureGitWorkflowServiceTest {
@@ -40,7 +39,7 @@ class FeatureGitWorkflowServiceTest {
     }
 
     @Test
-    void stagesOneFileThenCreatesPartialAndCompleteCommits(@TempDir Path repository) throws Exception {
+    void partialCommitAppliesStagedFileAndDiscardsRemainingCandidates(@TempDir Path repository) throws Exception {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
         RepositoryGitService gitService = new RepositoryGitService(candidateService);
@@ -60,26 +59,19 @@ class FeatureGitWorkflowServiceTest {
         assertEquals("PARTIAL", stagedFirst.getCommitScope());
         assertEquals(java.util.List.of("first.py"), stagedFirst.getStagedPaths());
         assertEquals(java.util.List.of("second.py"), stagedFirst.getUnstagedCandidatePaths());
-
-        GitCommitResult partial = workflow.commit("edit", null, runId);
-        assertEquals("PARTIAL", partial.getCommitScope());
-        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
-        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
-        assertEquals(java.util.List.of("second.py"), partial.getStatus().getPendingCandidatePaths());
-        verifyNoInteractions(codeMapService);
-
-        GitWorkspaceStatusResult stagedSecond = workflow.stageCandidate("second.py", runId);
-        assertEquals("COMPLETE", stagedSecond.getCommitScope());
         when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
                 .thenReturn(7);
 
-        GitCommitResult complete = workflow.commit("edit", null, runId);
-        assertEquals("COMPLETE", complete.getCommitScope());
-        assertEquals(7, complete.getFeatureId());
-        assertTrue(complete.getStatus().getStagedPaths().isEmpty());
-        assertTrue(complete.getStatus().getPendingCandidatePaths().isEmpty());
+        GitCommitResult partial = workflow.commit("edit", null, runId);
+        assertEquals("PARTIAL", partial.getCommitScope());
+        assertEquals(7, partial.getFeatureId());
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
+        assertTrue(partial.getStatus().getStagedPaths().isEmpty());
+        assertTrue(partial.getStatus().getPendingCandidatePaths().isEmpty());
         assertTrue(ProjectState.getInstance().getModifications().isEmpty());
-        assertEquals("3", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        assertFalse(runRegistry.hasActiveOperation(52));
+        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
         verify(codeMapService).modifyFeatureFromMemoryAndDatabase(
                 7,
                 "updated feature",
@@ -88,7 +80,61 @@ class FeatureGitWorkflowServiceTest {
     }
 
     @Test
-    void discardKeepsPartialCommitAndIgnoredPreprocessOutput(@TempDir Path repository) throws Exception {
+    void completeCommitAppliesEveryStagedCandidate(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        TestRun run = completedEditRun();
+        AgentRunRegistry runRegistry = run.registry();
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                codeMapService,
+                runRegistry
+        );
+        selectFeatureForEdit();
+        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
+                .thenReturn(7);
+
+        workflow.stageCandidate("first.py", run.runId());
+        GitWorkspaceStatusResult stagedAll = workflow.stageCandidate("second.py", run.runId());
+        assertEquals("COMPLETE", stagedAll.getCommitScope());
+
+        GitCommitResult complete = workflow.commit("edit", null, run.runId());
+
+        assertEquals("COMPLETE", complete.getCommitScope());
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second changed')\n", Files.readString(repository.resolve("second.py")));
+        assertTrue(complete.getStatus().getPendingCandidatePaths().isEmpty());
+        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
+    }
+
+    @Test
+    void revertsOneCandidateWithoutEndingTheOperation(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        TestRun run = completedEditRun();
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                mock(CodeMapService.class),
+                run.registry()
+        );
+
+        workflow.stageCandidate("first.py", run.runId());
+        GitWorkspaceStatusResult reverted = workflow.revertCandidate("first.py", run.runId());
+
+        assertEquals("print('first')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals(java.util.List.of("second.py"), reverted.getPendingCandidatePaths());
+        assertTrue(reverted.getStagedPaths().isEmpty());
+        assertEquals(Set.of("second.py"), run.registry().modifications(run.runId()).keySet());
+        assertTrue(run.registry().hasActiveOperation(52));
+    }
+
+    @Test
+    void discardRestoresAllCandidatesAndKeepsIgnoredPreprocessOutput(@TempDir Path repository) throws Exception {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
         RepositoryGitService gitService = new RepositoryGitService(candidateService);
@@ -104,8 +150,6 @@ class FeatureGitWorkflowServiceTest {
         selectFeatureForEdit();
 
         workflow.stageCandidate("first.py", runId);
-        workflow.commit("edit", null, runId);
-        workflow.stageCandidate("second.py", runId);
         Files.writeString(repository.resolve("notes.txt"), "untracked\n");
         Path ignoredOutput = repository.resolve("preprocess1/report.csv");
         Files.createDirectories(ignoredOutput.getParent());
@@ -113,14 +157,14 @@ class FeatureGitWorkflowServiceTest {
 
         GitWorkspaceStatusResult discarded = workflow.discard();
 
-        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('first')\n", Files.readString(repository.resolve("first.py")));
         assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
         assertFalse(Files.exists(repository.resolve("notes.txt")));
         assertTrue(Files.exists(ignoredOutput));
         assertTrue(discarded.getStagedPaths().isEmpty());
         assertTrue(discarded.getUnstagedPaths().isEmpty());
         assertTrue(discarded.getUntrackedPaths().isEmpty());
-        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        assertEquals("1", runGit(repository, "rev-list", "--count", "HEAD").trim());
     }
 
     @Test

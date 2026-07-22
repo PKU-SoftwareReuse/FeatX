@@ -8,6 +8,8 @@ Py
 out
 repos
 RepoSummary/output
+models
+codex-workplace
 **/*.iml
 
 **/node_modules

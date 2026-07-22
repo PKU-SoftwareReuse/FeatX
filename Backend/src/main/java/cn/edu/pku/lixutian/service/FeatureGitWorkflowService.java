@@ -11,9 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -45,6 +47,16 @@ public class FeatureGitWorkflowService {
         return repositoryGitService.stageCandidate(key);
     }
 
+    public GitWorkspaceStatusResult revertCandidate(String key, String runId) throws IOException, InterruptedException {
+        agentRunRegistry.requireCompletedIfActive(runId);
+        GitWorkspaceStatusResult result = repositoryGitService.revertCandidate(key);
+        agentRunRegistry.replaceCompletedModifications(
+                runId,
+                new LinkedHashMap<>(ProjectState.getInstance().getModifications())
+        );
+        return result;
+    }
+
     @Transactional(rollbackFor = Exception.class)
     public GitCommitResult commit(String operation, String requestedMessage, String runId)
             throws IOException, InterruptedException, ParseException {
@@ -61,6 +73,80 @@ public class FeatureGitWorkflowService {
             throws IOException, InterruptedException, ParseException {
         String normalizedOperation = normalizeOperation(operation);
         AgentRunContext agentRun = agentRunRegistry.requireCompletedOperation(runId, normalizedOperation);
+        if (!"delete".equals(normalizedOperation)) {
+            return commitAddOrEdit(normalizedOperation, requestedMessage, runId, agentRun);
+        }
+
+        return commitDelete(requestedMessage, agentRun);
+    }
+
+    private GitCommitResult commitAddOrEdit(
+            String operation,
+            String requestedMessage,
+            String runId,
+            AgentRunContext agentRun
+    ) throws IOException, InterruptedException, ParseException {
+        GitWorkspaceStatusResult before = repositoryGitService.status();
+        Set<String> stagedKeys = candidateCodeService.candidateKeysForProjectPaths(before.getStagedPaths());
+        if (stagedKeys.isEmpty()) {
+            throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");
+        }
+
+        boolean complete = "COMPLETE".equals(before.getCommitScope());
+        String commitScope = complete ? "COMPLETE" : "PARTIAL";
+
+        Map<String, String> allModifications = new LinkedHashMap<>(ProjectState.getInstance().getModifications());
+        List<String> candidatePaths = candidateCodeService.projectPathsForCandidateKeys(stagedKeys);
+        Map<String, String> stagedContents = repositoryGitService.readIndexContents(candidatePaths);
+
+        Integer featureId;
+        String commitHash;
+        boolean committed = false;
+        try {
+            Map<String, String> selectedModifications = candidateCodeService.adoptStagedCandidateContents(
+                    stagedKeys,
+                    stagedContents
+            );
+            if (selectedModifications.isEmpty()) {
+                throw new IllegalStateException("The staged files are not part of the active feature operation.");
+            }
+            candidateCodeService.validateCandidateSet(stagedKeys);
+            agentRunRegistry.replaceCompletedModifications(runId, selectedModifications);
+            featureId = confirmFeatureOperation(operation, agentRun);
+            for (String stagedKey : stagedKeys) {
+                candidateCodeService.materializeCandidate(stagedKey);
+            }
+            repositoryGitService.replaceStagedPaths(candidatePaths);
+            GitWorkspaceStatusResult readyToCommit = repositoryGitService.status();
+            if (readyToCommit.getStagedPaths().isEmpty()) {
+                throw new IllegalStateException("There are no staged changes to commit.");
+            }
+            commitHash = repositoryGitService.commit(defaultCommitMessage(
+                    requestedMessage,
+                    operation,
+                    commitScope
+            ));
+            committed = true;
+            repositoryGitService.discardUncommittedChanges();
+            agentRunRegistry.clear();
+        } catch (IOException | InterruptedException | ParseException | RuntimeException exception) {
+            if (!committed) {
+                candidateCodeService.restoreCandidateModifications(allModifications);
+                agentRunRegistry.replaceCompletedModifications(runId, allModifications);
+            }
+            throw exception;
+        }
+
+        GitCommitResult result = new GitCommitResult();
+        result.setCommitHash(commitHash);
+        result.setCommitScope(commitScope);
+        result.setFeatureId(featureId);
+        result.setStatus(repositoryGitService.status());
+        return result;
+    }
+
+    private GitCommitResult commitDelete(String requestedMessage, AgentRunContext agentRun)
+            throws IOException, InterruptedException, ParseException {
         GitWorkspaceStatusResult before = repositoryGitService.status();
         if (before.getStagedPaths().isEmpty()) {
             throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");
@@ -70,7 +156,7 @@ public class FeatureGitWorkflowService {
         Integer featureId = null;
         if (complete) {
             candidateCodeService.validateCompleteCandidateSet();
-            featureId = confirmFeatureOperation(normalizedOperation, agentRun);
+            featureId = confirmFeatureOperation("delete", agentRun);
             repositoryGitService.stagePaths(candidateCodeService.allCandidateProjectPaths());
         }
 
@@ -82,7 +168,7 @@ public class FeatureGitWorkflowService {
         String commitScope = complete ? "COMPLETE" : "PARTIAL";
         String commitHash = repositoryGitService.commit(defaultCommitMessage(
                 requestedMessage,
-                normalizedOperation,
+                "delete",
                 commitScope
         ));
         candidateCodeService.markCommittedPaths(committedPaths);

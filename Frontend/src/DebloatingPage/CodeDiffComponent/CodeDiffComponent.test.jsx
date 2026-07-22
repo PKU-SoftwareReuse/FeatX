@@ -40,3 +40,19 @@ new file mode 100644
     expect(files.map((file) => file.path)).toEqual(["a.txt", "b.txt"]);
     expect(files.map((file) => file.status)).toEqual(["M", "A"]);
 });
+
+test("recognizes a fully-qualified Java class id as Java source", () => {
+    const files = buildReadOnlyDiffFiles(`diff --git a/top.naccl.util.comment.CommentUtils b/top.naccl.util.comment.CommentUtils
+--- a/top.naccl.util.comment.CommentUtils
++++ b/top.naccl.util.comment.CommentUtils
+@@ -1 +1 @@
+-public class CommentUtils {}
++public class CommentUtils { int value; }
+`);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+        path: "top.naccl.util.comment.CommentUtils",
+        language: "java",
+    });
+});
