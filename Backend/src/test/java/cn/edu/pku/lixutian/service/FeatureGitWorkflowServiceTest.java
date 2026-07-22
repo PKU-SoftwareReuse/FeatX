@@ -149,6 +149,22 @@ class FeatureGitWorkflowServiceTest {
     }
 
     @Test
+    void unstagingKeepsTheCandidateContentInTheWorktree(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+
+        gitService.stageCandidate("first.py");
+        GitWorkspaceStatusResult unstaged = gitService.unstageCandidate("first.py");
+
+        assertTrue(unstaged.getStagedPaths().isEmpty());
+        assertEquals(java.util.List.of("first.py"), unstaged.getUnstagedPaths());
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertTrue(candidateService.stagedModificationKeys().isEmpty());
+        assertFalse(candidateService.existingCandidate("first.py").orElseThrow().isStaged());
+    }
+
+    @Test
     void revertsOneCandidateWithoutEndingTheOperation(@TempDir Path repository) throws Exception {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);

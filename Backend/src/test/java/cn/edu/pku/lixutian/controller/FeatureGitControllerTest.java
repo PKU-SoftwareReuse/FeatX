@@ -45,6 +45,19 @@ class FeatureGitControllerTest {
     }
 
     @Test
+    void unstageReturnsUpdatedWorkspaceState() throws Exception {
+        GitWorkspaceStatusResult result = new GitWorkspaceStatusResult();
+        result.setCommitScope("NONE");
+        when(workflowService.unstageCandidate(eq("src/Demo.java"), eq("run-1"))).thenReturn(result);
+
+        mockMvc.perform(post("/code/git/unstage")
+                        .contentType("application/json")
+                        .content("{\"key\":\"src/Demo.java\",\"runId\":\"run-1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.commitScope").value("NONE"));
+    }
+
+    @Test
     void revertReturnsUpdatedWorkspaceState() throws Exception {
         GitWorkspaceStatusResult result = new GitWorkspaceStatusResult();
         result.setCommitScope("NONE");

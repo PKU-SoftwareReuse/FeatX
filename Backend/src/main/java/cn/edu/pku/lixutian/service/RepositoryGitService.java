@@ -98,6 +98,19 @@ public class RepositoryGitService {
         }
     }
 
+    public GitWorkspaceStatusResult unstageCandidate(String key) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            String relativePath = candidateCodeService.requireCandidateProjectPath(key);
+            validateRepositoryPath(repository, relativePath);
+            runGit(repository, List.of(
+                    "git", "reset", "-q", "HEAD", "--", normalizePath(relativePath)
+            ), 0);
+            candidateCodeService.markUnstaged(key);
+            return statusLocked();
+        }
+    }
+
     public GitWorkspaceStatusResult revertCandidate(String key) throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
             Path repository = repositoryRoot();

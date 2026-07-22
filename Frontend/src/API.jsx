@@ -239,6 +239,10 @@ const API = {
         return http.post(`${BASE_URL}/code/git/stage`, {key, runId})
             .then(response => response.data);
     },
+    unstageCandidateFile: (key, runId) => {
+        return http.post(`${BASE_URL}/code/git/unstage`, {key, runId})
+            .then(response => response.data);
+    },
     revertCandidateFile: (key, runId) => {
         return http.post(`${BASE_URL}/code/git/revert`, {key, runId})
             .then(response => response.data);

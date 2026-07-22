@@ -283,18 +283,22 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "请先保存编辑，再确认应用。",
         saveBeforeClose: "当前编辑尚未保存。",
         gitGeneratedDiff: "Git 生成的差异",
-        confirmFile: "确认此文件（暂存）",
+        confirmFile: "暂存文件",
         stagingFile: "正在暂存……",
         fileStaged: "此文件已暂存",
         candidateStaged: "文件已写入项目并暂存。",
         failedStageCandidate: "暂存候选文件失败。",
-        noCandidateChanges: "当前文件没有可确认的修改。",
+        unstageFile: "取消暂存",
+        unstagingFile: "正在取消暂存……",
+        candidateUnstaged: "已取消暂存，文件内容保持不变。",
+        failedUnstageCandidate: "取消暂存失败。",
+        noCandidateChanges: "当前文件没有可暂存的修改。",
         revertFile: "撤销此文件",
         revertingFile: "正在撤销……",
         candidateReverted: "此文件的候选修改已撤销。",
         failedRevertCandidate: "撤销候选文件失败。",
-        commitChanges: "提交已确认文件",
-        noStagedFiles: "请先在 Diff Panel 中确认至少一个文件。",
+        commitChanges: "提交已暂存文件",
+        noStagedFiles: "请先在 Diff Panel 中暂存至少一个文件。",
         partialCommitTitle: "确认部分提交",
         completeCommitTitle: "确认全部提交",
         partialCommitDescription: "本次只提交已暂存文件，并同步更新功能数据、CodeMap 和静态分析；其余候选修改将被放弃。",
@@ -376,18 +380,22 @@ const DEBLOATING_COPY = {
         saveBeforeApply: "Save your edits before applying the change.",
         saveBeforeClose: "The current edits have not been saved.",
         gitGeneratedDiff: "Git-generated diff",
-        confirmFile: "Confirm file (stage)",
+        confirmFile: "Stage file",
         stagingFile: "Staging...",
         fileStaged: "File staged",
         candidateStaged: "The file was written to the project and staged.",
         failedStageCandidate: "Failed to stage the candidate file.",
-        noCandidateChanges: "This file has no changes to confirm.",
+        unstageFile: "Unstage file",
+        unstagingFile: "Unstaging...",
+        candidateUnstaged: "The file was unstaged without changing its content.",
+        failedUnstageCandidate: "Failed to unstage the candidate file.",
+        noCandidateChanges: "This file has no changes to stage.",
         revertFile: "Revert this file",
         revertingFile: "Reverting...",
         candidateReverted: "The candidate change for this file was reverted.",
         failedRevertCandidate: "Failed to revert the candidate file.",
-        commitChanges: "Commit confirmed files",
-        noStagedFiles: "Confirm at least one file in the Diff Panel first.",
+        commitChanges: "Commit staged files",
+        noStagedFiles: "Stage at least one file in the Diff Panel first.",
         partialCommitTitle: "Confirm partial commit",
         completeCommitTitle: "Confirm complete commit",
         partialCommitDescription: "Only staged files will be committed and applied to feature data, CodeMap, and static analysis. All other candidates will be discarded.",
@@ -815,6 +823,7 @@ const DebloatingPage = () => {
         setCandidateDirty(false);
         setCandidateSaveError(null);
         setStagingCandidate(false);
+        setUnstagingCandidate(false);
         setRevertingCandidate(false);
         if (selectedType === 'delete') {
             API.getMinGraphData(featureId, runId).then((data) => {
@@ -874,6 +883,7 @@ const DebloatingPage = () => {
     const [requestDraftDirty, setRequestDraftDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
     const [stagingCandidate, setStagingCandidate] = useState(false);
+    const [unstagingCandidate, setUnstagingCandidate] = useState(false);
     const [revertingCandidate, setRevertingCandidate] = useState(false);
     const [gitStatus, setGitStatus] = useState(EMPTY_GIT_STATUS);
     const [loadingConfirm, setLoadingConfirm] = useState(false);
@@ -1208,7 +1218,7 @@ const DebloatingPage = () => {
     }, [candidateDirty, candidateDraft, candidateFile?.key, isCandidateDiff, savingCandidate]);
 
     const stageCandidateDiff = () => {
-        if (!candidateFile || stagingCandidate) return;
+        if (!candidateFile || stagingCandidate || unstagingCandidate) return;
         if (candidateDirty) {
             message.warning(copy.saveBeforeApply);
             return;
@@ -1245,8 +1255,38 @@ const DebloatingPage = () => {
             });
     };
 
+    const unstageCandidateDiff = () => {
+        if (!candidateFile || stagingCandidate || unstagingCandidate) return;
+
+        setUnstagingCandidate(true);
+        API.unstageCandidateFile(candidateFile.key, activeRunId)
+            .then((status) => {
+                const nextCandidateFile = {
+                    ...candidateFile,
+                    staged: false,
+                    stagedContent: null,
+                    warning: null,
+                };
+                setGitStatus(status || EMPTY_GIT_STATUS);
+                setCandidateFile(nextCandidateFile);
+                setGraphData((current) => current ? {
+                    ...current,
+                    nodes: (current.nodes || []).map((node) => (
+                        String(node.id) === String(selectedCodeNodeId)
+                            ? {...node, type: candidateNodeTypeForDraft(nextCandidateFile, candidateDraft)}
+                            : node
+                    )),
+                } : current);
+                message.success(copy.candidateUnstaged);
+            })
+            .catch((error) => {
+                message.error(errorMessage(error, copy.failedUnstageCandidate));
+            })
+            .finally(() => setUnstagingCandidate(false));
+    };
+
     const revertCandidateDiff = () => {
-        if (!candidateFile || revertingCandidate || savingCandidate || stagingCandidate) return;
+        if (!candidateFile || revertingCandidate || savingCandidate || stagingCandidate || unstagingCandidate) return;
 
         autoSaveAttemptRef.current = candidateDraft;
         setCandidateDirty(false);
@@ -1309,6 +1349,7 @@ const DebloatingPage = () => {
         setCandidateDirty(false);
         setCandidateSaveError(null);
         setStagingCandidate(false);
+        setUnstagingCandidate(false);
         setRevertingCandidate(false);
     };
 
@@ -2302,6 +2343,8 @@ const DebloatingPage = () => {
     const candidateDiffersFromStaged = Boolean(candidateFile?.staged)
         && candidateDraft !== (candidateFile.stagedContent ?? '');
     const candidateCanStage = candidateDiffersFromOriginal || candidateDiffersFromStaged;
+    const candidateIsUnchanged = Boolean(candidateFile)
+        && candidateNodeTypeForDraft(candidateFile, candidateDraft) === 'Default';
     const candidateDiffFiles = useMemo(() => candidateFile ? [{
         ...candidateFile,
         status: candidateFile.newFile ? 'A' : candidateFile.deleted ? 'D' : 'M',
@@ -2713,7 +2756,7 @@ const DebloatingPage = () => {
                                                     } : current);
                                                 }}
                                                 onSave={saveCandidateDiff}
-                                                readOnly={false}
+                                                readOnly={candidateIsFullyStaged}
                                             />
                                         </div>
                                     </div>
@@ -2729,38 +2772,53 @@ const DebloatingPage = () => {
                                 )}
                                 {isCandidateDiff && candidateFile && (
                                     <Tooltip
-                                        title={candidateDirty
+                                        title={candidateIsFullyStaged ? "" : candidateDirty
                                             ? copy.saveBeforeApply
                                             : !candidateCanStage ? copy.noCandidateChanges
                                                 : !confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
                                         <div className={styles.centerButtonWrapper}>
-                                            <Button
-                                                type="primary"
-                                                icon={<CheckOutlined/>}
-                                                loading={stagingCandidate}
-                                                disabled={!confirmEnabled
-                                                    || candidateDirty
-                                                    || savingCandidate
-                                                    || !candidateCanStage
-                                                    || candidateIsFullyStaged}
-                                                onClick={stageCandidateDiff}
-                                            >
-                                                {candidateIsFullyStaged
-                                                    ? copy.fileStaged
-                                                    : stagingCandidate ? copy.stagingFile : copy.confirmFile}
-                                            </Button>
-                                            {(selectedType === 'delete' || selectedType === 'edit' || selectedType === 'add') && (
+                                            {candidateIsFullyStaged ? (
                                                 <Button
+                                                    type="primary"
                                                     danger
                                                     icon={<UndoOutlined/>}
-                                                    loading={revertingCandidate}
-                                                    disabled={savingCandidate
-                                                        || stagingCandidate}
-                                                    onClick={revertCandidateDiff}
+                                                    loading={unstagingCandidate}
+                                                    disabled={savingCandidate || stagingCandidate}
+                                                    onClick={unstageCandidateDiff}
                                                 >
-                                                    {revertingCandidate ? copy.revertingFile : copy.revertFile}
+                                                    {unstagingCandidate ? copy.unstagingFile : copy.unstageFile}
                                                 </Button>
+                                            ) : (
+                                                <>
+                                                    <Button
+                                                        type="primary"
+                                                        icon={<CheckOutlined/>}
+                                                        loading={stagingCandidate}
+                                                        disabled={!confirmEnabled
+                                                            || candidateDirty
+                                                            || savingCandidate
+                                                            || unstagingCandidate
+                                                            || !candidateCanStage}
+                                                        onClick={stageCandidateDiff}
+                                                    >
+                                                        {stagingCandidate ? copy.stagingFile : copy.confirmFile}
+                                                    </Button>
+                                                    {(selectedType === 'delete' || selectedType === 'edit' || selectedType === 'add') && (
+                                                        <Button
+                                                            danger
+                                                            icon={<UndoOutlined/>}
+                                                            loading={revertingCandidate}
+                                                            disabled={savingCandidate
+                                                                || stagingCandidate
+                                                                || unstagingCandidate
+                                                                || candidateIsUnchanged}
+                                                            onClick={revertCandidateDiff}
+                                                        >
+                                                            {revertingCandidate ? copy.revertingFile : copy.revertFile}
+                                                        </Button>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                     </Tooltip>

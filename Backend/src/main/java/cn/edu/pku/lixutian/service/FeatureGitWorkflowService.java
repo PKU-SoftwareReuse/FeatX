@@ -47,6 +47,11 @@ public class FeatureGitWorkflowService {
         return repositoryGitService.stageCandidate(key);
     }
 
+    public GitWorkspaceStatusResult unstageCandidate(String key, String runId) throws IOException, InterruptedException {
+        agentRunRegistry.requireCompletedIfActive(runId);
+        return repositoryGitService.unstageCandidate(key);
+    }
+
     public GitWorkspaceStatusResult revertCandidate(String key, String runId) throws IOException, InterruptedException {
         agentRunRegistry.requireCompletedIfActive(runId);
         GitWorkspaceStatusResult result = repositoryGitService.revertCandidate(key);
