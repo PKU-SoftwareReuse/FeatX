@@ -15,6 +15,7 @@ import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
+import cn.edu.pku.lixutian.service.RepositoryGitService;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import com.github.javaparser.ast.body.TypeDeclaration;
@@ -41,10 +42,16 @@ public class CodeDiffController {
     );
 
     private final CandidateCodeService candidateCodeService;
+    private final RepositoryGitService repositoryGitService;
     private final AgentRunRegistry agentRunRegistry;
 
-    public CodeDiffController(CandidateCodeService candidateCodeService, AgentRunRegistry agentRunRegistry) {
+    public CodeDiffController(
+            CandidateCodeService candidateCodeService,
+            RepositoryGitService repositoryGitService,
+            AgentRunRegistry agentRunRegistry
+    ) {
         this.candidateCodeService = candidateCodeService;
+        this.repositoryGitService = repositoryGitService;
         this.agentRunRegistry = agentRunRegistry;
     }
 
@@ -163,6 +170,10 @@ public class CodeDiffController {
             agentRunRegistry.requireCompletedOperation(runId, operation);
             if (ProjectState.getInstance().isPython()) {
                 String filePath = CodeMapService.resolvePythonNodeToFile(classId);
+                java.util.Optional<CodeFileDiffResult> cached = candidateCodeService.existingCandidate(filePath);
+                if (cached.isPresent()) {
+                    return cached.get();
+                }
                 Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
                 if (candidateEntry == null) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + filePath);
@@ -173,6 +184,10 @@ public class CodeDiffController {
             String javaFilePath = classId.endsWith(".java")
                     ? JavaFilePath.normalize(classId)
                     : JavaFilePath.fromClassName(classId);
+            java.util.Optional<CodeFileDiffResult> cached = candidateCodeService.existingCandidate(javaFilePath);
+            if (cached.isPresent()) {
+                return cached.get();
+            }
             Map.Entry<String, String> candidateEntry = "delete".equalsIgnoreCase(operation)
                     ? Map.entry(javaFilePath, deleteCodeByClass(classId))
                     : findCandidateEntry(javaFilePath, classId);
@@ -226,7 +241,7 @@ public class CodeDiffController {
         }
         try {
             agentRunRegistry.requireCompletedOperation(request.getRunId(), request.getOperation());
-            CodeFileDiffResult result = candidateCodeService.updateCandidate(
+            CodeFileDiffResult result = repositoryGitService.updateCandidate(
                     request.getKey(),
                     request.getOperation(),
                     request.getContent()

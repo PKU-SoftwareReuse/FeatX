@@ -15,5 +15,7 @@ public class CodeFileDiffResult {
     private boolean newFile;
     private boolean deleted;
     private boolean editable;
+    private boolean staged;
+    private String stagedContent;
     private String warning;
 }

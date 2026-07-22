@@ -10,6 +10,9 @@ const GitDiffEditor = ({file, value, onChange, onSave, readOnly = false}) => {
     const changeSubscriptionRef = useRef(null);
     const onChangeRef = useRef(onChange);
     const onSaveRef = useRef(onSave);
+    const controlledValueRef = useRef("");
+
+    controlledValueRef.current = value ?? file?.modifiedContent ?? "";
 
     useEffect(() => {
         onChangeRef.current = onChange;
@@ -47,7 +50,9 @@ const GitDiffEditor = ({file, value, onChange, onSave, readOnly = false}) => {
         });
         if (!readOnly) {
             changeSubscriptionRef.current = modifiedEditor.onDidChangeModelContent(() => {
-                onChangeRef.current?.(modifiedEditor.getValue());
+                const editorValue = modifiedEditor.getValue();
+                if (editorValue === controlledValueRef.current) return;
+                onChangeRef.current?.(editorValue);
             });
             modifiedEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
                 onSaveRef.current?.(modifiedEditor.getValue());

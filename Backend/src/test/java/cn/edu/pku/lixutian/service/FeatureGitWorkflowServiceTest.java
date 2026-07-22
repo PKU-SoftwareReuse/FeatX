@@ -111,6 +111,44 @@ class FeatureGitWorkflowServiceTest {
     }
 
     @Test
+    void stagedFileCanBeEditedRestoredAndRestaged(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+
+        gitService.stageCandidate("first.py");
+        assertEquals(Set.of("first.py"), candidateService.stagedModificationKeys());
+
+        var edited = gitService.updateCandidate(
+                "first.py",
+                "edit",
+                "print('edited after stage')\n"
+        );
+        GitWorkspaceStatusResult editedStatus = gitService.status();
+
+        assertTrue(edited.isStaged());
+        assertEquals("print('first changed')\n", edited.getStagedContent());
+        assertEquals(java.util.List.of("first.py"), editedStatus.getStagedPaths());
+        assertEquals(java.util.List.of("first.py"), editedStatus.getUnstagedPaths());
+        assertTrue(candidateService.stagedModificationKeys().isEmpty());
+        assertTrue(runGit(repository, "diff", "--cached", "--", "first.py")
+                .contains("+print('first changed')"));
+
+        gitService.updateCandidate("first.py", "edit", "print('first changed')\n");
+        GitWorkspaceStatusResult restoredStatus = gitService.status();
+        assertTrue(restoredStatus.getUnstagedPaths().isEmpty());
+        assertEquals(Set.of("first.py"), candidateService.stagedModificationKeys());
+
+        gitService.updateCandidate("first.py", "edit", "print('restaged latest')\n");
+        GitWorkspaceStatusResult restagedStatus = gitService.stageCandidate("first.py");
+        assertTrue(restagedStatus.getUnstagedPaths().isEmpty());
+        assertEquals(Set.of("first.py"), candidateService.stagedModificationKeys());
+        String cachedDiff = runGit(repository, "diff", "--cached", "--", "first.py");
+        assertTrue(cachedDiff.contains("+print('restaged latest')"));
+        assertFalse(cachedDiff.contains("+print('first changed')"));
+    }
+
+    @Test
     void revertsOneCandidateWithoutEndingTheOperation(@TempDir Path repository) throws Exception {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
@@ -131,6 +169,16 @@ class FeatureGitWorkflowServiceTest {
         assertTrue(reverted.getStagedPaths().isEmpty());
         assertEquals(Set.of("second.py"), run.registry().modifications(run.runId()).keySet());
         assertTrue(run.registry().hasActiveOperation(52));
+
+        var restoredCandidate = candidateService.existingCandidate("first.py").orElseThrow();
+        assertEquals("print('first')\n", restoredCandidate.getModifiedContent());
+        assertTrue(restoredCandidate.getDiff().isBlank());
+
+        gitService.updateCandidate("first.py", "edit", "print('edited again')\n");
+        assertEquals(
+                Set.of("first.py", "second.py"),
+                candidateService.pendingModificationKeys()
+        );
     }
 
     @Test

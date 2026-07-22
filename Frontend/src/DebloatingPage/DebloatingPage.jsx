@@ -13,7 +13,6 @@ import {
     SwapOutlined,
     ApartmentOutlined,
     DiffOutlined,
-    SaveOutlined,
     CheckOutlined,
     CheckCircleOutlined,
     UndoOutlined
@@ -48,6 +47,7 @@ const FEATURE_PANEL_DESCRIPTION_MIN_WIDTH = 220;
 const GRAPH_PANEL_TARGET_WIDTH = 440;
 const WORKSPACE_MAX_WIDTH = 1600;
 const DIFF_DRAWER_LAYOUT_SETTLE_MS = 360;
+const CANDIDATE_AUTO_SAVE_DELAY_MS = 800;
 const LEGACY_ACTIVE_RUN_STORAGE_KEY = 'featx.activeRunId';
 const ACTIVE_RUN_STORAGE_PREFIX = 'featx.activeRunId.';
 const CANDIDATE_DRAFT_STORAGE_PREFIX = 'featx.candidateDraft.';
@@ -75,8 +75,10 @@ export const shouldShowCandidateDiff = (confirmEnabled, operationType, codeNode)
     && Boolean(codeNode)
 );
 
-export const candidateNodeTypeForDraft = (candidateFile, draft, fullyStaged = false) => {
-    if (fullyStaged) return "Staged";
+export const candidateNodeTypeForDraft = (candidateFile, draft) => {
+    if (candidateFile?.staged && (draft ?? "") === (candidateFile.stagedContent ?? "")) {
+        return "Staged";
+    }
     const originalContent = candidateFile?.originalContent ?? "";
     return (draft ?? "") === originalContent ? "Default" : "Modify";
 };
@@ -276,8 +278,6 @@ const DEBLOATING_COPY = {
         failedFetchRepositoryDiff: "获取仓库 Git Diff 失败。",
         candidateDiff: "候选代码 Git Diff",
         failedFetchCandidateDiff: "获取候选代码 Git Diff 失败。",
-        saveCandidate: "保存编辑",
-        savingCandidate: "正在保存……",
         candidateSaved: "候选代码已保存。",
         failedSaveCandidate: "保存候选代码失败。",
         saveBeforeApply: "请先保存编辑，再确认应用。",
@@ -371,8 +371,6 @@ const DEBLOATING_COPY = {
         failedFetchRepositoryDiff: "Failed to fetch repository Git diff.",
         candidateDiff: "Candidate Git Diff",
         failedFetchCandidateDiff: "Failed to fetch candidate Git diff.",
-        saveCandidate: "Save edits",
-        savingCandidate: "Saving...",
         candidateSaved: "Candidate code saved.",
         failedSaveCandidate: "Failed to save candidate code.",
         saveBeforeApply: "Save your edits before applying the change.",
@@ -812,7 +810,10 @@ const DebloatingPage = () => {
         setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
+        candidateDraftRef.current = '';
+        autoSaveAttemptRef.current = null;
         setCandidateDirty(false);
+        setCandidateSaveError(null);
         setStagingCandidate(false);
         setRevertingCandidate(false);
         if (selectedType === 'delete') {
@@ -869,12 +870,17 @@ const DebloatingPage = () => {
     const [candidateFile, setCandidateFile] = useState(null);
     const [candidateDraft, setCandidateDraft] = useState('');
     const [candidateDirty, setCandidateDirty] = useState(false);
+    const [candidateSaveError, setCandidateSaveError] = useState(null);
     const [requestDraftDirty, setRequestDraftDirty] = useState(false);
     const [savingCandidate, setSavingCandidate] = useState(false);
     const [stagingCandidate, setStagingCandidate] = useState(false);
     const [revertingCandidate, setRevertingCandidate] = useState(false);
     const [gitStatus, setGitStatus] = useState(EMPTY_GIT_STATUS);
     const [loadingConfirm, setLoadingConfirm] = useState(false);
+    const candidateDraftRef = useRef(candidateDraft);
+    const autoSaveAttemptRef = useRef(null);
+    const saveCandidateDiffRef = useRef(null);
+    candidateDraftRef.current = candidateDraft;
 
     useEffect(() => {
         const shouldWarn = Boolean(
@@ -1027,7 +1033,10 @@ const DebloatingPage = () => {
         setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
+        candidateDraftRef.current = '';
+        autoSaveAttemptRef.current = null;
         setCandidateDirty(false);
+        setCandidateSaveError(null);
         setSelectedCodeNodeId(String(classNodeId));
         setDiffDrawerOpen(true);
         setLoadingCode(true)
@@ -1041,10 +1050,14 @@ const DebloatingPage = () => {
             candidateRequest
                 .then((data) => {
                     const restoredDraft = loadCandidateDraft(activeRunId, data);
+                    const nextDraft = restoredDraft ?? (data.modifiedContent || '');
                     setCandidateFile(data);
-                    setCandidateDraft(restoredDraft ?? (data.modifiedContent || ''));
+                    setCandidateDraft(nextDraft);
+                    candidateDraftRef.current = nextDraft;
+                    autoSaveAttemptRef.current = null;
                     setCandidateDirty(restoredDraft !== null
                         && restoredDraft !== (data.modifiedContent || ''));
+                    setCandidateSaveError(null);
                     setCodeDiff(data.diff || '');
                     setIsCandidateDiff(true);
                     setLoadingCode(false);
@@ -1103,7 +1116,10 @@ const DebloatingPage = () => {
         setIsRepositoryDiff(true);
         setIsCandidateDiff(false);
         setCandidateFile(null);
+        candidateDraftRef.current = '';
+        autoSaveAttemptRef.current = null;
         setCandidateDirty(false);
+        setCandidateSaveError(null);
         setRepositoryDiffError(false);
         setSelectedCodeNodeId('Git');
         setDiffDrawerOpen(true);
@@ -1122,43 +1138,74 @@ const DebloatingPage = () => {
             });
     };
 
-    const saveCandidateDiff = (editorContent) => {
-        if (!candidateFile || savingCandidate) return;
+    const saveCandidateDiff = (editorContent, options = {}) => {
+        if (!candidateFile || savingCandidate) return Promise.resolve(null);
 
+        const silent = options.silent === true;
         const contentToSave = typeof editorContent === 'string' ? editorContent : candidateDraft;
-        if (contentToSave === (candidateFile.modifiedContent || '')) return;
+        if (contentToSave === (candidateFile.modifiedContent || '')) return Promise.resolve(candidateFile);
+        candidateDraftRef.current = contentToSave;
         setCandidateDraft(contentToSave);
         setSavingCandidate(true);
-        API.updateCandidateDiff(candidateFile.key, selectedType, contentToSave, activeRunId)
-            .then((data) => {
+        setCandidateSaveError(null);
+        return API.updateCandidateDiff(candidateFile.key, selectedType, contentToSave, activeRunId)
+            .then(async (data) => {
+                const savedContent = data.modifiedContent || '';
+                const currentDraft = candidateDraftRef.current;
+                const hasNewerDraft = currentDraft !== contentToSave;
+                const nextDraft = hasNewerDraft ? currentDraft : savedContent;
+                if (!hasNewerDraft) {
+                    candidateDraftRef.current = savedContent;
+                }
                 setCandidateFile(data);
-                setCandidateDraft((currentDraft) => {
-                    const savedContent = data.modifiedContent || '';
-                    if (currentDraft === contentToSave) {
-                        setCandidateDirty(false);
-                        return savedContent;
-                    }
-                    setCandidateDirty(currentDraft !== savedContent);
-                    return currentDraft;
-                });
+                setCandidateDraft(nextDraft);
+                setCandidateDirty(nextDraft !== savedContent);
                 setCodeDiff(data.diff || '');
+                await refreshGitStatus();
                 setGraphData((current) => current ? {
                     ...current,
                     nodes: (current.nodes || []).map((node) => (
                         String(node.id) === String(selectedCodeNodeId)
-                            ? {...node, type: data.diff?.trim() ? 'Modify' : 'Default'}
+                            ? {...node, type: candidateNodeTypeForDraft(data, nextDraft)}
                             : node
                     )),
                 } : current);
                 setSavingCandidate(false);
-                removeCandidateDraft(activeRunId, candidateFile.key);
-                message.success(copy.candidateSaved);
+                setCandidateSaveError(null);
+                if (!hasNewerDraft) {
+                    removeCandidateDraft(activeRunId, candidateFile.key);
+                }
+                if (!silent) {
+                    message.success(copy.candidateSaved);
+                }
+                return data;
             })
             .catch((error) => {
                 setSavingCandidate(false);
-                message.error(errorMessage(error, copy.failedSaveCandidate));
+                const detail = errorMessage(error, copy.failedSaveCandidate);
+                setCandidateSaveError(detail);
+                if (!silent) {
+                    message.error(detail);
+                }
+                return null;
             });
     };
+
+    saveCandidateDiffRef.current = saveCandidateDiff;
+
+    useEffect(() => {
+        if (!isCandidateDiff || !candidateFile?.key || !candidateDirty || savingCandidate) {
+            return undefined;
+        }
+        if (autoSaveAttemptRef.current === candidateDraft) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => {
+            autoSaveAttemptRef.current = candidateDraft;
+            saveCandidateDiffRef.current?.(candidateDraft, {silent: true});
+        }, CANDIDATE_AUTO_SAVE_DELAY_MS);
+        return () => window.clearTimeout(timer);
+    }, [candidateDirty, candidateDraft, candidateFile?.key, isCandidateDiff, savingCandidate]);
 
     const stageCandidateDiff = () => {
         if (!candidateFile || stagingCandidate) return;
@@ -1170,14 +1217,22 @@ const DebloatingPage = () => {
         setStagingCandidate(true);
         API.stageCandidateFile(candidateFile.key, activeRunId)
             .then((status) => {
-                setGitStatus(status || EMPTY_GIT_STATUS);
+                const nextStatus = status || EMPTY_GIT_STATUS;
+                const staged = Boolean(candidateFile.path && nextStatus.stagedPaths?.includes(candidateFile.path));
+                const nextCandidateFile = {
+                    ...candidateFile,
+                    warning: null,
+                    staged,
+                    stagedContent: staged ? candidateDraft : null,
+                };
+                setGitStatus(nextStatus);
                 setStagingCandidate(false);
-                setCandidateFile((current) => current ? {...current, warning: null} : current);
+                setCandidateFile(nextCandidateFile);
                 setGraphData((current) => current ? {
                     ...current,
                     nodes: (current.nodes || []).map((node) => (
                         String(node.id) === String(selectedCodeNodeId)
-                            ? {...node, type: 'Staged'}
+                            ? {...node, type: candidateNodeTypeForDraft(nextCandidateFile, candidateDraft)}
                             : node
                     )),
                 } : current);
@@ -1191,25 +1246,47 @@ const DebloatingPage = () => {
     };
 
     const revertCandidateDiff = () => {
-        if (!candidateFile || revertingCandidate || candidateDirty) return;
+        if (!candidateFile || revertingCandidate || savingCandidate || stagingCandidate) return;
 
+        autoSaveAttemptRef.current = candidateDraft;
+        setCandidateDirty(false);
+        setCandidateSaveError(null);
         setRevertingCandidate(true);
         API.revertCandidateFile(candidateFile.key, activeRunId)
             .then((status) => {
+                const revertedContent = candidateFile.originalContent ?? '';
+                const revertedCandidate = {
+                    ...candidateFile,
+                    modifiedContent: revertedContent,
+                    diff: '',
+                    staged: false,
+                    stagedContent: null,
+                    deleted: false,
+                    warning: null,
+                };
                 setGitStatus(status || EMPTY_GIT_STATUS);
                 removeCandidateDraft(activeRunId, candidateFile.key);
-                resetGraphDiffDrawer();
+                setCandidateFile(revertedCandidate);
+                setCandidateDraft(revertedContent);
+                candidateDraftRef.current = revertedContent;
+                autoSaveAttemptRef.current = null;
+                setCandidateDirty(false);
+                setCandidateSaveError(null);
+                setCodeDiff('');
+                setGraphData((current) => current ? {
+                    ...current,
+                    nodes: (current.nodes || []).map((node) => (
+                        String(node.id) === String(selectedCodeNodeId)
+                            ? {...node, type: candidateNodeTypeForDraft(revertedCandidate, revertedContent)}
+                            : node
+                    )),
+                } : current);
                 message.success(copy.candidateReverted);
-                const graphRequest = selectedType === 'delete'
-                    ? API.getMinGraphData(selectedFeatureItem?.featureId, activeRunId)
-                    : API.getNewGraphData(activeRunId);
-                return graphRequest
-                    .then(setGraphData)
-                    .catch((error) => {
-                        message.error(errorMessage(error, copy.failedFetchGeneratedGraph));
-                    });
             })
             .catch((error) => {
+                setCandidateDirty(
+                    candidateDraftRef.current !== (candidateFile.modifiedContent || '')
+                );
                 message.error(errorMessage(error, copy.failedRevertCandidate));
             })
             .finally(() => setRevertingCandidate(false));
@@ -1227,7 +1304,10 @@ const DebloatingPage = () => {
         setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
+        candidateDraftRef.current = '';
+        autoSaveAttemptRef.current = null;
         setCandidateDirty(false);
+        setCandidateSaveError(null);
         setStagingCandidate(false);
         setRevertingCandidate(false);
     };
@@ -2217,7 +2297,11 @@ const DebloatingPage = () => {
     );
     const candidateIsFullyStaged = candidateHasStagedChanges
         && !gitStatus.unstagedPaths?.includes(candidateFile.path);
-    const candidateHasChanges = Boolean(candidateFile?.diff?.trim());
+    const candidateDiffersFromOriginal = Boolean(candidateFile)
+        && candidateDraft !== (candidateFile.originalContent ?? '');
+    const candidateDiffersFromStaged = Boolean(candidateFile?.staged)
+        && candidateDraft !== (candidateFile.stagedContent ?? '');
+    const candidateCanStage = candidateDiffersFromOriginal || candidateDiffersFromStaged;
     const candidateDiffFiles = useMemo(() => candidateFile ? [{
         ...candidateFile,
         status: candidateFile.newFile ? 'A' : candidateFile.deleted ? 'D' : 'M',
@@ -2587,19 +2671,6 @@ const DebloatingPage = () => {
                                 )}
                             </div>
                             <div className={styles.diffDrawerHeaderActions}>
-                                {isCandidateDiff && (
-                                    <Tooltip title={copy.saveCandidate}>
-                                        <Button
-                                            type="primary"
-                                            icon={<SaveOutlined/>}
-                                            loading={savingCandidate}
-                                            disabled={!candidateDirty || candidateHasStagedChanges}
-                                            onClick={() => saveCandidateDiff()}
-                                        >
-                                            {savingCandidate ? copy.savingCandidate : copy.saveCandidate}
-                                        </Button>
-                                    </Tooltip>
-                                )}
                                 <Button
                                     type="text"
                                     icon={<CloseOutlined/>}
@@ -2618,18 +2689,20 @@ const DebloatingPage = () => {
                                         {candidateFile.warning && (
                                             <Alert type="warning" showIcon message={candidateFile.warning}/>
                                         )}
+                                        {candidateSaveError && (
+                                            <Alert type="error" showIcon message={candidateSaveError}/>
+                                        )}
                                         <div className={styles.candidateEditorView}>
                                             <CodeDiffComponent
                                                 files={candidateDiffFiles}
                                                 value={candidateDraft}
                                                 onChange={(value) => {
-                                                    const nodeType = candidateNodeTypeForDraft(
-                                                        candidateFile,
-                                                        value,
-                                                        candidateIsFullyStaged
-                                                    );
+                                                    const nodeType = candidateNodeTypeForDraft(candidateFile, value);
+                                                    candidateDraftRef.current = value;
+                                                    autoSaveAttemptRef.current = null;
                                                     setCandidateDraft(value);
                                                     setCandidateDirty(value !== (candidateFile.modifiedContent || ''));
+                                                    setCandidateSaveError(null);
                                                     setGraphData((current) => current ? {
                                                         ...current,
                                                         nodes: (current.nodes || []).map((node) => (
@@ -2640,7 +2713,7 @@ const DebloatingPage = () => {
                                                     } : current);
                                                 }}
                                                 onSave={saveCandidateDiff}
-                                                readOnly={candidateHasStagedChanges}
+                                                readOnly={false}
                                             />
                                         </div>
                                     </div>
@@ -2658,7 +2731,7 @@ const DebloatingPage = () => {
                                     <Tooltip
                                         title={candidateDirty
                                             ? copy.saveBeforeApply
-                                            : !candidateHasChanges ? copy.noCandidateChanges
+                                            : !candidateCanStage ? copy.noCandidateChanges
                                                 : !confirmEnabled ? copy.noSubmittedChanges : ""}
                                     >
                                         <div className={styles.centerButtonWrapper}>
@@ -2669,7 +2742,7 @@ const DebloatingPage = () => {
                                                 disabled={!confirmEnabled
                                                     || candidateDirty
                                                     || savingCandidate
-                                                    || !candidateHasChanges
+                                                    || !candidateCanStage
                                                     || candidateIsFullyStaged}
                                                 onClick={stageCandidateDiff}
                                             >
@@ -2682,8 +2755,7 @@ const DebloatingPage = () => {
                                                     danger
                                                     icon={<UndoOutlined/>}
                                                     loading={revertingCandidate}
-                                                    disabled={candidateDirty
-                                                        || savingCandidate
+                                                    disabled={savingCandidate
                                                         || stagingCandidate}
                                                     onClick={revertCandidateDiff}
                                                 >

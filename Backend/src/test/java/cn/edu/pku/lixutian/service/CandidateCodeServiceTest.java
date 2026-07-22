@@ -98,6 +98,51 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void autoSaveAllowsTemporarilyInvalidJavaUntilCommitValidation(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        String original = "package demo;\n\nclass Example {}\n";
+        Files.writeString(sourceFile, original);
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        service.prepareManualJavaCandidate("demo/Example.java");
+
+        String incompleteEdit = "package demo;\n\nclass Example { int value = ; }\n";
+        CodeFileDiffResult saved = service.updateCandidate(
+                "demo/Example.java",
+                "edit",
+                incompleteEdit
+        );
+
+        assertEquals(incompleteEdit, saved.getModifiedContent());
+        assertEquals(incompleteEdit, ProjectState.getInstance().getModifications().get("demo/Example.java"));
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                service::validateCompleteCandidateSet
+        );
+        assertTrue(error.getMessage().contains("valid Java source"));
+    }
+
+    @Test
+    void stagingWritesTemporarilyInvalidJavaLikeGitAdd(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\n\nclass Example {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        service.prepareManualJavaCandidate("demo/Example.java");
+        String incompleteEdit = "package demo;\n\nclass Example { int value = ; }\n";
+        service.updateCandidate("demo/Example.java", "edit", incompleteEdit);
+
+        service.materializeCandidate("demo/Example.java");
+
+        assertEquals(incompleteEdit, Files.readString(sourceFile));
+    }
+
+    @Test
     void materializeJavaCandidateWritesOnlyTheConfirmedFile(@TempDir Path projectRoot) throws Exception {
         Path firstFile = projectRoot.resolve("src/main/java/demo/First.java");
         Path secondFile = projectRoot.resolve("src/main/java/demo/Second.java");

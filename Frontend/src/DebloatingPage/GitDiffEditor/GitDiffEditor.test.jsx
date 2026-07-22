@@ -57,3 +57,41 @@ test.each([false, true])("always uses the unified inline diff layout (readOnly=%
 
     unmount();
 });
+
+test("does not report a controlled value reset as a user edit", () => {
+    const originalEditor = {
+        getDomNode: jest.fn(() => ({style: {}})),
+        updateOptions: jest.fn(),
+    };
+    let editorValue = file.modifiedContent;
+    let changeListener;
+    const modifiedEditor = {
+        addCommand: jest.fn(),
+        getValue: jest.fn(() => editorValue),
+        onDidChangeModelContent: jest.fn((listener) => {
+            changeListener = listener;
+            return {dispose: jest.fn()};
+        }),
+        updateOptions: jest.fn(),
+    };
+    const onChange = jest.fn();
+    const {rerender} = render(
+        <GitDiffEditor file={file} value={file.modifiedContent} onChange={onChange} readOnly={false}/>
+    );
+
+    diffEditorProps.onMount({
+        getOriginalEditor: () => originalEditor,
+        getModifiedEditor: () => modifiedEditor,
+    });
+
+    editorValue = file.originalContent;
+    rerender(
+        <GitDiffEditor file={file} value={file.originalContent} onChange={onChange} readOnly={false}/>
+    );
+    changeListener();
+    expect(onChange).not.toHaveBeenCalled();
+
+    editorValue = `${file.originalContent}\n// user edit`;
+    changeListener();
+    expect(onChange).toHaveBeenCalledWith(editorValue);
+});

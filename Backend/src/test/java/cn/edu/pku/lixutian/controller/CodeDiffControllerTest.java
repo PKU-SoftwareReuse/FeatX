@@ -2,6 +2,7 @@ package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
+import cn.edu.pku.lixutian.service.RepositoryGitService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,6 +28,9 @@ class CodeDiffControllerTest {
 
     @MockitoBean
     private CandidateCodeService candidateCodeService;
+
+    @MockitoBean
+    private RepositoryGitService repositoryGitService;
 
     @MockitoBean
     private AgentRunRegistry agentRunRegistry;

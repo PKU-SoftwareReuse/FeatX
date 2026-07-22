@@ -31,10 +31,16 @@ describe("FeatureListItem", () => {
 
     test("derives candidate node color from diff and full-stage state", () => {
         const candidate = {originalContent: "class Demo {}\n"};
+        const stagedCandidate = {
+            ...candidate,
+            staged: true,
+            stagedContent: "class Demo { int value; }\n",
+        };
 
         expect(candidateNodeTypeForDraft(candidate, "class Demo {}\n")).toBe("Default");
         expect(candidateNodeTypeForDraft(candidate, "class Demo { int value; }\n")).toBe("Modify");
-        expect(candidateNodeTypeForDraft(candidate, "class Demo { int value; }\n", true)).toBe("Staged");
+        expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int value; }\n")).toBe("Staged");
+        expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int changedAgain; }\n")).toBe("Modify");
     });
 
     test("keeps the complete editor visible in the minimal compressed layout", () => {

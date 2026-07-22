@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.service;
 
 import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
 import org.springframework.stereotype.Service;
 
@@ -72,11 +73,28 @@ public class RepositoryGitService {
 
     public GitWorkspaceStatusResult stageCandidate(String key) throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
-            repositoryRoot();
+            Path repository = repositoryRoot();
             CandidateCodeService.MaterializedCandidate candidate = candidateCodeService.materializeCandidate(key);
             stagePathsLocked(List.of(candidate.path()));
-            candidateCodeService.markStaged(candidate.key());
+            int stagedDiff = gitExitCode(repository, List.of(
+                    "git", "diff", "--cached", "--quiet", "--", normalizePath(candidate.path())
+            ));
+            if (stagedDiff == 1) {
+                candidateCodeService.markStaged(candidate.key());
+            } else if (stagedDiff == 0) {
+                candidateCodeService.markUnstaged(candidate.key());
+            } else {
+                throw new IOException("Unable to determine the staged state for " + candidate.path() + ".");
+            }
             return statusLocked();
+        }
+    }
+
+    public CodeFileDiffResult updateCandidate(String key, String operation, String content)
+            throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            repositoryRoot();
+            return candidateCodeService.updateCandidate(key, operation, content);
         }
     }
 
@@ -102,7 +120,7 @@ public class RepositoryGitService {
                 throw new IOException("Unable to determine whether the candidate file exists at HEAD.");
             }
 
-            candidateCodeService.discardCandidate(key);
+            candidateCodeService.restoreCandidateToOriginal(key);
             return statusLocked();
         }
     }
