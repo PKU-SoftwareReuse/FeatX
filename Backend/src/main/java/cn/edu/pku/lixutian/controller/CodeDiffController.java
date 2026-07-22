@@ -10,6 +10,7 @@ import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.CodeDiffHelper;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
+import cn.edu.pku.lixutian.helper.ProjectFilePath;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.DeleteHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
@@ -168,38 +169,21 @@ public class CodeDiffController {
 
         try {
             agentRunRegistry.requireCompletedOperation(runId, operation);
-            if (ProjectState.getInstance().isPython()) {
-                String filePath = CodeMapService.resolvePythonNodeToFile(classId);
-                java.util.Optional<CodeFileDiffResult> cached = candidateCodeService.existingCandidate(filePath);
-                if (cached.isPresent()) {
-                    return cached.get();
-                }
-                Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
-                if (candidateEntry == null) {
-                    throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + filePath);
-                }
-                return candidateCodeService.preparePythonCandidate(filePath, filePath, candidateEntry.getValue());
-            }
-
-            String javaFilePath = classId.endsWith(".java")
-                    ? JavaFilePath.normalize(classId)
-                    : JavaFilePath.fromClassName(classId);
-            java.util.Optional<CodeFileDiffResult> cached = candidateCodeService.existingCandidate(javaFilePath);
+            String filePath = resolveCandidateFilePath(classId);
+            java.util.Optional<CodeFileDiffResult> cached = candidateCodeService.existingCandidate(filePath);
             if (cached.isPresent()) {
                 return cached.get();
             }
-            Map.Entry<String, String> candidateEntry = "delete".equalsIgnoreCase(operation)
-                    ? Map.entry(javaFilePath, deleteCodeByClass(classId))
-                    : findCandidateEntry(javaFilePath, classId);
-            String candidate = candidateEntry == null ? null : candidateEntry.getValue();
-            if (candidate == null) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + classId);
+            Map.Entry<String, String> candidateEntry = findCandidateEntry(filePath, classId);
+            if (candidateEntry != null) {
+                return candidateCodeService.prepareProjectCandidate(filePath, candidateEntry.getValue());
             }
-            return candidateCodeService.prepareJavaCandidate(
-                    candidateEntry.getKey(),
-                    operation,
-                    candidate
-            );
+            if (!ProjectState.getInstance().isPython()
+                    && filePath.endsWith(".java")
+                    && "delete".equalsIgnoreCase(operation)) {
+                return candidateCodeService.prepareJavaCandidate(filePath, operation, deleteCodeByClass(classId));
+            }
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + filePath);
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         } catch (IllegalStateException exception) {
@@ -218,14 +202,7 @@ public class CodeDiffController {
         }
         try {
             agentRunRegistry.requireCompletedOperation(runId, operation);
-            if (ProjectState.getInstance().isPython()) {
-                String filePath = CodeMapService.resolvePythonNodeToFile(classId);
-                return candidateCodeService.prepareManualPythonCandidate(filePath);
-            }
-            String javaFilePath = classId.endsWith(".java")
-                    ? JavaFilePath.normalize(classId)
-                    : JavaFilePath.fromClassName(classId);
-            return candidateCodeService.prepareManualJavaCandidate(javaFilePath);
+            return candidateCodeService.prepareManualProjectCandidate(resolveCandidateFilePath(classId));
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, exception.getMessage(), exception);
         } catch (IllegalStateException exception) {
@@ -289,6 +266,29 @@ public class CodeDiffController {
             }
         }
         return null;
+    }
+
+    private String resolveCandidateFilePath(String classOrFileId) {
+        Map<String, String> modifications = ProjectState.getInstance().getModifications();
+        if (modifications.containsKey(classOrFileId)) {
+            return ProjectFilePath.normalize(classOrFileId);
+        }
+        try {
+            String projectPath = ProjectFilePath.normalize(classOrFileId);
+            Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath());
+            if (Files.isRegularFile(ProjectFilePath.resolve(sourceRoot, projectPath))) {
+                return projectPath;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Graph node ids are not always file paths; language-specific resolution follows.
+        }
+        if (ProjectState.getInstance().isPython()) {
+            return ProjectFilePath.normalize(CodeMapService.resolvePythonNodeToFile(classOrFileId));
+        }
+        if (classOrFileId.endsWith(".java")) {
+            return JavaFilePath.normalize(classOrFileId);
+        }
+        return JavaFilePath.fromClassName(classOrFileId);
     }
 
     @GetMapping("/repositoryDiff")

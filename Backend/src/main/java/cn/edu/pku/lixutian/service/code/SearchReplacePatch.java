@@ -73,8 +73,9 @@ final class SearchReplacePatch {
             if (search.isEmpty()) {
                 throw new IllegalArgumentException("Agent3 SEARCH text cannot be empty.");
             }
-            if (search.equals(working)
-                    || (working.startsWith(search) && working.substring(search.length()).isBlank())) {
+            boolean replacesCompleteFile = search.equals(working)
+                    || (working.startsWith(search) && working.substring(search.length()).isBlank());
+            if (replacesCompleteFile && working.lines().count() > 1) {
                 throw new IllegalArgumentException(
                         "Agent3 cannot replace the complete existing file; use minimal Search/Replace blocks."
                 );

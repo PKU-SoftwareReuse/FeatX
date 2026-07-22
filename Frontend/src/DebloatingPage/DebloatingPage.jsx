@@ -12,7 +12,6 @@ import {
     SearchOutlined,
     SwapOutlined,
     ApartmentOutlined,
-    DiffOutlined,
     CheckOutlined,
     CheckCircleOutlined,
     UndoOutlined
@@ -270,7 +269,6 @@ const DEBLOATING_COPY = {
         fetchingGraph: "正在获取相关代码图谱。",
         changesPanel: "代码变更",
         resizeChangesPanel: "调整代码变更面板宽度，双击恢复默认宽度",
-        viewRepositoryDiff: "查看仓库 Git Diff",
         repositoryDiff: "仓库 Git Diff",
         closeChangesPanel: "关闭代码变更",
         fetchingCode: "正在获取代码详情。",
@@ -367,7 +365,6 @@ const DEBLOATING_COPY = {
         fetchingGraph: "fetching codeMap.",
         changesPanel: "Diff Panel",
         resizeChangesPanel: "Resize the diff panel; double-click to reset",
-        viewRepositoryDiff: "View repository Git diff",
         repositoryDiff: "Repository Git Diff",
         closeChangesPanel: "Close Diff Panel",
         fetchingCode: "Fetching code details.",
@@ -1117,36 +1114,6 @@ const DebloatingPage = () => {
 
         return true;
     }
-
-    const getRepositoryDiff = () => {
-        if (isCandidateDiff && candidateDirty) {
-            message.warning(copy.saveBeforeClose);
-            return;
-        }
-        setIsRepositoryDiff(true);
-        setIsCandidateDiff(false);
-        setCandidateFile(null);
-        candidateDraftRef.current = '';
-        autoSaveAttemptRef.current = null;
-        setCandidateDirty(false);
-        setCandidateSaveError(null);
-        setRepositoryDiffError(false);
-        setSelectedCodeNodeId('Git');
-        setDiffDrawerOpen(true);
-        setCodeDiff('');
-        setLoadingCode(true);
-        API.getRepositoryDiff()
-            .then((data) => {
-                setCodeDiff(typeof data === 'string' ? data : '');
-                setLoadingCode(false);
-            })
-            .catch((error) => {
-                setCodeDiff('');
-                setRepositoryDiffError(true);
-                setLoadingCode(false);
-                message.error(errorMessage(error, copy.failedFetchRepositoryDiff));
-            });
-    };
 
     const saveCandidateDiff = (editorContent, options = {}) => {
         if (!candidateFile || savingCandidate) return Promise.resolve(null);
@@ -2604,17 +2571,6 @@ const DebloatingPage = () => {
                                                     </Tooltip>
                                                 </>
                                             )}
-                                            <Tooltip title={copy.viewRepositoryDiff}>
-                                                <Button
-                                                    type="text"
-                                                    icon={<DiffOutlined/>}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        getRepositoryDiff();
-                                                    }}
-                                                    className={styles.icon}
-                                                />
-                                            </Tooltip>
                                             <Tooltip
                                                 title={hasFocusGraphStages ? copy.focusGraphReady : copy.focusGraphPending}
                                             >

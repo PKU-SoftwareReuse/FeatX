@@ -101,6 +101,23 @@ public class ListFileHelper {
         return Files.readString(file, StandardCharsets.UTF_8);
     }
 
+    public static String getProjectFileContent(String baseFolder, String relativePath) throws IOException {
+        Path file = ProjectFilePath.resolve(Path.of(baseFolder), relativePath);
+        if (!Files.isRegularFile(file)) {
+            throw new IOException("Project path is not a regular file: " + relativePath);
+        }
+        if (Files.size(file) > MAX_AGENT_FILE_BYTES) {
+            throw new IOException("Project file exceeds the 2 MiB Agent limit: " + relativePath);
+        }
+        byte[] content = Files.readAllBytes(file);
+        for (byte value : content) {
+            if (value == 0) {
+                throw new IOException("Binary project file cannot be loaded into the Agent: " + relativePath);
+            }
+        }
+        return new String(content, StandardCharsets.UTF_8);
+    }
+
     public static List<String> findPythonFiles(String folderPath) {
         List<String> pythonFiles = new ArrayList<>();
         File folder = new File(folderPath);
@@ -108,6 +125,7 @@ public class ListFileHelper {
             return pythonFiles;
         }
         recursiveFindPython(folder, pythonFiles, folder.getAbsolutePath());
+        pythonFiles.sort(Comparator.naturalOrder());
         return pythonFiles;
     }
 

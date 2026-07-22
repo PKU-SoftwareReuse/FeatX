@@ -3,6 +3,7 @@ package cn.edu.pku.lixutian.service;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
+import cn.edu.pku.lixutian.helper.ProjectFilePath;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import com.github.javaparser.StaticJavaParser;
@@ -205,7 +206,7 @@ public class CandidateCodeService {
             document.modifiedContent = stagedContent == null ? "" : stagedContent;
             document.pending = true;
             document.authoritative = true;
-            String modification = ProjectState.getInstance().isPython() && stagedContent == null
+            String modification = stagedContent == null
                     ? AgentService.DELETE_FILE_SENTINEL
                     : document.modifiedContent;
             selected.put(normalizedKey, modification);
@@ -316,19 +317,28 @@ public class CandidateCodeService {
 
     public CodeFileDiffResult preparePythonCandidate(String key, String relativePath, String candidateContent)
             throws IOException, InterruptedException {
+        return prepareProjectCandidate(relativePath, candidateContent);
+    }
+
+    public CodeFileDiffResult prepareProjectCandidate(String relativePath, String candidateContent)
+            throws IOException, InterruptedException {
+        String key = ProjectFilePath.normalize(relativePath);
         Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-        Path sourceFile = safeResolve(sourceRoot, relativePath);
+        Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
         CandidateDocument cached = state().candidateDocuments.get(key);
         boolean originalExists = cached == null ? Files.isRegularFile(sourceFile) : cached.originalExists;
         String originalContent = cached == null
                 ? originalExists ? readEditableFile(sourceFile) : ""
                 : cached.originalContent;
         String modifiedContent = AgentService.DELETE_FILE_SENTINEL.equals(candidateContent) ? "" : candidateContent;
+        if (key.endsWith(".java") && modifiedContent != null && !modifiedContent.isBlank()) {
+            validateJavaCandidate(key, modifiedContent);
+        }
         boolean pending = !Objects.equals(originalContent, modifiedContent == null ? originalContent : modifiedContent);
         CandidateDocument document = new CandidateDocument(
                 key,
                 projectRelativePath(sourceFile),
-                "python",
+                languageFor(key),
                 originalContent,
                 modifiedContent == null ? originalContent : modifiedContent,
                 originalExists,
@@ -369,13 +379,18 @@ public class CandidateCodeService {
 
     public CodeFileDiffResult prepareManualPythonCandidate(String relativePath)
             throws IOException, InterruptedException {
-        String normalizedPath = normalizeProjectPath(relativePath);
+        return prepareManualProjectCandidate(relativePath);
+    }
+
+    public CodeFileDiffResult prepareManualProjectCandidate(String relativePath)
+            throws IOException, InterruptedException {
+        String normalizedPath = ProjectFilePath.normalize(relativePath);
         CandidateDocument cached = state().candidateDocuments.get(normalizedPath);
         if (cached != null) {
             return toResult(cached);
         }
         Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-        Path sourceFile = safeResolve(sourceRoot, normalizedPath);
+        Path sourceFile = ProjectFilePath.resolve(sourceRoot, normalizedPath);
         if (!Files.isRegularFile(sourceFile)) {
             throw new IllegalStateException("Source file does not exist for " + relativePath + ".");
         }
@@ -383,7 +398,7 @@ public class CandidateCodeService {
         CandidateDocument document = new CandidateDocument(
                 normalizedPath,
                 projectRelativePath(sourceFile),
-                "python",
+                languageFor(normalizedPath),
                 originalContent,
                 originalContent,
                 true,
@@ -404,39 +419,13 @@ public class CandidateCodeService {
         if (updatedContent.getBytes(StandardCharsets.UTF_8).length > MAX_EDITABLE_FILE_BYTES) {
             throw new IllegalArgumentException("Candidate file is too large to edit online.");
         }
-        String normalizedInputKey = normalizeCandidateKey(key);
-        if (ProjectState.getInstance().isPython()) {
-            CandidateDocument document = state().candidateDocuments.get(normalizedInputKey);
-            if (document == null) {
-                throw new IllegalStateException("Open the candidate diff before saving it.");
-            }
-            Map<String, String> modifications = mutableModifications();
-            if (Objects.equals(document.originalContent, updatedContent)) {
-                modifications.entrySet().removeIf(entry ->
-                        normalizeCandidateKey(entry.getKey()).equals(normalizedInputKey));
-                state().expectedCandidateKeys.remove(normalizedInputKey);
-            } else {
-                modifications.put(normalizedInputKey, updatedContent.isEmpty() && "delete".equalsIgnoreCase(operation)
-                        ? AgentService.DELETE_FILE_SENTINEL
-                        : updatedContent);
-            }
-            ProjectState.getInstance().setModifications(modifications);
-            preparePythonCandidate(
-                    normalizedInputKey,
-                    normalizedInputKey,
-                    modifications.getOrDefault(normalizedInputKey, updatedContent)
-            );
-            syncSavedCandidateWithWorktree(normalizedInputKey);
-            return toResult(state().candidateDocuments.get(normalizedInputKey));
-        }
-
-        String normalizedKey = JavaFilePath.normalize(key);
+        String normalizedKey = normalizeCandidateKey(key);
         CandidateDocument document = state().candidateDocuments.get(normalizedKey);
         if (document == null) {
             throw new IllegalStateException("Open the candidate diff before saving it.");
         }
         if (updatedContent.isBlank() && !"delete".equalsIgnoreCase(operation)) {
-            throw new IllegalArgumentException("Java candidate content cannot be empty.");
+            throw new IllegalArgumentException("Candidate content cannot be empty.");
         }
         document.modifiedContent = updatedContent;
         document.pending = !Objects.equals(document.originalContent, updatedContent);
@@ -447,7 +436,9 @@ public class CandidateCodeService {
         modifications.entrySet().removeIf(entry ->
                 normalizeCandidateKey(entry.getKey()).equals(normalizedKey));
         if (document.pending) {
-            modifications.put(normalizedKey, updatedContent);
+            modifications.put(normalizedKey, updatedContent.isEmpty() && "delete".equalsIgnoreCase(operation)
+                    ? AgentService.DELETE_FILE_SENTINEL
+                    : updatedContent);
         } else {
             state().expectedCandidateKeys.remove(normalizedKey);
         }
@@ -600,9 +591,7 @@ public class CandidateCodeService {
         if (key == null) {
             return "";
         }
-        return ProjectState.getInstance().isPython()
-                ? normalizeProjectPath(key)
-                : JavaFilePath.normalize(key);
+        return ProjectFilePath.normalize(key);
     }
 
     private List<String> projectPathsForKeys(Collection<String> keys) {
@@ -622,13 +611,8 @@ public class CandidateCodeService {
             return Optional.of(normalizeProjectPath(document.path));
         }
         try {
-            Path sourceFile;
-            if (ProjectState.getInstance().isPython()) {
-                Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-                sourceFile = safeResolve(sourceRoot, key);
-            } else {
-                sourceFile = RewriteFileHelper.resolveJavaFilePath(JavaFilePath.normalize(key)).toAbsolutePath().normalize();
-            }
+            Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
+            Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
             return Optional.of(projectRelativePath(sourceFile));
         } catch (IllegalArgumentException exception) {
             return Optional.empty();
@@ -655,6 +639,16 @@ public class CandidateCodeService {
 
     private String normalizeProjectPath(String path) {
         return path.replace('\\', '/');
+    }
+
+    private String languageFor(String path) {
+        if (path.endsWith(".java")) {
+            return "java";
+        }
+        if (path.endsWith(".py")) {
+            return "python";
+        }
+        return "text";
     }
 
     private CodeFileDiffResult toResult(CandidateDocument document) throws IOException, InterruptedException {

@@ -254,6 +254,25 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void javaProjectCanReviewAndMaterializeANonJavaAgentCandidate(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("application.yml");
+        Files.writeString(sourceFile, "feature: disabled\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        ProjectState.getInstance().setModifications(Map.of("application.yml", "feature: enabled\n"));
+        CodeFileDiffResult candidate = service.prepareProjectCandidate(
+                "application.yml",
+                "feature: enabled\n"
+        );
+
+        assertEquals("text", candidate.getLanguage());
+        assertTrue(candidate.getDiff().contains("feature: enabled"));
+        service.materializeCandidate("application.yml");
+        assertEquals("feature: enabled\n", Files.readString(sourceFile));
+    }
+
+    @Test
     void candidateStateDoesNotLeakBetweenRepositories(@TempDir Path first, @TempDir Path second) {
         ProjectState firstProject = ProjectState.selectWorkspace("candidate-a", 301, first.toString(), "JAVA");
         ProjectState secondProject = ProjectState.selectWorkspace("candidate-b", 302, second.toString(), "JAVA");

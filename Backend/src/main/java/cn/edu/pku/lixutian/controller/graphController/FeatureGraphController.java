@@ -113,28 +113,47 @@ public class FeatureGraphController {
         }
         if (ProjectState.getInstance().isPython()) {
             FeatureGraphResult graph = codemapService.getPythonModificationGraph();
+            java.util.Set<String> pendingPaths = candidateCodeService.pendingModificationKeys().stream()
+                    .map(path -> path.replace('\\', '/'))
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
             java.util.Set<String> stagedPaths = candidateCodeService.stagedModificationKeys().stream()
                     .map(path -> path.replace('\\', '/'))
                     .collect(java.util.stream.Collectors.toSet());
+            java.util.Set<String> representedPaths = graph.getNodes().stream()
+                    .map(node -> pythonNodeProjectPath(node.getId(), pendingPaths))
+                    .collect(java.util.stream.Collectors.toSet());
+            pendingPaths.stream()
+                    .filter(path -> !representedPaths.contains(path))
+                    .map(FeatureGraphResult.Node::new)
+                    .forEach(node -> {
+                        node.setType("Modify");
+                        graph.getNodes().add(node);
+                    });
             graph.getNodes().stream()
-                    .filter(node -> stagedPaths.contains(
-                            CodeMapService.resolvePythonNodeToFile(node.getId()).replace('\\', '/')
-                    ))
+                    .filter(node -> stagedPaths.contains(pythonNodeProjectPath(node.getId(), pendingPaths)))
                     .forEach(node -> node.setType("Staged"));
             return graph;
         }
         FeatureGraphResult maxGraph = codemapService.getMaxGraph();
         java.util.Set<String> classIds = candidateCodeService.pendingModificationKeys().stream()
-                .map(JavaFilePath::toClassName)
+                .map(path -> path.endsWith(".java") ? JavaFilePath.toClassName(path) : path)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         FeatureGraphResult newGraph = new FeatureGraphResult(classIds);
         FeatureGraphResult result = maxGraph.setNewType(newGraph);
         java.util.Set<String> stagedClassIds = candidateCodeService.stagedModificationKeys().stream()
-                .map(JavaFilePath::toClassName)
+                .map(path -> path.endsWith(".java") ? JavaFilePath.toClassName(path) : path)
                 .collect(java.util.stream.Collectors.toSet());
         result.getNodes().stream()
                 .filter(node -> stagedClassIds.contains(node.getId()))
                 .forEach(node -> node.setType("Staged"));
         return result;
+    }
+
+    private String pythonNodeProjectPath(String nodeId, java.util.Set<String> candidatePaths) {
+        String normalized = nodeId.replace('\\', '/');
+        if (candidatePaths.contains(normalized)) {
+            return normalized;
+        }
+        return CodeMapService.resolvePythonNodeToFile(nodeId).replace('\\', '/');
     }
 }

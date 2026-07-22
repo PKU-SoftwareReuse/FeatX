@@ -166,6 +166,19 @@ class ModifyAgentServiceTest {
     }
 
     @Test
+    void appliesSearchReplaceToANonJavaProjectFile() {
+        String result = service.applyAgent3Result("""
+                <<<<<<< SEARCH
+                feature: disabled
+                =======
+                feature: enabled
+                >>>>>>> REPLACE
+                """, "application.yml", "feature: disabled\n", false);
+
+        assertTrue(result.contains("feature: enabled"));
+    }
+
+    @Test
     void rejectsATypeThatDoesNotMatchTheTargetPath() {
         assertThrows(
                 IllegalArgumentException.class,

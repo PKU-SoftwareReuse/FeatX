@@ -3,12 +3,15 @@ package cn.edu.pku.lixutian.service.code;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.ProjectFilePath;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -23,15 +26,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-abstract class JavaAgentPipelineSupport extends AgentService {
+abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static final int MAX_ADDITIONAL_FILES = 12;
     private static final int MAX_MODIFIED_FILES = 20;
-    private static final int MAX_CORE_CONTEXT_CHARS = contextLimit("JAVA_AGENT_MAX_CORE_CONTEXT_CHARS", 0);
-    private static final int MAX_REFERENCE_CONTEXT_CHARS = contextLimit("JAVA_AGENT_MAX_REFERENCE_CONTEXT_CHARS", 0);
+    private static final int MAX_CORE_CONTEXT_CHARS = contextLimit(
+            "AGENT_MAX_CORE_CONTEXT_CHARS",
+            contextLimit("JAVA_AGENT_MAX_CORE_CONTEXT_CHARS", 0)
+    );
+    private static final int MAX_REFERENCE_CONTEXT_CHARS = contextLimit(
+            "AGENT_MAX_REFERENCE_CONTEXT_CHARS",
+            contextLimit("JAVA_AGENT_MAX_REFERENCE_CONTEXT_CHARS", 0)
+    );
     private static final int MAX_PRIOR_GENERATION_CHARS = 80_000;
     private static final int MAX_AGENT3_RETRIES = 5;
     private static final int MAX_RETRY_RESPONSE_CHARS = 20_000;
     private static final long PIPELINE_TIMEOUT_MILLIS = TimeUnit.MINUTES.toMillis(30);
+    private static final long PYTHON_SYNTAX_TIMEOUT_SECONDS = 20;
 
     private static class AdditionalFile {
         String filename;
@@ -45,6 +55,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
 
     private static class ModifiedFile {
         String filename;
+        String action;
         String plan;
         String note;
     }
@@ -53,7 +64,12 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         List<ModifiedFile> modifiedFileList = new ArrayList<>();
     }
 
-    protected SseEmitter runJavaPipeline(String runId, String model, boolean addition) {
+    protected SseEmitter runThreeStagePipeline(
+            String runId,
+            String model,
+            String projectLanguage,
+            boolean addition
+    ) {
         AgentRunContext context = agentRunRegistry.claim(runId);
         AgentRunEventStream eventStream = agentRunRegistry.eventStream(runId);
         SseEmitter subscriber = agentRunRegistry.subscribe(runId);
@@ -76,6 +92,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             Future<?> future = agentPipelineExecutor.submit(() -> projectContext.run(() -> executePipeline(
                     context,
                     model,
+                    projectLanguage,
                     addition,
                     eventStream,
                     terminal
@@ -95,20 +112,24 @@ abstract class JavaAgentPipelineSupport extends AgentService {
     private void executePipeline(
             AgentRunContext context,
             String model,
+            String projectLanguage,
             boolean addition,
             AgentEventSink eventSink,
             AtomicBoolean terminal
     ) {
         try {
-            Set<String> existingJavaFiles = new HashSet<>(ListFileHelper.findJavaFiles(context.sourceRoot()));
+            if ("Python".equals(projectLanguage)) {
+                ProjectState.getInstance().setPythonModifiedMethods(Set.of());
+            }
+            Set<String> existingFiles = new HashSet<>(ListFileHelper.findAllFiles(context.sourceRoot()));
 
             sendStatus(eventSink, context.language().stageOneDescription());
-            String agent1Prompt = buildAgent1Prompt(context, addition);
+            String agent1Prompt = buildAgent1Prompt(context, projectLanguage, addition);
             Agent1ParsedResult agent1 = requestAndParseAgent1(
                     agent1Prompt,
                     eventSink,
                     model,
-                    existingJavaFiles,
+                    existingFiles,
                     context.language()
             );
 
@@ -127,7 +148,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                         followUpPrompt,
                         eventSink,
                         model,
-                        existingJavaFiles,
+                        existingFiles,
                         context.language()
                 );
                 if (followUp.needAdditionalFile) {
@@ -153,7 +174,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             }
 
             sendStatus(eventSink, context.language().stageTwoDescription());
-            String agent2Prompt = buildAgent2Prompt(context, extraInfo, addition);
+            String agent2Prompt = buildAgent2Prompt(context, extraInfo, projectLanguage, addition);
             Agent2ParsedResult agent2 = requestAndParseAgent2(
                     agent2Prompt,
                     eventSink,
@@ -163,7 +184,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             );
             if (agent2.modifiedFileList.isEmpty()) {
                 throw new IllegalStateException(
-                        "Agent2 planned no Java file changes, so there is no candidate operation to confirm."
+                        "Agent2 planned no project file changes, so there is no candidate operation to confirm."
                 );
             }
 
@@ -178,11 +199,16 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             for (ModifiedFile file : agent2.modifiedFileList) {
                 ensureNotInterrupted();
                 sendStatus(eventSink, context.language().stageThreeDescription(file.filename));
-                Path targetPath = JavaFilePath.resolve(Path.of(context.sourceRoot()), file.filename);
+                if ("delete".equals(file.action)) {
+                    modifications.put(file.filename, DELETE_FILE_SENTINEL);
+                    priorGenerations.append("\nFILE DELETED: ").append(file.filename).append("\n");
+                    continue;
+                }
+                Path targetPath = ProjectFilePath.resolve(Path.of(context.sourceRoot()), file.filename);
                 boolean createMode = !Files.isRegularFile(targetPath);
                 String fileContent = createMode
                         ? ""
-                        : ListFileHelper.getFileContent(context.sourceRoot(), file.filename);
+                        : ListFileHelper.getProjectFileContent(context.sourceRoot(), file.filename);
                 if (fileContent.isBlank()) {
                     createMode = true;
                 }
@@ -194,6 +220,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                         globalPlan,
                         referenceContext,
                         boundedPromptSection(priorGenerations.toString(), MAX_PRIOR_GENERATION_CHARS),
+                        projectLanguage,
                         addition
                 );
                 String generatedContent = requestAndApplyAgent3(
@@ -229,7 +256,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             }
             terminal.set(true);
             agentRunRegistry.fail(context.runId(), exception);
-            logger.error("Java Agent pipeline failed for run {}", context.runId(), exception);
+            logger.error("{} Agent pipeline failed for run {}", projectLanguage, context.runId(), exception);
             try {
                 sendFailed(
                         eventSink,
@@ -282,7 +309,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
     private Agent2ParsedResult requirePlannedFiles(Agent2ParsedResult result) {
         if (result.modifiedFileList.isEmpty()) {
             throw new IllegalArgumentException(
-                    "Agent2 planned no Java file changes for the submitted requirement."
+                    "Agent2 planned no project file changes for the submitted requirement."
             );
         }
         return result;
@@ -317,7 +344,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 }
                 lastFailure = exception;
                 logger.warn(
-                        "Java Agent3 failed for {} on attempt {}/{}: {}",
+                        "Agent3 failed for {} on attempt {}/{}: {}",
                         filename,
                         attempt + 1,
                         MAX_AGENT3_RETRIES + 1,
@@ -353,9 +380,9 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         result.needAdditionalFile = needNode.booleanValue();
         Set<String> seen = new HashSet<>();
         for (JsonNode fileNode : filesNode) {
-            String filename = JavaFilePath.normalize(requiredText(fileNode, "filename", "Agent1"));
+            String filename = ProjectFilePath.normalize(requiredText(fileNode, "filename", "Agent1"));
             if (!existingFiles.contains(filename)) {
-                throw new IllegalArgumentException("Agent1 requested a Java file outside the supplied list: " + filename);
+                throw new IllegalArgumentException("Agent1 requested a file outside the supplied project list: " + filename);
             }
             if (!seen.add(filename)) {
                 continue;
@@ -384,13 +411,20 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         Agent2ParsedResult result = new Agent2ParsedResult();
         Set<String> seen = new HashSet<>();
         for (JsonNode fileNode : filesNode) {
-            String filename = JavaFilePath.normalize(requiredText(fileNode, "filename", "Agent2"));
-            JavaFilePath.resolve(Path.of(sourceRoot), filename);
+            String filename = ProjectFilePath.normalize(requiredText(fileNode, "filename", "Agent2"));
+            Path resolved = ProjectFilePath.resolve(Path.of(sourceRoot), filename);
             if (!seen.add(filename)) {
                 throw new IllegalArgumentException("Agent2 returned a duplicate file: " + filename);
             }
             ModifiedFile file = new ModifiedFile();
             file.filename = filename;
+            file.action = fileNode.path("action").asText("rewrite").trim().toLowerCase();
+            if (!Set.of("rewrite", "delete").contains(file.action)) {
+                throw new IllegalArgumentException("Agent2 returned an unsupported file action: " + file.action);
+            }
+            if ("delete".equals(file.action) && !Files.isRegularFile(resolved)) {
+                throw new IllegalArgumentException("Agent2 cannot delete a file that does not exist: " + filename);
+            }
             file.plan = requiredText(fileNode, "plan", "Agent2");
             file.note = optionalText(fileNode, "note");
             result.modifiedFileList.add(file);
@@ -405,35 +439,9 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             boolean createMode
     ) {
         try {
-            String javaCode = SearchReplacePatch.apply(response, originalContent, createMode);
-            CompilationUnit compilationUnit = StaticJavaParser.parse(javaCode);
-            String expectedType = JavaFilePath.simpleTypeName(filename);
-            boolean expectedTypePresent = compilationUnit.getTypes().stream()
-                    .anyMatch(type -> type.getNameAsString().equals(expectedType));
-            if (!expectedTypePresent) {
-                throw new IllegalArgumentException(
-                        "Generated file " + filename + " does not declare its expected type " + expectedType + "."
-                );
-            }
-            boolean mismatchedPublicType = compilationUnit.getTypes().stream()
-                    .anyMatch(type -> type.isPublic() && !type.getNameAsString().equals(expectedType));
-            if (mismatchedPublicType) {
-                throw new IllegalArgumentException(
-                        "Generated file " + filename + " declares a different public top-level type."
-                );
-            }
-            String expectedPackage = JavaFilePath.packageName(filename);
-            String actualPackage = compilationUnit.getPackageDeclaration()
-                    .map(declaration -> declaration.getNameAsString())
-                    .orElse("");
-            if (!expectedPackage.equals(actualPackage)) {
-                throw new IllegalArgumentException(
-                        "Generated file " + filename + " must declare package "
-                                + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
-                );
-            }
-
-            return javaCode;
+            String generatedContent = SearchReplacePatch.apply(response, originalContent, createMode);
+            validateGeneratedContent(filename, generatedContent);
+            return generatedContent;
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException(
                     "Agent3 Search/Replace result is invalid for " + filename + ": "
@@ -441,6 +449,86 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                     exception
             );
         }
+    }
+
+    private void validateGeneratedContent(String filename, String content) {
+        if (filename.endsWith(".java")) {
+            validateJavaSource(filename, content);
+        } else if (filename.endsWith(".py")) {
+            validatePythonSyntax(filename, content);
+        }
+    }
+
+    private void validateJavaSource(String filename, String content) {
+        CompilationUnit compilationUnit = StaticJavaParser.parse(content);
+        String expectedType = JavaFilePath.simpleTypeName(filename);
+        boolean expectedTypePresent = compilationUnit.getTypes().stream()
+                .anyMatch(type -> type.getNameAsString().equals(expectedType));
+        if (!expectedTypePresent) {
+            throw new IllegalArgumentException(
+                    "Generated file " + filename + " does not declare its expected type " + expectedType + "."
+            );
+        }
+        boolean mismatchedPublicType = compilationUnit.getTypes().stream()
+                .anyMatch(type -> type.isPublic() && !type.getNameAsString().equals(expectedType));
+        if (mismatchedPublicType) {
+            throw new IllegalArgumentException(
+                    "Generated file " + filename + " declares a different public top-level type."
+            );
+        }
+        String expectedPackage = JavaFilePath.packageName(filename);
+        String actualPackage = compilationUnit.getPackageDeclaration()
+                .map(declaration -> declaration.getNameAsString())
+                .orElse("");
+        if (!expectedPackage.equals(actualPackage)) {
+            throw new IllegalArgumentException(
+                    "Generated file " + filename + " must declare package "
+                            + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
+            );
+        }
+    }
+
+    private void validatePythonSyntax(String filename, String content) {
+        String pythonExec = environmentOrDefault("REPOSUMMARY_PYTHON", "python3");
+        Process process = null;
+        try {
+            process = new ProcessBuilder(
+                    pythonExec,
+                    "-c",
+                    "import ast,sys; ast.parse(sys.stdin.read(), filename=sys.argv[1])",
+                    filename
+            ).start();
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(content.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!process.waitFor(PYTHON_SYNTAX_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IllegalArgumentException("Python syntax validation timed out.");
+            }
+            if (process.exitValue() != 0) {
+                String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+                throw new IllegalArgumentException(
+                        "Generated Python syntax is invalid"
+                                + (error.isBlank() ? "." : ": " + boundedError(error))
+                );
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            if (process != null) {
+                process.destroyForcibly();
+            }
+            throw new IllegalArgumentException("Python syntax validation was interrupted.", exception);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException(
+                    "Unable to run Python syntax validation with " + pythonExec + ".",
+                    exception
+            );
+        }
+    }
+
+    private String boundedError(String error) {
+        String singleLine = error.replace('\r', ' ').replace('\n', ' ').trim();
+        return singleLine.length() <= 500 ? singleLine : singleLine.substring(0, 500);
     }
 
     private String loadAdditionalContext(
@@ -457,7 +545,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             extra.append("filename: ").append(file.filename).append("\n")
                     .append("recommendReason: ").append(file.recommendReason).append("\n")
                     .append("fileContent:\n")
-                    .append(ListFileHelper.getFileContent(sourceRoot, file.filename))
+                    .append(ListFileHelper.getProjectFileContent(sourceRoot, file.filename))
                     .append("\n=======================\n");
         }
         return boundedPromptSection(extra.toString(), MAX_REFERENCE_CONTEXT_CHARS);
@@ -467,13 +555,14 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         StringBuilder plan = new StringBuilder();
         for (ModifiedFile file : files) {
             plan.append("FILE: ").append(file.filename).append("\n")
+                    .append("ACTION: ").append(file.action).append("\n")
                     .append("PLAN: ").append(file.plan).append("\n")
                     .append("NOTE: ").append(file.note).append("\n\n");
         }
         return plan.toString();
     }
 
-    private String buildAgent1Prompt(AgentRunContext context, boolean addition) {
+    private String buildAgent1Prompt(AgentRunContext context, String projectLanguage, boolean addition) {
         String originalSection = addition ? "" : """
                 Original feature description:
                 \"\"\"
@@ -482,7 +571,8 @@ abstract class JavaAgentPipelineSupport extends AgentService {
 
                 """.formatted(context.oldRequest());
         return """
-                You are Agent1. Determine which existing Java source files are required to implement the requested %s.
+                You are Agent1 for a %s project. Determine which existing project files are required to implement
+                the requested %s.
 
                 Requirement:
                 \"\"\"
@@ -490,13 +580,14 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 \"\"\"
 
                 %s
-                Existing CodeMap context:
+                Retrieved graph and CodeMap context:
                 \"\"\"
                 %s
                 \"\"\"
 
-                Complete Java source-file list. Every filename uses a source-root-relative path such as
-                cn/edu/pku/Foo.java. Return filenames in exactly this format:
+                Complete project file list from the original source root. It includes source code, configuration,
+                metadata, templates, scripts, tests, and other project files without filtering by extension.
+                Every filename is source-root-relative. Return filenames in exactly this format:
                 \"\"\"
                 %s
                 \"\"\"
@@ -505,24 +596,30 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 {
                   "needAdditionalFile": true,
                   "additionalFileList": [
-                    {"filename": "cn/edu/pku/Foo.java", "recommendReason": "why it is needed"}
+                    {"filename": "path/to/project.file", "recommendReason": "why it is needed"}
                   ]
                 }
                 Write recommendReason values in %s.
                 If no additional files are needed, return false and an empty array.
                 """.formatted(
+                projectLanguage,
                 addition ? "feature addition" : "feature modification",
                 context.newRequest(),
                 originalSection,
                 boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
-                boundedPromptSection(context.allFiles(), 80_000),
+                context.allFiles(),
                 context.language().promptLanguageName()
         );
     }
 
-    private String buildAgent2Prompt(AgentRunContext context, String extraInfo, boolean addition) {
+    private String buildAgent2Prompt(
+            AgentRunContext context,
+            String extraInfo,
+            String projectLanguage,
+            boolean addition
+    ) {
         return """
-                You are Agent2. Produce a complete, internally consistent Java file-level plan for this %s.
+                You are Agent2 for a %s project. Produce a complete, internally consistent file-level plan for this %s.
 
                 Requirement:
                 \"\"\"
@@ -534,7 +631,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 %s
                 \"\"\"
 
-                Existing CodeMap context:
+                Retrieved graph and CodeMap context:
                 \"\"\"
                 %s
                 \"\"\"
@@ -544,15 +641,16 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 %s
                 \"\"\"
 
-                Every filename must be a source-root-relative Java path such as cn/edu/pku/Foo.java.
-                Include every edited or newly created Java file, but no non-Java files. Make shared API names,
-                signatures, data types, and call sites explicit so independent file rewrites stay consistent.
+                Every filename must be relative to the original source root. Include every edited, newly created,
+                or deleted project file regardless of extension. Make shared API names, signatures, data types,
+                configuration keys, and call sites explicit so independent edits stay consistent.
 
                 Return JSON only. Do not include reasoning or Markdown fences:
                 {
                   "modifiedFileList": [
                     {
-                      "filename": "cn/edu/pku/Foo.java",
+                      "filename": "path/to/project.file",
+                      "action": "rewrite",
                       "plan": "Concrete steps, including exact shared signatures.",
                       "note": "Constraints and compatibility risks."
                     }
@@ -562,6 +660,7 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 empty modifiedFileList merely because the requested behavior is small or unconventional.
                 Write plan and note values in %s.
                 """.formatted(
+                projectLanguage,
                 addition ? "feature addition" : "feature modification",
                 context.newRequest(),
                 context.oldRequest(),
@@ -579,22 +678,24 @@ abstract class JavaAgentPipelineSupport extends AgentService {
             String globalPlan,
             String referenceContext,
             String priorGenerations,
+            String projectLanguage,
             boolean addition
     ) {
-        String expectedPackage = JavaFilePath.packageName(target.filename);
-        String packageDeclaration = expectedPackage.isEmpty()
-                ? ""
-                : "package " + expectedPackage + ";\n\n";
-        String expectedTypeName = JavaFilePath.simpleTypeName(target.filename);
+        boolean javaFile = target.filename.endsWith(".java");
+        String expectedPackage = javaFile ? JavaFilePath.packageName(target.filename) : "";
+        String packageDeclaration = expectedPackage.isEmpty() ? "" : "package " + expectedPackage + ";\n\n";
+        String expectedTypeName = javaFile ? JavaFilePath.simpleTypeName(target.filename) : "";
+        String createExample = javaFile
+                ? packageDeclaration + "public class " + expectedTypeName + " {\n}"
+                : "complete content for " + target.filename;
         String outputContract = createMode ? """
                 The target is a new or empty file, so return exactly one CREATE block:
                 <<<<<<< CREATE
-                %spublic class %s {
-                }
+                %s
                 >>>>>>> CREATE
 
                 CREATE is the only case where complete-file generation is allowed.
-                """.formatted(packageDeclaration, expectedTypeName) : """
+                """.formatted(createExample) : """
                 Return only minimal exact Search/Replace blocks in application order:
                 <<<<<<< SEARCH
                 exact text copied from the current target file
@@ -603,7 +704,8 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 >>>>>>> REPLACE
 
                 Rules:
-                - Never return the complete existing file.
+                - Never return the complete existing multi-line file. For a single-line file, replacing its one
+                  line is the minimal valid edit.
                 - SEARCH must be non-empty and match exactly once in the current file at that step.
                 - Every REPLACE must differ from its SEARCH and must implement part of the requirement.
                 - Include enough unchanged context to make every SEARCH unique.
@@ -611,8 +713,8 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 - Do not use ellipses, line numbers, regexes, explanations, or omitted-code placeholders.
                 """;
         return """
-                You are Agent3. Produce precise Search/Replace edits for one Java source file in a coordinated
-                multi-file %s.
+                You are Agent3 for a %s project. Produce precise Search/Replace edits for one project file in a
+                coordinated multi-file %s.
 
                 Requirement:
                 \"\"\"
@@ -650,11 +752,12 @@ abstract class JavaAgentPipelineSupport extends AgentService {
 
                 %s
 
-                The resulting file must remain syntactically valid Java and declare the type named %s.
-                FeatX applies the blocks only in memory and parses the result; it does not compile or run the project.
+                The resulting file must remain valid for its file type. FeatX applies the blocks only in memory;
+                it syntax-checks generated Java and Python files but does not compile or run the project.
                 Do not wrap the protocol in Markdown fences.
                 Write newly added or modified natural-language comments in %s.
                 """.formatted(
+                projectLanguage,
                 addition ? "feature addition" : "feature modification",
                 context.newRequest(),
                 context.oldRequest(),
@@ -666,7 +769,6 @@ abstract class JavaAgentPipelineSupport extends AgentService {
                 target.note,
                 originalFile,
                 outputContract,
-                expectedTypeName,
                 context.language().promptLanguageName()
         );
     }
@@ -772,6 +874,11 @@ abstract class JavaAgentPipelineSupport extends AgentService {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("Agent pipeline was cancelled.");
         }
+    }
+
+    private String environmentOrDefault(String name, String defaultValue) {
+        String value = System.getenv(name);
+        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
     private static int contextLimit(String name, int defaultValue) {

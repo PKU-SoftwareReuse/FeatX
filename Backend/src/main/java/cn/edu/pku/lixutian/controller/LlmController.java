@@ -120,7 +120,7 @@ public class LlmController {
                     newRequest,
                     oldRequest,
                     graphContext.getContextPrompt(),
-                    String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                    String.join("\n", ListFileHelper.findAllFiles(project.getSrcPath())),
                     requestLanguage,
                     project.getSrcPath(),
                     project.getProjectPath(),
@@ -259,7 +259,7 @@ public class LlmController {
                     newRequest,
                     "",
                     graphContext.getContextPrompt(),
-                    String.join("\n", ListFileHelper.findJavaFiles(project.getSrcPath())),
+                    String.join("\n", ListFileHelper.findAllFiles(project.getSrcPath())),
                     requestLanguage,
                     project.getSrcPath(),
                     project.getProjectPath(),
@@ -624,7 +624,7 @@ public class LlmController {
 
     private String projectFileList(ProjectState project) {
         StringBuilder fileList = new StringBuilder();
-        for (String projectFile : ListFileHelper.findPythonFiles(project.getSrcPath())) {
+        for (String projectFile : ListFileHelper.findAllFiles(project.getSrcPath())) {
             fileList.append(projectFile).append("\n");
         }
         return fileList.toString();

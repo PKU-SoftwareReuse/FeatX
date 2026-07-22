@@ -57,6 +57,8 @@ class LlmControllerTest {
     @Test
     void javaModifyStoresReasoningStagesInRunContext(@TempDir Path projectRoot) throws Exception {
         prepareProject(projectRoot, "JAVA");
+        Files.writeString(projectRoot.resolve("application.yml"), "feature: disabled\n");
+        Files.writeString(projectRoot.resolve("README.md"), "# Test project\n");
         FeatureResult feature = selectedFeature(7, "Old feature");
 
         FocusGraphContextResult graphContext = new FocusGraphContextResult();
@@ -89,6 +91,9 @@ class LlmControllerTest {
         assertEquals("modify", run.mode());
         assertEquals(feature.getFeatureId(), run.featureId());
         assertEquals("complete Java graph context", run.relatedCodes());
+        assertTrue(run.allFiles().contains("application.yml"));
+        assertTrue(run.allFiles().contains("README.md"));
+        assertTrue(run.allFiles().contains("Feature.java"));
         assertEquals(List.of("initial"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildModifyContext(feature, "Old feature", "Old feature plus greeting", "print greeting", AgentLanguage.EN);
     }
@@ -124,6 +129,48 @@ class LlmControllerTest {
         assertEquals("Java add graph context", run.relatedCodes());
         assertEquals(List.of("reasoning"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildAddContext("Add report export", AgentLanguage.EN);
+    }
+
+    @Test
+    void pythonModifyReceivesEveryFileUnderTheOriginalSourceRoot(@TempDir Path projectRoot) throws Exception {
+        prepareProject(projectRoot, "PYTHON");
+        Files.writeString(projectRoot.resolve("settings.yml"), "feature: disabled\n");
+        Files.writeString(projectRoot.resolve("README.md"), "# Python project\n");
+        FeatureResult feature = selectedFeature(12, "Old Python feature");
+
+        FocusGraphContextResult graphContext = new FocusGraphContextResult();
+        graphContext.setContextPrompt("complete Python graph context");
+        FocusGraphContextService pythonGraphService = mock(FocusGraphContextService.class);
+        when(pythonGraphService.buildModifyContext(
+                anyInt(),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyList()
+        )).thenReturn(graphContext);
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.generateWithSinglePrompt(anyString()))
+                .thenReturn("{\"deltaQuery\":\"enable feature\"}");
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        LlmController controller = controller(
+                registry,
+                mock(JavaGraphContextService.class),
+                pythonGraphService,
+                llmClient
+        );
+        AddOrModifyRequest request = new AddOrModifyRequest();
+        request.setFeatureDescription("Enable the Python feature");
+        request.setLanguage(AgentLanguage.EN);
+
+        AgentRunStartResult result = controller.modifyFeature(request);
+        AgentRunContext run = registry.requireActiveContext(result.runId());
+
+        assertEquals("modify-python", run.mode());
+        assertEquals(feature.getFeatureId(), run.featureId());
+        assertTrue(run.allFiles().contains("Feature.py"));
+        assertTrue(run.allFiles().contains("settings.yml"));
+        assertTrue(run.allFiles().contains("README.md"));
     }
 
     @Test

@@ -20,6 +20,7 @@ import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
+import cn.edu.pku.lixutian.helper.ProjectFilePath;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import com.github.javaparser.ParseException;
 import com.github.javaparser.StaticJavaParser;
@@ -651,8 +652,18 @@ public class CodeMapService {
 
         // 3. 从已确认的完整候选代码更新邻接表并重写文件
         for (Map.Entry<String, String> entry : ProjectState.getInstance().getModifications().entrySet()) {
+            if (!entry.getKey().endsWith(".java")) {
+                continue;
+            }
             try {
                 String javaFilePath = JavaFilePath.normalize(entry.getKey());
+                if (AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue())) {
+                    Files.deleteIfExists(ProjectFilePath.resolve(
+                            Path.of(ProjectState.getInstance().getSrcPath()),
+                            javaFilePath
+                    ));
+                    continue;
+                }
                 String currentFile = JavaFilePath.toClassName(javaFilePath);
                 String editedContent = candidateCodeService.authoritativeJavaContent(javaFilePath)
                         .orElseThrow(() -> new IllegalStateException(
@@ -797,6 +808,7 @@ public class CodeMapService {
 
         List<String> changedFiles = modifications.entrySet().stream()
                 .filter(entry -> !AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue()))
+                .filter(entry -> entry.getKey().endsWith(".py"))
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toCollection(ArrayList::new));
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
@@ -822,6 +834,7 @@ public class CodeMapService {
 
         List<String> changedFiles = modifications.entrySet().stream()
                 .filter(entry -> !AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue()))
+                .filter(entry -> entry.getKey().endsWith(".py"))
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toCollection(ArrayList::new));
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
@@ -935,6 +948,9 @@ public class CodeMapService {
 
     private void applyPythonModifications(Map<String, String> modifications) throws IOException {
         for (Map.Entry<String, String> entry : modifications.entrySet()) {
+            if (!entry.getKey().endsWith(".py")) {
+                continue;
+            }
             if (AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue())) {
                 deletePythonFile(entry.getKey());
             } else {
