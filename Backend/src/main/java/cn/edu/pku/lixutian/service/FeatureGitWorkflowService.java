@@ -78,14 +78,10 @@ public class FeatureGitWorkflowService {
             throws IOException, InterruptedException, ParseException {
         String normalizedOperation = normalizeOperation(operation);
         AgentRunContext agentRun = agentRunRegistry.requireCompletedOperation(runId, normalizedOperation);
-        if (!"delete".equals(normalizedOperation)) {
-            return commitAddOrEdit(normalizedOperation, requestedMessage, runId, agentRun);
-        }
-
-        return commitDelete(requestedMessage, agentRun);
+        return commitCandidateChanges(normalizedOperation, requestedMessage, runId, agentRun);
     }
 
-    private GitCommitResult commitAddOrEdit(
+    private GitCommitResult commitCandidateChanges(
             String operation,
             String requestedMessage,
             String runId,
@@ -140,47 +136,6 @@ public class FeatureGitWorkflowService {
                 agentRunRegistry.replaceCompletedModifications(runId, allModifications);
             }
             throw exception;
-        }
-
-        GitCommitResult result = new GitCommitResult();
-        result.setCommitHash(commitHash);
-        result.setCommitScope(commitScope);
-        result.setFeatureId(featureId);
-        result.setStatus(repositoryGitService.status());
-        return result;
-    }
-
-    private GitCommitResult commitDelete(String requestedMessage, AgentRunContext agentRun)
-            throws IOException, InterruptedException, ParseException {
-        GitWorkspaceStatusResult before = repositoryGitService.status();
-        if (before.getStagedPaths().isEmpty()) {
-            throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");
-        }
-
-        boolean complete = "COMPLETE".equals(before.getCommitScope());
-        Integer featureId = null;
-        if (complete) {
-            candidateCodeService.validateCompleteCandidateSet();
-            featureId = confirmFeatureOperation("delete", agentRun);
-            repositoryGitService.stagePaths(candidateCodeService.allCandidateProjectPaths());
-        }
-
-        GitWorkspaceStatusResult readyToCommit = repositoryGitService.status();
-        List<String> committedPaths = readyToCommit.getStagedPaths();
-        if (committedPaths.isEmpty()) {
-            throw new IllegalStateException("There are no staged changes to commit.");
-        }
-        String commitScope = complete ? "COMPLETE" : "PARTIAL";
-        String commitHash = repositoryGitService.commit(defaultCommitMessage(
-                requestedMessage,
-                "delete",
-                commitScope
-        ));
-        candidateCodeService.markCommittedPaths(committedPaths);
-
-        if (complete) {
-            candidateCodeService.discardCandidateState();
-            agentRunRegistry.clear();
         }
 
         GitCommitResult result = new GitCommitResult();

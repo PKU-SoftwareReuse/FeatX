@@ -26,6 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class LlmClient {
@@ -153,7 +154,15 @@ public class LlmClient {
     }
 
     public String streamGenerateWithPrompt(String prompt, SseEmitter emitter, String model) throws IOException {
-        return streamGenerateWithPrompt(prompt, model, contentChunk -> {
+        return streamGenerateWithPromptResult(prompt, emitter, model).content();
+    }
+
+    public LlmGenerationResult streamGenerateWithPromptResult(
+            String prompt,
+            SseEmitter emitter,
+            String model
+    ) throws IOException {
+        return streamGenerateWithPromptResult(prompt, model, contentChunk -> {
             String encoded = Base64.getEncoder().encodeToString(
                     contentChunk.getBytes(StandardCharsets.UTF_8)
             );
@@ -162,11 +171,28 @@ public class LlmClient {
     }
 
     public String streamGenerateWithPrompt(String prompt, AgentEventSink eventSink, String model) throws IOException {
-        return streamGenerateWithPrompt(prompt, model, contentChunk -> eventSink.send("delta", contentChunk));
+        return streamGenerateWithPromptResult(prompt, eventSink, model).content();
     }
 
-    private String streamGenerateWithPrompt(String prompt, String model, ChunkSink chunkSink) throws IOException {
+    public LlmGenerationResult streamGenerateWithPromptResult(
+            String prompt,
+            AgentEventSink eventSink,
+            String model
+    ) throws IOException {
+        return streamGenerateWithPromptResult(
+                prompt,
+                model,
+                contentChunk -> eventSink.send("delta", contentChunk)
+        );
+    }
+
+    private LlmGenerationResult streamGenerateWithPromptResult(
+            String prompt,
+            String model,
+            ChunkSink chunkSink
+    ) throws IOException {
         StringBuilder buffer = new StringBuilder();
+        AtomicReference<LlmTokenUsage> usage = new AtomicReference<>();
         ObjectNode root = createRequestBody(createUserMessages(prompt), model, true);
         Request request = authorizedRequest(endpoint("chat/completions"))
                 .post(RequestBody.create(OBJECT_MAPPER.writeValueAsString(root), JSON))
@@ -200,7 +226,12 @@ public class LlmClient {
                         break;
                     }
 
-                    String contentChunk = extractContentFromChunk(jsonPart);
+                    JsonNode chunk = parseStreamChunk(jsonPart);
+                    LlmTokenUsage chunkUsage = extractUsage(chunk);
+                    if (chunkUsage != null) {
+                        usage.set(chunkUsage);
+                    }
+                    String contentChunk = extractContentFromChunk(chunk);
                     if (contentChunk != null && !contentChunk.isEmpty()) {
                         chunkSink.send(contentChunk);
                         buffer.append(contentChunk);
@@ -210,7 +241,7 @@ public class LlmClient {
             if (!completed) {
                 throw new IOException("LLM stream ended before the [DONE] marker.");
             }
-            return buffer.toString();
+            return new LlmGenerationResult(buffer.toString(), usage.get());
         }
     }
 
@@ -246,6 +277,11 @@ public class LlmClient {
         root.put("model", model);
         root.put("temperature", TEMPERATURE);
         root.put("stream", stream);
+        if (stream) {
+            ObjectNode streamOptions = OBJECT_MAPPER.createObjectNode();
+            streamOptions.put("include_usage", true);
+            root.set("stream_options", streamOptions);
+        }
         root.set("messages", messages);
         return root;
     }
@@ -281,20 +317,88 @@ public class LlmClient {
         return lowerCaseUrl.endsWith("/v1") ? normalized : normalized + "/v1";
     }
 
-    private static String extractContentFromChunk(String jsonChunk) throws IOException {
+    private static JsonNode parseStreamChunk(String jsonChunk) throws IOException {
         try {
-            JsonNode choices = OBJECT_MAPPER.readTree(jsonChunk).path("choices");
-            if (!choices.isArray() || choices.isEmpty()) {
-                return null;
-            }
-
-            JsonNode content = choices.get(0).path("delta").path("content");
-            if (content.isMissingNode() || content.isNull()) {
-                return null;
-            }
-            return content.asText();
+            return OBJECT_MAPPER.readTree(jsonChunk);
         } catch (Exception e) {
             throw new IOException("Malformed JSON chunk in LLM stream.", e);
         }
+    }
+
+    private static String extractContentFromChunk(JsonNode chunk) {
+        JsonNode choices = chunk.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            return null;
+        }
+
+        JsonNode content = choices.get(0).path("delta").path("content");
+        if (content.isMissingNode() || content.isNull()) {
+            return null;
+        }
+        return content.asText();
+    }
+
+    private static LlmTokenUsage extractUsage(JsonNode chunk) {
+        JsonNode usage = chunk.path("usage");
+        if (!usage.isObject()) {
+            return null;
+        }
+
+        Long input = firstLong(usage, "prompt_tokens", "input_tokens");
+        Long output = firstLong(usage, "completion_tokens", "output_tokens");
+        Long total = firstLong(usage, "total_tokens");
+        Long cached = firstLong(
+                usage,
+                "cached_input_tokens",
+                "prompt_cache_hit_tokens",
+                "cache_read_input_tokens"
+        );
+        if (cached == null) {
+            cached = firstLong(usage.path("prompt_tokens_details"), "cached_tokens");
+        }
+        if (cached == null) {
+            cached = firstLong(usage.path("input_tokens_details"), "cached_tokens");
+        }
+
+        Long reasoning = firstLong(usage, "reasoning_output_tokens");
+        if (reasoning == null) {
+            reasoning = firstLong(usage.path("completion_tokens_details"), "reasoning_tokens");
+        }
+        if (reasoning == null) {
+            reasoning = firstLong(usage.path("output_tokens_details"), "reasoning_tokens");
+        }
+
+        boolean hasReportedValue = input != null
+                || output != null
+                || total != null
+                || cached != null
+                || reasoning != null;
+        if (!hasReportedValue) {
+            return null;
+        }
+        return new LlmTokenUsage(
+                valueOrZero(input),
+                valueOrZero(cached),
+                valueOrZero(output),
+                valueOrZero(reasoning),
+                valueOrZero(total)
+        );
+    }
+
+    private static Long firstLong(JsonNode node, String... fields) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        for (String field : fields) {
+            JsonNode value = node.get(field);
+            if (value != null && value.isNumber()) {
+                return Math.max(0, value.longValue());
+            }
+        }
+        return null;
+    }
+
+    private static long valueOrZero(Long value) {
+        return value == null ? 0 : value;
     }
 }

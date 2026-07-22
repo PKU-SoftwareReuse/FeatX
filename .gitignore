@@ -23,6 +23,7 @@ out/
 
 # Runtime repositories created/imported by FeatX.
 /repos/
+/agent-logs/
 
 code-workspace/
 experiments/

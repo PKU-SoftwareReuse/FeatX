@@ -126,6 +126,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             sendStatus(eventSink, context.language().stageOneDescription());
             String agent1Prompt = buildAgent1Prompt(context, projectLanguage, addition);
             Agent1ParsedResult agent1 = requestAndParseAgent1(
+                    context,
+                    "agent1",
                     agent1Prompt,
                     eventSink,
                     model,
@@ -145,6 +147,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         + boundedPromptSection(extraInfo, MAX_REFERENCE_CONTEXT_CHARS)
                         + "\nRe-evaluate sufficiency once. Do not request a file already shown above.";
                 Agent1ParsedResult followUp = requestAndParseAgent1(
+                        context,
+                        "agent1-recheck",
                         followUpPrompt,
                         eventSink,
                         model,
@@ -176,6 +180,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             sendStatus(eventSink, context.language().stageTwoDescription());
             String agent2Prompt = buildAgent2Prompt(context, extraInfo, projectLanguage, addition);
             Agent2ParsedResult agent2 = requestAndParseAgent2(
+                    context,
+                    "agent2",
                     agent2Prompt,
                     eventSink,
                     model,
@@ -224,6 +230,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         addition
                 );
                 String generatedContent = requestAndApplyAgent3(
+                        context,
                         agent3Prompt,
                         eventSink,
                         model,
@@ -269,35 +276,47 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     }
 
     private Agent1ParsedResult requestAndParseAgent1(
+            AgentRunContext context,
+            String stage,
             String prompt,
             AgentEventSink eventSink,
             String model,
             Set<String> existingFiles,
             AgentLanguage language
     ) throws IOException {
-        String response = llmClient.streamGenerateWithPrompt(prompt, eventSink, model);
+        String response = generateAgentResponse(context, stage, prompt, eventSink, model);
         try {
             return parseAndValidateAgent1(response, existingFiles);
         } catch (RuntimeException exception) {
             sendStatus(eventSink, retryMessage(language, "Agent1", exception));
-            String retried = llmClient.streamGenerateWithPrompt(repairPrompt(prompt, "Agent1"), eventSink, model);
+            String retried = generateAgentResponse(
+                    context,
+                    stage + "-repair",
+                    repairPrompt(prompt, "Agent1"),
+                    eventSink,
+                    model
+            );
             return parseAndValidateAgent1(retried, existingFiles);
         }
     }
 
     private Agent2ParsedResult requestAndParseAgent2(
+            AgentRunContext context,
+            String stage,
             String prompt,
             AgentEventSink eventSink,
             String model,
             String sourceRoot,
             AgentLanguage language
     ) throws IOException {
-        String response = llmClient.streamGenerateWithPrompt(prompt, eventSink, model);
+        String response = generateAgentResponse(context, stage, prompt, eventSink, model);
         try {
             return requirePlannedFiles(parseAndValidateAgent2(response, sourceRoot));
         } catch (RuntimeException exception) {
             sendStatus(eventSink, retryMessage(language, "Agent2", exception));
-            String retried = llmClient.streamGenerateWithPrompt(
+            String retried = generateAgentResponse(
+                    context,
+                    stage + "-repair",
                     repairPrompt(prompt, "Agent2", exception),
                     eventSink,
                     model
@@ -324,6 +343,28 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             boolean createMode,
             AgentLanguage language
     ) throws IOException {
+        return requestAndApplyAgent3(
+                null,
+                prompt,
+                eventSink,
+                model,
+                filename,
+                originalContent,
+                createMode,
+                language
+        );
+    }
+
+    private String requestAndApplyAgent3(
+            AgentRunContext context,
+            String prompt,
+            AgentEventSink eventSink,
+            String model,
+            String filename,
+            String originalContent,
+            boolean createMode,
+            AgentLanguage language
+    ) throws IOException {
         Exception lastFailure = null;
         String previousResponse = "";
         for (int attempt = 0; attempt <= MAX_AGENT3_RETRIES; attempt++) {
@@ -336,7 +377,15 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
 
             try {
-                previousResponse = llmClient.streamGenerateWithPrompt(attemptPrompt, eventSink, model);
+                previousResponse = context == null
+                        ? llmClient.streamGenerateWithPrompt(attemptPrompt, eventSink, model)
+                        : generateAgentResponse(
+                                context,
+                                "agent3-" + filename + "-attempt-" + (attempt + 1),
+                                attemptPrompt,
+                                eventSink,
+                                model
+                        );
                 return applyAgent3Result(previousResponse, filename, originalContent, createMode);
             } catch (IOException | RuntimeException exception) {
                 if (Thread.currentThread().isInterrupted()) {

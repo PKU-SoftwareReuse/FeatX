@@ -2221,7 +2221,7 @@ const DebloatingPage = () => {
         }
     }
 
-    const finishCompleteCommit = async (commitResult) => {
+    const finishFeatureCommit = async (commitResult) => {
         const completedRunId = activeRunId;
         const previousFeatureId = selectedFeatureItem?.featureId;
         const features = await getFeatureData();
@@ -2242,19 +2242,10 @@ const DebloatingPage = () => {
             const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
             setGitStatus(result.status || EMPTY_GIT_STATUS);
             resetGraphDiffDrawer();
-            if (result.commitScope === 'COMPLETE' || selectedType === 'edit' || selectedType === 'add') {
-                await finishCompleteCommit(result);
-                message.success(result.commitScope === 'COMPLETE'
-                    ? copy.completeCommitSuccess
-                    : copy.partialCommitSuccess);
-            } else {
-                if (selectedType === 'delete' && !isPythonProject) {
-                    getFeatureGraphData(selectedFeatureItem?.featureId, 'delete');
-                } else {
-                    getFeatureGraphData(0, 'new');
-                }
-                message.success(copy.partialCommitSuccess);
-            }
+            await finishFeatureCommit(result);
+            message.success(result.commitScope === 'COMPLETE'
+                ? copy.completeCommitSuccess
+                : copy.partialCommitSuccess);
         } catch (error) {
             message.error(errorMessage(error, copy.failedCommitChanges));
             throw error;

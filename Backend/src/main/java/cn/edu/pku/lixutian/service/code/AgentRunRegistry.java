@@ -2,7 +2,9 @@ package cn.edu.pku.lixutian.service.code;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.AgentRunSnapshotResult;
+import cn.edu.pku.lixutian.dto.result.AgentTokenUsageResult;
 import cn.edu.pku.lixutian.dto.result.FocusGraphContextResult;
+import cn.edu.pku.lixutian.service.llm.LlmTokenUsage;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -59,6 +61,14 @@ public class AgentRunRegistry {
         private Instant statusChangedAt = Instant.now();
         private Thread preparingThread;
         private Runnable cancellation;
+        private int llmCalls;
+        private int reportedUsageCalls;
+        private long inputTokens;
+        private long cachedInputTokens;
+        private long outputTokens;
+        private long reasoningOutputTokens;
+        private long totalTokens;
+        private String agentLogPath;
         private final List<AgentEvent> events = new ArrayList<>();
         private final Set<SseEmitter> subscribers = new LinkedHashSet<>();
 
@@ -300,6 +310,38 @@ public class AgentRunRegistry {
         return requireRunState(runId).status;
     }
 
+    public synchronized int beginLlmCall(String runId) {
+        RunState state = requireStatus(runId, Status.RUNNING);
+        state.llmCalls++;
+        return state.llmCalls;
+    }
+
+    public synchronized void completeLlmCall(String runId, LlmTokenUsage usage) {
+        RunState state = requireRunState(runId);
+        if (state.status != Status.RUNNING && state.status != Status.COMPLETED) {
+            throw new IllegalStateException(
+                    "Cannot record LLM usage for Agent run " + runId + " with status " + state.status + "."
+            );
+        }
+        if (usage == null) {
+            return;
+        }
+        state.reportedUsageCalls++;
+        state.inputTokens += usage.inputTokens();
+        state.cachedInputTokens += usage.cachedInputTokens();
+        state.outputTokens += usage.outputTokens();
+        state.reasoningOutputTokens += usage.reasoningOutputTokens();
+        state.totalTokens += usage.totalTokens();
+    }
+
+    public synchronized AgentTokenUsageResult tokenUsage(String runId) {
+        return tokenUsage(requireRunState(runId));
+    }
+
+    public synchronized void setAgentLogPath(String runId, String path) {
+        requireRunState(runId).agentLogPath = path;
+    }
+
     public synchronized AgentRunSnapshotResult snapshot(String runId) {
         RunState state = requireRunState(runId);
         AgentRunContext context = requireContext(state);
@@ -313,7 +355,9 @@ public class AgentRunRegistry {
                 context.featureId(),
                 context.moduleId(),
                 state.model,
-                state.failureMessage
+                state.failureMessage,
+                tokenUsage(state),
+                state.agentLogPath
         );
     }
 
@@ -438,6 +482,19 @@ public class AgentRunRegistry {
         }
         throw new IllegalStateException(
                 "Another Agent operation is still active for this project. Commit or discard it before starting a new operation."
+        );
+    }
+
+    private AgentTokenUsageResult tokenUsage(RunState state) {
+        return new AgentTokenUsageResult(
+                state.llmCalls,
+                state.reportedUsageCalls,
+                state.inputTokens,
+                state.cachedInputTokens,
+                Math.max(0, state.inputTokens - state.cachedInputTokens),
+                state.outputTokens,
+                state.reasoningOutputTokens,
+                state.totalTokens
         );
     }
 

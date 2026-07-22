@@ -1,6 +1,8 @@
 package cn.edu.pku.lixutian.service.code;
 
 import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.result.AgentTokenUsageResult;
+import cn.edu.pku.lixutian.service.llm.LlmTokenUsage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -98,6 +100,32 @@ class AgentRunRegistryTest {
         assertEquals("test-model", registry.snapshot(context.runId()).model());
         assertEquals("new requirement", registry.snapshot(context.runId()).request());
         assertEquals("class Foo {}", registry.modifications(context.runId()).get("cn/edu/pku/Foo.java"));
+    }
+
+    @Test
+    void aggregatesReportedUsageAndKeepsMissingUsageVisible(@TempDir Path projectRoot) {
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(41);
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = prepare(registry, project);
+        registry.claim(context.runId());
+
+        assertEquals(1, registry.beginLlmCall(context.runId()));
+        registry.completeLlmCall(context.runId(), new LlmTokenUsage(100, 60, 20, 5, 120));
+        assertEquals(2, registry.beginLlmCall(context.runId()));
+        registry.completeLlmCall(context.runId(), null);
+
+        AgentTokenUsageResult usage = registry.tokenUsage(context.runId());
+        assertEquals(2, usage.calls());
+        assertEquals(1, usage.reportedCalls());
+        assertEquals(100, usage.inputTokens());
+        assertEquals(60, usage.cachedInputTokens());
+        assertEquals(40, usage.uncachedInputTokens());
+        assertEquals(20, usage.outputTokens());
+        assertEquals(5, usage.reasoningOutputTokens());
+        assertEquals(120, usage.totalTokens());
+        assertTrue(!usage.complete());
     }
 
     @Test

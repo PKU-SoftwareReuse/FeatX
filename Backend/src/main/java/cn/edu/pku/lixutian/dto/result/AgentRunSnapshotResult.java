@@ -12,6 +12,8 @@ public record AgentRunSnapshotResult(
         Integer featureId,
         Integer moduleId,
         String model,
-        String failureMessage
+        String failureMessage,
+        AgentTokenUsageResult tokenUsage,
+        String agentLogPath
 ) {
 }

@@ -111,6 +111,37 @@ class FeatureGitWorkflowServiceTest {
     }
 
     @Test
+    void partialDeleteCommitFinishesTheOperationAndDiscardsUnstagedCandidates(@TempDir Path repository)
+            throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        TestRun run = completedDeleteRun();
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                codeMapService,
+                run.registry()
+        );
+        selectFeatureForEdit();
+
+        workflow.stageCandidate("first.py", run.runId());
+        GitCommitResult result = workflow.commit("delete", null, run.runId());
+
+        assertEquals("PARTIAL", result.getCommitScope());
+        assertEquals(7, result.getFeatureId());
+        assertEquals("print('first changed')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
+        assertTrue(result.getStatus().getStagedPaths().isEmpty());
+        assertTrue(result.getStatus().getPendingCandidatePaths().isEmpty());
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+        assertFalse(run.registry().hasActiveOperation(52));
+        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        verify(codeMapService).deleteFeatureFromMemoryAndDatabase(7);
+    }
+
+    @Test
     void stagedFileCanBeEditedRestoredAndRestaged(@TempDir Path repository) throws Exception {
         initializeRepository(repository);
         CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
@@ -297,6 +328,27 @@ class FeatureGitWorkflowServiceTest {
         );
         registry.claim(context.runId());
         registry.complete(context.runId(), ProjectState.getInstance().getModifications());
+        return new TestRun(registry, context.runId());
+    }
+
+    private TestRun completedDeleteRun() {
+        ProjectState project = ProjectState.getInstance();
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "",
+                "feature to delete",
+                "",
+                "first.py\nsecond.py",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                7,
+                null,
+                java.util.List.of()
+        );
+        registry.completePrepared(context.runId(), ProjectState.getInstance().getModifications());
         return new TestRun(registry, context.runId());
     }
 

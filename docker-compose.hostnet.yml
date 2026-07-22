@@ -48,6 +48,8 @@ services:
       LLM_API_URL: ${LLM_API_URL:-https://api.deepseek.com}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-v4-pro}
+      AGENT_LOGS_ENABLED: ${AGENT_LOGS_ENABLED:-true}
+      AGENT_LOG_DIR: /workspace/agent-logs
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_API_MODEL: ${OPENAI_API_MODEL:-deepseek-v4-pro}
@@ -85,6 +87,7 @@ services:
       LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
     volumes:
       - featx-repos:/workspace/repos
+      - ./agent-logs:/workspace/agent-logs
       - featx-reposummary-output:/app/RepoSummary/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     restart: unless-stopped

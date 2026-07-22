@@ -128,6 +128,20 @@ NBlog 的博客内容 epic 下添加一个 “Good Morning” 一键发博客特
 `Diff Panel` 中的行级 diff。只有在确实希望把生成补丁应用到挂载的 NBlog
 快照时，才点击 `Confirm Apply the Diff`。
 
+## Agent 日志与 Token 统计
+
+FeatX 会记录代码演化 Agent 每次模型调用的 prompt、原始响应、调用元数据和
+整次运行的 token 汇总。Docker Compose 默认将日志写入宿主机的
+`agent-logs/<runId>/`；如需关闭，可在 `.env` 中设置
+`AGENT_LOGS_ENABLED=false`。手动启动后端时默认目录为
+`Backend/logs/agent-runs`（从 `Backend` 目录启动的情形），也可通过
+`AGENT_LOG_DIR` 修改。
+
+`GET /llm/run?runId=<runId>` 的响应包含 `tokenUsage` 和 `agentLogPath`。
+其中 `tokenUsage` 汇总模型调用次数以及输入、缓存输入、非缓存输入、输出、推理
+输出和总 token 数。部分模型服务不会为每个流式请求返回 usage；此时
+`reportedCalls` 会小于 `calls`，避免把未知消耗误报成零。
+
 ## 不完全复现的内容
 
 快速检查不会重新运行论文中所有 LLM 驱动实验。完整的特性抽取和代码演化依赖

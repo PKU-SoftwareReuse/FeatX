@@ -194,6 +194,21 @@ The packaged quick checks do not fully rerun every LLM-backed experiment from
 the paper. Full feature extraction and code evolution require a configured
 OpenAI-compatible API key and may incur provider-side cost.
 
+### Agent run logs and token usage
+
+FeatX records every code-evolution Agent prompt, raw model response, call
+metadata, and the run-level token summary. Docker Compose writes these files to
+`agent-logs/<runId>/` on the host. Set `AGENT_LOGS_ENABLED=false` in `.env` to
+disable file logging. Manual deployments default to `Backend/logs/agent-runs`
+when the backend is started from the `Backend` directory; this can be changed
+with `AGENT_LOG_DIR`.
+
+`GET /llm/run?runId=<runId>` includes `tokenUsage` and `agentLogPath`.
+`tokenUsage` reports the number of LLM calls and input, cached input, uncached
+input, output, reasoning output, and total tokens. Providers do not always
+return usage for every streaming call, so compare `reportedCalls` with `calls`;
+the summary is complete when they are equal.
+
 ## 💽 Usage
 
 After completing the deployment, open a web browser and navigate to:

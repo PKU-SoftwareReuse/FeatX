@@ -2,6 +2,10 @@ package cn.edu.pku.lixutian.service.code;
 
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.service.llm.LlmClient;
+import cn.edu.pku.lixutian.service.llm.LlmGenerationResult;
+import cn.edu.pku.lixutian.service.llm.LlmTokenUsage;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,6 +27,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ThreeStageAgentPipelineSupportTest {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private ExecutorService executor;
 
     @AfterEach
@@ -59,47 +65,83 @@ class ThreeStageAgentPipelineSupportTest {
         );
 
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.streamGenerateWithPrompt(anyString(), any(AgentEventSink.class), eq("model")))
-                .thenReturn("""
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
                         {"needAdditionalFile":true,"additionalFileList":[
                           {"filename":"settings.yml","recommendReason":"contains the feature switch"}
                         ]}
-                        """)
-                .thenReturn("""
+                        """))
+                .thenReturn(generation("""
                         {"needAdditionalFile":false,"additionalFileList":[]}
-                        """)
-                .thenReturn("""
+                        """))
+                .thenReturn(generation("""
                         {"modifiedFileList":[{
                           "filename":"settings.yml",
                           "action":"rewrite",
                           "plan":"Enable the feature switch.",
                           "note":"Preserve other settings."
                         }]}
-                        """)
-                .thenReturn("""
+                        """))
+                .thenReturn(generation("""
                         <<<<<<< SEARCH
                         feature: disabled
                         =======
                         feature: enabled
                         >>>>>>> REPLACE
-                        """);
+                        """));
 
         PythonModifyAgentService service = new PythonModifyAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
+        service.agentRunLogService = new AgentRunLogService(sourceRoot.resolve("agent-logs"));
         service.agentPipelineExecutor = executor;
 
         service.runPipeline(context.runId(), "model");
         awaitCompleted(registry, context.runId());
 
         assertEquals("feature: enabled\n", registry.modifications(context.runId()).get("settings.yml"));
-        verify(llmClient, times(4)).streamGenerateWithPrompt(
+        verify(llmClient, times(4)).streamGenerateWithPromptResult(
                 anyString(),
                 any(AgentEventSink.class),
                 eq("model")
         );
         assertTrue(registry.modifications(context.runId()).containsKey("settings.yml"));
+        assertEquals(4, registry.snapshot(context.runId()).tokenUsage().calls());
+        assertEquals(4, registry.snapshot(context.runId()).tokenUsage().reportedCalls());
+        assertEquals(40, registry.snapshot(context.runId()).tokenUsage().inputTokens());
+        assertEquals(16, registry.snapshot(context.runId()).tokenUsage().cachedInputTokens());
+        assertEquals(8, registry.snapshot(context.runId()).tokenUsage().outputTokens());
+
+        Path runLogs = sourceRoot.resolve("agent-logs").resolve(context.runId());
+        assertEquals(runLogs.toAbsolutePath().toString(), registry.snapshot(context.runId()).agentLogPath());
+        assertTrue(Files.isRegularFile(runLogs.resolve("run.json")));
+        assertTrue(Files.isRegularFile(runLogs.resolve("token-usage.json")));
+        assertTrue(Files.isRegularFile(runLogs.resolve("001-agent1/prompt.txt")));
+        assertTrue(Files.isRegularFile(runLogs.resolve("001-agent1/response.txt")));
+        assertTrue(Files.isRegularFile(runLogs.resolve("004-agent3-settings.yml-attempt-1/metadata.json")));
+
+        JsonNode tokenLog = OBJECT_MAPPER.readTree(runLogs.resolve("token-usage.json").toFile());
+        assertEquals(4, tokenLog.path("calls").asInt());
+        assertEquals(4, tokenLog.path("reportedCalls").asInt());
+        assertEquals(40, tokenLog.path("inputTokens").asLong());
+        assertEquals(16, tokenLog.path("cachedInputTokens").asLong());
+        assertEquals(24, tokenLog.path("uncachedInputTokens").asLong());
+        assertEquals(8, tokenLog.path("outputTokens").asLong());
+        assertTrue(tokenLog.path("complete").asBoolean());
+
+        JsonNode callLog = OBJECT_MAPPER.readTree(
+                runLogs.resolve("004-agent3-settings.yml-attempt-1/metadata.json").toFile()
+        );
+        assertEquals("COMPLETED", callLog.path("status").asText());
+        assertTrue(callLog.path("usageReported").asBoolean());
+        assertEquals(10, callLog.path("usage").path("inputTokens").asLong());
+        assertTrue(Files.readString(runLogs.resolve("001-agent1/prompt.txt")).contains("settings.yml"));
+        assertTrue(Files.readString(runLogs.resolve("001-agent1/response.txt")).contains("needAdditionalFile"));
+    }
+
+    private LlmGenerationResult generation(String content) {
+        return new LlmGenerationResult(content, new LlmTokenUsage(10, 4, 2, 0, 12));
     }
 
     private void awaitCompleted(AgentRunRegistry registry, String runId) throws Exception {

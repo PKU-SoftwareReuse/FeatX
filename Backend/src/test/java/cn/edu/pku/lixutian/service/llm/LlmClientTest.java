@@ -100,6 +100,37 @@ class LlmClientTest {
         assertEquals("system", requestBody.path("messages").get(0).path("role").asText());
         assertEquals("test prompt", requestBody.path("messages").get(1).path("content").asText());
         assertTrue(requestBody.path("stream").asBoolean());
+        assertTrue(requestBody.path("stream_options").path("include_usage").asBoolean());
+    }
+
+    @Test
+    void streamingResultCapturesContentCacheAndReasoningUsage() throws Exception {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"result\"}}]}\n\n"
+                        + "data: {\"choices\":[],\"usage\":{"
+                        + "\"prompt_tokens\":120,"
+                        + "\"completion_tokens\":30,"
+                        + "\"total_tokens\":150,"
+                        + "\"prompt_cache_hit_tokens\":80,"
+                        + "\"completion_tokens_details\":{\"reasoning_tokens\":4}}}\n\n"
+                        + "data: [DONE]\n\n"));
+
+        LlmGenerationResult result = client.streamGenerateWithPromptResult(
+                "test prompt",
+                (event, content) -> {
+                },
+                "chosen-model"
+        );
+
+        assertEquals("result", result.content());
+        assertNotNull(result.usage());
+        assertEquals(120, result.usage().inputTokens());
+        assertEquals(80, result.usage().cachedInputTokens());
+        assertEquals(40, result.usage().uncachedInputTokens());
+        assertEquals(30, result.usage().outputTokens());
+        assertEquals(4, result.usage().reasoningOutputTokens());
+        assertEquals(150, result.usage().totalTokens());
     }
 
     private void enqueueModels(String... modelIds) {
