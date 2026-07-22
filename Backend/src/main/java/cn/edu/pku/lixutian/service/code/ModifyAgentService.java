@@ -6,7 +6,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 public class ModifyAgentService extends ThreeStageAgentPipelineSupport {
     public SseEmitter runPipeline(String runId, String model) {
-        return runThreeStagePipeline(runId, model, "Java", false);
+        return runThreeStagePipeline(runId, model, "Java", AgentOperation.MODIFY);
     }
 
     public String applyAgent3Result(

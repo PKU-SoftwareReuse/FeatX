@@ -4,6 +4,7 @@ import cn.edu.pku.lixutian.service.code.AddAgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
+import cn.edu.pku.lixutian.service.code.DeleteAgentService;
 import cn.edu.pku.lixutian.service.code.ModifyAgentService;
 import cn.edu.pku.lixutian.service.code.PythonModifyAgentService;
 import cn.edu.pku.lixutian.config.ClusterState;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/llm")
@@ -43,6 +45,9 @@ public class LlmController {
 
     @Autowired
     private AddAgentService addAgentService;
+
+    @Autowired
+    private DeleteAgentService deleteAgentService;
 
     @Autowired
     private PythonModifyAgentService pythonModifyAgentService;
@@ -345,86 +350,91 @@ public class LlmController {
             if (candidateFeature == null || candidateFeature.getFeatureId() == null) {
                 throw new UnsupportedOperationException("Please select a feature before deleting it.");
             }
-
-            if (!project.isPython()) {
-                AgentRunContext run = agentRunRegistry.prepare(
-                        runId,
-                        "delete",
-                        "",
-                        localizedDescription(
-                                candidateFeature.getFeatureDescription(),
-                                candidateFeature.getFeatureDescriptionCn(),
-                                AgentLanguage.EN
-                        ),
-                        "",
-                        "",
-                        AgentLanguage.EN,
-                        project.getSrcPath(),
-                        project.getProjectPath(),
-                        project.getRepoId(),
-                        candidateFeature.getFeatureId(),
-                        null,
-                        List.of()
-                );
-                agentRunRegistry.completePrepared(runId, Map.of());
-                return new AgentRunStartResult(run.runId());
-            }
-
+            AgentLanguage requestLanguage = AgentLanguage.orDefault(request == null ? null : request.getLanguage());
+            ClusterState.getInstance().setAgentLanguage(requestLanguage);
+            String oldRequest = localizedDescription(
+                    candidateFeature.getFeatureDescription(),
+                    candidateFeature.getFeatureDescriptionCn(),
+                    requestLanguage
+            );
+            String deleteRequest = "Delete the selected feature while preserving unrelated and shared behavior: "
+                    + oldRequest;
+            String progressOperation = project.isPython() ? "python-delete" : "java-delete";
             progressService.start(
-                    "python-delete",
-                    4,
+                    progressOperation,
+                    8,
                     "start",
-                    "Preparing deterministic Python Delete Feature diff."
+                    "Preparing Delete Feature reasoning and safety context."
             );
             progressService.update(
                     "collect-code-map",
                     "Collecting current feature CodeMap methods.",
                     1,
-                    4
+                    8
             );
             List<String> currentCodeMap = collectCurrentCodeMap(candidateFeature);
-
-            progressService.update(
-                    "ownership-check",
-                    "Checking whether CodeMap methods are uniquely owned by this feature.",
-                    2,
-                    4
-            );
-
-            progressService.update(
-                    "ast-delete-plan",
-                    "Planning Python function/method deletion with AST.",
-                    3,
-                    4
-            );
-            JsonNode plan = codeMapService.preparePythonDeleteFeature(
+            Set<String> sharedMethods = codeMapService.sharedCodeMapMethods(
                     candidateFeature.getFeatureId(),
                     currentCodeMap
+            );
+            progressService.update(
+                    "ownership-check",
+                    "Protecting CodeMap methods shared with other features.",
+                    2,
+                    8,
+                    Map.of("protectedSharedMethods", sharedMethods.size())
+            );
+            JsonNode deterministicPlan = null;
+            FocusGraphContextResult graphContext;
+            if (project.isPython()) {
+                progressService.update(
+                        "ast-delete-boundary",
+                        "Building the deterministic Python AST deletion boundary.",
+                        3,
+                        8
+                );
+                deterministicPlan = codeMapService.preparePythonDeleteFeature(
+                        candidateFeature.getFeatureId(),
+                        currentCodeMap
+                );
+                project.setModifications(Collections.emptyMap());
+                project.setPythonModifiedMethods(Collections.emptySet());
+                graphContext = focusGraphContextService.buildDeleteContext(
+                        candidateFeature.getFeatureId(),
+                        oldRequest,
+                        currentCodeMap
+                );
+            } else {
+                graphContext = javaGraphContextService.buildDeleteContext(
+                        candidateFeature,
+                        oldRequest,
+                        requestLanguage
+                );
+            }
+
+            String relatedCodes = deletionSafetyContext(
+                    graphContext,
+                    currentCodeMap,
+                    sharedMethods,
+                    deterministicPlan
             );
 
             AgentRunContext run = agentRunRegistry.prepare(
                     runId,
                     "delete",
-                    "",
-                    candidateFeature.getFeatureDescription(),
-                    "",
-                    "",
-                    AgentLanguage.orDefault(request == null ? null : request.getLanguage()),
+                    deleteRequest,
+                    oldRequest,
+                    relatedCodes,
+                    projectFileList(project),
+                    requestLanguage,
                     project.getSrcPath(),
                     project.getProjectPath(),
                     project.getRepoId(),
                     candidateFeature.getFeatureId(),
                     null,
-                    List.of()
+                    graphContext.getGraphStages()
             );
-            agentRunRegistry.completePrepared(runId, project.getModifications());
-
-            int deletedCount = plan.path("deletedMethods").size();
-            int skippedCount = plan.path("skippedMethods").size();
-            int fileCount = plan.path("affectedFiles").size();
-            progressService.complete("Python delete diff is ready. Deleted "
-                    + deletedCount + " methods across " + fileCount
-                    + " files; skipped " + skippedCount + " shared or unresolved methods.");
+            progressService.complete("Delete reasoning and safety context are ready. Starting Delete Agent.");
             return new AgentRunStartResult(run.runId());
         } catch (IOException | InterruptedException | RuntimeException e) {
             progressService.fail(e.getMessage());
@@ -480,6 +490,16 @@ public class LlmController {
             return pythonModifyAgentService.runAddPipeline(runId, selectedModel);
         } else if (context.mode().equals("add")) {
             return addAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals("delete")) {
+            progressService.update(
+                    "agent-stream",
+                    "Streaming Delete Agent code generation.",
+                    8,
+                    8
+            );
+            return ProjectState.getInstance().isPython()
+                    ? pythonModifyAgentService.runDeletePipeline(runId, selectedModel)
+                    : deleteAgentService.runPipeline(runId, selectedModel);
         } else {
             agentRunRegistry.fail(runId, new IllegalStateException("Unsupported Agent run mode: " + context.mode()));
             throw new UnsupportedOperationException("非法访问");
@@ -537,6 +557,48 @@ public class LlmController {
             return englishDescription;
         }
         return hasText(chineseDescription) ? chineseDescription : "";
+    }
+
+    private String deletionSafetyContext(
+            FocusGraphContextResult graphContext,
+            List<String> currentCodeMap,
+            Set<String> sharedMethods,
+            JsonNode deterministicPlan
+    ) {
+        StringBuilder context = new StringBuilder(
+                graphContext == null || graphContext.getContextPrompt() == null
+                        ? ""
+                        : graphContext.getContextPrompt()
+        );
+        context.append("\n\n## FeatX Deterministic Delete Safety Boundary\n\n")
+                .append("Only the selected feature may be removed. Preserve unrelated behavior.\n")
+                .append("Every PROTECTED_SYMBOL line is enforced after Agent generation.\n\n")
+                .append("### Selected Feature CodeMap\n");
+        if (currentCodeMap != null) {
+            currentCodeMap.stream()
+                    .filter(method -> method != null && !method.isBlank())
+                    .distinct()
+                    .forEach(method -> context.append("FEATURE_SYMBOL: ").append(method).append('\n'));
+        }
+        context.append("\n### Shared Symbols That Must Remain\n");
+        if (sharedMethods == null || sharedMethods.isEmpty()) {
+            context.append("None\n");
+        } else {
+            sharedMethods.stream().sorted()
+                    .forEach(method -> context.append("PROTECTED_SYMBOL: ").append(method).append('\n'));
+        }
+        if (deterministicPlan != null && !deterministicPlan.isMissingNode()) {
+            context.append("\n### Deterministic Python AST Boundary\n")
+                    .append(deterministicPlan.toPrettyString())
+                    .append('\n');
+            deterministicPlan.path("deletedFiles").forEach(file -> {
+                String path = file.asText("").trim();
+                if (!path.isBlank()) {
+                    context.append("ALLOWED_DELETE_FILE: ").append(path).append('\n');
+                }
+            });
+        }
+        return context.toString();
     }
 
     private boolean hasText(String value) {
@@ -633,6 +695,7 @@ public class LlmController {
     private void resetCandidateState(ProjectState project) {
         candidateCodeService.clear();
         project.setModifications(Collections.emptyMap());
+        project.setPythonModifiedMethods(Collections.emptySet());
     }
 
 }

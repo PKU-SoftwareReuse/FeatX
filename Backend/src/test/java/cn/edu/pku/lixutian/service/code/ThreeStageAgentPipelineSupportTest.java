@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -140,6 +141,194 @@ class ThreeStageAgentPipelineSupportTest {
         assertTrue(Files.readString(runLogs.resolve("001-agent1/response.txt")).contains("needAdditionalFile"));
     }
 
+    @Test
+    void deleteAgentProducesCandidateWhilePreservingProtectedSharedSymbol(@TempDir Path sourceRoot)
+            throws Exception {
+        String original = "def shared():\n    return 'shared'\n\ndef owned():\n    return 'owned'\n";
+        Files.writeString(sourceRoot.resolve("feature.py"), original);
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "PYTHON");
+        project.setRepoId(92);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "Delete the selected feature",
+                "Selected feature",
+                "PROTECTED_SYMBOL: package.feature.shared()\n",
+                "feature.py",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                8,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"feature.py",
+                          "action":"rewrite",
+                          "plan":"Remove only the feature-owned function.",
+                          "note":"Preserve shared()."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                        def owned():
+                            return 'owned'
+                        =======
+
+                        >>>>>>> REPLACE
+                        """));
+
+        PythonModifyAgentService service = new PythonModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runDeletePipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        String candidate = registry.modifications(context.runId()).get("feature.py");
+        assertTrue(candidate.contains("def shared()"));
+        assertFalse(candidate.contains("def owned()"));
+        assertEquals(original, Files.readString(sourceRoot.resolve("feature.py")));
+    }
+
+    @Test
+    void deleteAgentRejectsRemovalOfProtectedSharedSymbol(@TempDir Path sourceRoot) throws Exception {
+        Files.writeString(
+                sourceRoot.resolve("feature.py"),
+                "def shared():\n    return 'shared'\n\ndef owned():\n    return 'owned'\n"
+        );
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "PYTHON");
+        project.setRepoId(93);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "Delete the selected feature",
+                "Selected feature",
+                "PROTECTED_SYMBOL: package.feature.shared()\n",
+                "feature.py",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                9,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"feature.py",
+                          "action":"rewrite",
+                          "plan":"Remove shared code.",
+                          "note":"Unsafe test output."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                        def shared():
+                            return 'shared'
+                        =======
+
+                        >>>>>>> REPLACE
+                        """));
+
+        PythonModifyAgentService service = new PythonModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runDeletePipeline(context.runId(), "model");
+        awaitFailed(registry, context.runId());
+
+        assertTrue(registry.snapshot(context.runId()).failureMessage().contains("protected shared symbol"));
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
+    @Test
+    void javaDeleteRejectsRemovingProtectedDefinitionEvenWhenSameNamedCallRemains(@TempDir Path sourceRoot)
+            throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/Feature.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, """
+                package demo;
+
+                public class Feature {
+                    void shared() {}
+                    void callShared() { shared(); }
+                    void owned() {}
+                }
+                """);
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(94);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "Delete the selected feature",
+                "Selected feature",
+                "PROTECTED_SYMBOL: demo.Feature.shared()\n",
+                "demo/Feature.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                10,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"demo/Feature.java",
+                          "action":"rewrite",
+                          "plan":"Remove shared code.",
+                          "note":"Unsafe test output."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                            void shared() {}
+                        =======
+
+                        >>>>>>> REPLACE
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitFailed(registry, context.runId());
+
+        assertTrue(registry.snapshot(context.runId()).failureMessage().contains("protected shared symbol"));
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
     private LlmGenerationResult generation(String content) {
         return new LlmGenerationResult(content, new LlmTokenUsage(10, 4, 2, 0, 12));
     }
@@ -157,5 +346,20 @@ class ThreeStageAgentPipelineSupportTest {
             Thread.sleep(20);
         }
         throw new AssertionError("Agent pipeline did not complete in time.");
+    }
+
+    private void awaitFailed(AgentRunRegistry registry, String runId) throws Exception {
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (System.currentTimeMillis() < deadline) {
+            AgentRunRegistry.Status status = registry.status(runId);
+            if (status == AgentRunRegistry.Status.FAILED) {
+                return;
+            }
+            if (status == AgentRunRegistry.Status.COMPLETED) {
+                throw new AssertionError("Delete Agent unexpectedly completed.");
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Delete Agent did not fail in time.");
     }
 }

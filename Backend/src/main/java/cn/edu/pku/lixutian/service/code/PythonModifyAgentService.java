@@ -6,11 +6,15 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @Service
 public class PythonModifyAgentService extends ThreeStageAgentPipelineSupport {
     public SseEmitter runPipeline(String runId, String model) {
-        return runThreeStagePipeline(runId, model, "Python", false);
+        return runThreeStagePipeline(runId, model, "Python", AgentOperation.MODIFY);
     }
 
     public SseEmitter runAddPipeline(String runId, String model) {
-        return runThreeStagePipeline(runId, model, "Python", true);
+        return runThreeStagePipeline(runId, model, "Python", AgentOperation.ADD);
+    }
+
+    public SseEmitter runDeletePipeline(String runId, String model) {
+        return runThreeStagePipeline(runId, model, "Python", AgentOperation.DELETE);
     }
 
     public String applyAgent3Result(

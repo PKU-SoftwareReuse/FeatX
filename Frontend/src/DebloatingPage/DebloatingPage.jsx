@@ -65,7 +65,7 @@ const EMPTY_GIT_STATUS = {
 };
 
 export const supportsReasoningGraphStages = (operationType) => (
-    operationType === "edit" || operationType === "add"
+    operationType === "edit" || operationType === "add" || operationType === "delete"
 );
 
 export const shouldShowCandidateDiff = (confirmEnabled, operationType, codeNode) => (
@@ -326,7 +326,6 @@ const DEBLOATING_COPY = {
         codeGenerationFailed: "代码生成失败，未创建可确认的候选修改。",
         restoringAgentRun: "正在恢复刷新前的 Agent 任务……",
         failedRestoreAgentRun: "无法恢复刷新前的 Agent 任务，请重新提交需求。",
-        pythonDeleteReady: "Python 删除差异已准备好。请检查受影响文件后确认或放弃。",
         focusGraphReady: "查看代码检索的初始图、扩展图和推理图。",
         focusGraphPending: "Java/Python 新增或修改提交后可查看三阶段图。",
         failedFetchFeatureSummary: "获取功能摘要失败。",
@@ -422,7 +421,6 @@ const DEBLOATING_COPY = {
         codeGenerationFailed: "Code generation failed; no candidate changes are available to confirm.",
         restoringAgentRun: "Restoring the Agent run from before the refresh...",
         failedRestoreAgentRun: "The Agent run from before the refresh could not be restored. Submit the request again.",
-        pythonDeleteReady: "Deterministic Python delete diff is ready. Review the affected files and confirm or drop it.",
         focusGraphReady: "Show the initial, expanded, and reasoning code graphs.",
         focusGraphPending: "Graph stages are available after Java/Python Add or Modify submit.",
         failedFetchFeatureSummary: "Failed to fetch feature summary.",
@@ -1656,7 +1654,7 @@ const DebloatingPage = () => {
         setChatMode(true)
         setModeTrans(true)
         const progressOperation = `${isPythonProject ? "python" : "java"}-${
-            operationType === 'add' ? "add" : "modify"
+            operationType === 'add' ? "add" : operationType === 'delete' ? "delete" : "modify"
         }`
         setOperationProgress({
             operation: progressOperation,
@@ -1821,29 +1819,31 @@ const DebloatingPage = () => {
                 setSubmitEnabled(false)
                 setConfirmEnabled(snapshot.status === 'COMPLETED')
                 setLoadingFeatureList(snapshot.status === 'PREPARED' || snapshot.status === 'RUNNING')
+                const recoveringDelete = operationType === 'delete'
+                    && snapshot.status !== 'COMPLETED';
                 getFeatureGraphData(
-                    operationType === 'add' || (operationType === 'delete' && isPythonProject)
+                    operationType === 'add' || (operationType === 'delete' && !recoveringDelete)
                         ? null
                         : targetFeature.featureId,
-                    operationType === 'delete' && isPythonProject ? 'new' : operationType,
+                    operationType === 'delete'
+                        ? recoveringDelete ? 'select' : 'new'
+                        : operationType,
                     snapshot.runId
                 )
 
                 if (supportsReasoningGraphStages(operationType)) {
                     await loadFocusGraphStages(snapshot.runId, operationType).catch(() => [])
                 }
-                if (operationType !== 'delete') {
-                    handleChat(
-                        API.getLlmResponse(
-                            snapshot.runId,
-                            snapshot.language || apiLanguage,
-                            snapshot.model || selectedModel
-                        ),
+                handleChat(
+                    API.getLlmResponse(
                         snapshot.runId,
-                        operationType,
-                        true
-                    )
-                }
+                        snapshot.language || apiLanguage,
+                        snapshot.model || selectedModel
+                    ),
+                    snapshot.runId,
+                    operationType,
+                    true
+                )
             })
             .catch((error) => {
                 console.error('Failed to restore Agent run:', error)
@@ -1983,6 +1983,7 @@ const DebloatingPage = () => {
             || operationProgress?.operation === "python-delete"
             || operationProgress?.operation === "java-modify"
             || operationProgress?.operation === "java-add"
+            || operationProgress?.operation === "java-delete"
             || operationProgress?.stage === "submit"
             || operationProgress?.stage === "agent-stream";
     }
@@ -2065,53 +2066,41 @@ const DebloatingPage = () => {
     }, [])
 
     const prepareDelete = (item) => {
+        if (!selectedModel) {
+            message.warning(copy.modelUnavailable);
+            return;
+        }
+
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         setConfirmEnabled(false)
+        clearFocusGraphStages()
+        const expectedOperation = `${isPythonProject ? "python" : "java"}-delete`;
         setOperationProgress({
-            operation: "python-delete",
+            operation: expectedOperation,
             stage: "submit",
             message: copy.submittingFeatureDeletion,
             currentStep: 0,
-            totalSteps: 4,
+            totalSteps: 8,
             running: true,
             failed: false
         })
-        if (isPythonProject) {
-            startProgressPolling("python-delete")
-        }
+        startProgressPolling(expectedOperation)
         API.deleteFeature({
             featureId: item.featureId,
-            featureDescription: item.featureDescription
+            featureDescription: item.featureDescription,
+            language: apiLanguage,
         })
-            .then((result) => {
-                setActiveRunId(result.runId)
-                stopProgressPolling()
-                setLoadingFeatureList(false)
-                setConfirmEnabled(true)
-                setChatMode(false)
-                setModeTrans(false)
-                if (isPythonProject) {
-                    API.getLlmProgress()
-                        .then((progress) => {
-                            setOperationProgress(progress)
-                        })
-                        .catch(() => {
-                            setOperationProgress({
-                                operation: "python-delete",
-                                stage: "complete",
-                                message: copy.pythonDeleteReady,
-                                currentStep: 4,
-                                totalSteps: 4,
-                                running: false,
-                                failed: false
-                            })
-                        })
-                    getFeatureGraphData(0, "new", result.runId)
-                } else {
-                    setOperationProgress(null)
-                    getFeatureGraphData(item.featureId, "delete", result.runId)
-                }
+            .then(async (result) => {
+                const runId = result?.runId
+                restoredRunRef.current = runId
+                setActiveRunId(runId)
+                await loadFocusGraphStages(runId, "delete")
+                handleChat(
+                    API.getLlmResponse(runId, apiLanguage, selectedModel),
+                    runId,
+                    "delete"
+                )
             })
             .catch((error) => {
                 console.error('Error Delete Feature:', error)
@@ -2119,11 +2108,11 @@ const DebloatingPage = () => {
                 setLoadingFeatureList(false)
                 const msg = errorMessage(error, copy.failedPrepareDeletion)
                 setOperationProgress({
-                    operation: "python-delete",
+                    operation: expectedOperation,
                     stage: "failed",
                     message: msg,
                     currentStep: operationProgress?.currentStep || 0,
-                    totalSteps: operationProgress?.totalSteps || 4,
+                    totalSteps: operationProgress?.totalSteps || 8,
                     running: false,
                     failed: true,
                     error: msg

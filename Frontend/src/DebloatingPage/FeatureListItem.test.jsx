@@ -15,10 +15,10 @@ import {
 } from "./DebloatingPage";
 
 describe("FeatureListItem", () => {
-    test("supports reasoning stages only for add and edit operations", () => {
+    test("supports reasoning stages for add, edit, and delete operations", () => {
         expect(supportsReasoningGraphStages("edit")).toBe(true);
         expect(supportsReasoningGraphStages("add")).toBe(true);
-        expect(supportsReasoningGraphStages("delete")).toBe(false);
+        expect(supportsReasoningGraphStages("delete")).toBe(true);
         expect(supportsReasoningGraphStages("select")).toBe(false);
     });
 

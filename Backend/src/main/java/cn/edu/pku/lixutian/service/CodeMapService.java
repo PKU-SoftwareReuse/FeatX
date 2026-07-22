@@ -325,17 +325,7 @@ public class CodeMapService {
             throw new UnsupportedOperationException("The selected Python feature has no CodeMap methods to delete.");
         }
 
-        Set<String> sharedMethods = new LinkedHashSet<>();
-        for (String method : featureMethods) {
-            boolean shared = codeMapRepository.findByMethodName(method).stream()
-                    .map(CodeMap::getFeature)
-                    .filter(Objects::nonNull)
-                    .map(Feature::getId)
-                    .anyMatch(ownerFeatureId -> !featureId.equals(ownerFeatureId));
-            if (shared) {
-                sharedMethods.add(method);
-            }
-        }
+        Set<String> sharedMethods = sharedCodeMapMethods(featureId, featureMethods);
 
         JsonNode result = runPythonDeletePlanner(featureMethods, sharedMethods);
         Map<String, String> modifications = new LinkedHashMap<>();
@@ -372,6 +362,28 @@ public class CodeMapService {
         }
 
         return result;
+    }
+
+    public Set<String> sharedCodeMapMethods(Integer featureId, Collection<String> methods) {
+        if (featureId == null || methods == null || methods.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> sharedMethods = new LinkedHashSet<>();
+        methods.stream()
+                .filter(Objects::nonNull)
+                .filter(method -> !method.isBlank())
+                .distinct()
+                .forEach(method -> {
+                    boolean shared = codeMapRepository.findByMethodName(method).stream()
+                            .map(CodeMap::getFeature)
+                            .filter(Objects::nonNull)
+                            .map(Feature::getId)
+                            .anyMatch(ownerFeatureId -> !featureId.equals(ownerFeatureId));
+                    if (shared) {
+                        sharedMethods.add(method);
+                    }
+                });
+        return sharedMethods;
     }
 
     public FeatureResult getFeature(Integer featureId) {

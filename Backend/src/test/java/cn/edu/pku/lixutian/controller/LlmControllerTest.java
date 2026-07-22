@@ -14,16 +14,20 @@ import cn.edu.pku.lixutian.service.OperationProgressService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
+import cn.edu.pku.lixutian.service.code.DeleteAgentService;
+import cn.edu.pku.lixutian.service.code.PythonModifyAgentService;
 import cn.edu.pku.lixutian.service.llm.LlmClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,13 +35,14 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -174,35 +179,66 @@ class LlmControllerTest {
     }
 
     @Test
-    void javaDeleteDoesNotBuildReasoningStages(@TempDir Path projectRoot) throws Exception {
+    void javaDeletePreparesAgentWithReasoningAndSafetyContext(@TempDir Path projectRoot) throws Exception {
         prepareProject(projectRoot, "JAVA");
-        selectedFeature(8, "Delete this Java feature");
+        FeatureResult feature = selectedFeature(8, "Delete this Java feature");
+        FocusGraphContextResult graphContext = new FocusGraphContextResult();
+        graphContext.setContextPrompt("Java delete reasoning context");
+        FocusGraphContextResult.GraphStage reasoning = new FocusGraphContextResult.GraphStage();
+        reasoning.setId("reasoning");
+        graphContext.setGraphStages(List.of(reasoning));
         JavaGraphContextService javaGraphService = mock(JavaGraphContextService.class);
+        when(javaGraphService.buildDeleteContext(feature, "Delete this Java feature", AgentLanguage.EN))
+                .thenReturn(graphContext);
         FocusGraphContextService pythonGraphService = mock(FocusGraphContextService.class);
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        when(codeMapService.sharedCodeMapMethods(anyInt(), anyList()))
+                .thenReturn(Set.of("demo.Shared.keep()"));
+        AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
-                new AgentRunRegistry(),
+                registry,
                 javaGraphService,
                 pythonGraphService,
-                mock(LlmClient.class)
+                mock(LlmClient.class),
+                codeMapService
         );
+        AddOrModifyRequest request = new AddOrModifyRequest();
+        request.setFeatureId(8);
+        request.setLanguage(AgentLanguage.EN);
 
-        controller.deleteFeature(new AddOrModifyRequest());
+        AgentRunStartResult result = controller.deleteFeature(request);
+        AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        verifyNoInteractions(javaGraphService, pythonGraphService);
+        assertEquals("delete", run.mode());
+        assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(result.runId()));
+        assertTrue(run.relatedCodes().contains("Java delete reasoning context"));
+        assertTrue(run.relatedCodes().contains("PROTECTED_SYMBOL: demo.Shared.keep()"));
+        assertEquals(List.of("reasoning"), run.graphStages().stream()
+                .map(FocusGraphContextResult.GraphStage::getId).toList());
+        verify(javaGraphService).buildDeleteContext(feature, "Delete this Java feature", AgentLanguage.EN);
+        verifyNoInteractions(pythonGraphService);
     }
 
     @Test
-    void pythonDeleteDoesNotBuildReasoningStages(@TempDir Path projectRoot) throws Exception {
+    void pythonDeleteUsesAstBoundaryThenPreparesAgent(@TempDir Path projectRoot) throws Exception {
         prepareProject(projectRoot, "PYTHON");
-        selectedFeature(9, "Delete this feature");
+        FeatureResult feature = selectedFeature(9, "Delete this feature");
         JavaGraphContextService javaGraphService = mock(JavaGraphContextService.class);
         FocusGraphContextService pythonGraphService = mock(FocusGraphContextService.class);
+        FocusGraphContextResult graphContext = new FocusGraphContextResult();
+        graphContext.setContextPrompt("Python delete reasoning context");
+        graphContext.setGraphStages(List.of());
+        when(pythonGraphService.buildDeleteContext(anyInt(), anyString(), anyList()))
+                .thenReturn(graphContext);
         CodeMapService codeMapService = mock(CodeMapService.class);
         when(codeMapService.preparePythonDeleteFeature(anyInt(), anyList())).thenReturn(
-                OBJECT_MAPPER.readTree("{\"deletedMethods\":[],\"skippedMethods\":[],\"affectedFiles\":[]}")
+                OBJECT_MAPPER.readTree("{\"deletedMethods\":[\"feature_fn\"],"
+                        + "\"skippedMethods\":[],\"affectedFiles\":[\"feature.py\"]}")
         );
+        when(codeMapService.sharedCodeMapMethods(anyInt(), anyList())).thenReturn(Set.of());
+        AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
-                new AgentRunRegistry(),
+                registry,
                 javaGraphService,
                 pythonGraphService,
                 mock(LlmClient.class),
@@ -211,11 +247,69 @@ class LlmControllerTest {
         AddOrModifyRequest request = new AddOrModifyRequest();
         request.setFeatureId(9);
 
-        controller.deleteFeature(request);
+        AgentRunStartResult result = controller.deleteFeature(request);
+        AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        verifyNoInteractions(javaGraphService, pythonGraphService);
+        assertEquals("delete", run.mode());
+        assertEquals(feature.getFeatureId(), run.featureId());
+        assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(result.runId()));
+        assertTrue(run.relatedCodes().contains("Python delete reasoning context"));
+        assertTrue(run.relatedCodes().contains("Deterministic Python AST Boundary"));
+        verifyNoInteractions(javaGraphService);
+        verify(pythonGraphService).buildDeleteContext(eq(9), eq("Delete this feature"), anyList());
         verify(codeMapService).preparePythonDeleteFeature(anyInt(), anyList());
-        verify(codeMapService, never()).getFeaturesByModuleId(anyInt());
+    }
+
+    @Test
+    void javaDeleteStreamRoutesToDeleteAgent(@TempDir Path projectRoot) throws Exception {
+        prepareProject(projectRoot, "JAVA");
+        AgentRunRegistry registry = new AgentRunRegistry();
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.resolveModel("delete-model")).thenReturn("delete-model");
+        LlmController controller = controller(
+                registry,
+                mock(JavaGraphContextService.class),
+                mock(FocusGraphContextService.class),
+                llmClient
+        );
+        DeleteAgentService deleteAgentService = mock(DeleteAgentService.class);
+        PythonModifyAgentService pythonAgentService = mock(PythonModifyAgentService.class);
+        ReflectionTestUtils.setField(controller, "deleteAgentService", deleteAgentService);
+        ReflectionTestUtils.setField(controller, "pythonModifyAgentService", pythonAgentService);
+        AgentRunContext run = preparedDeleteRun(registry, projectRoot);
+        SseEmitter emitter = new SseEmitter();
+        when(deleteAgentService.runPipeline(run.runId(), "delete-model")).thenReturn(emitter);
+
+        assertSame(emitter, controller.streamResponse(run.runId(), AgentLanguage.EN, "delete-model"));
+
+        verify(deleteAgentService).runPipeline(run.runId(), "delete-model");
+        verifyNoInteractions(pythonAgentService);
+    }
+
+    @Test
+    void pythonDeleteStreamRoutesToPythonDeleteAgent(@TempDir Path projectRoot) throws Exception {
+        prepareProject(projectRoot, "PYTHON");
+        AgentRunRegistry registry = new AgentRunRegistry();
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.resolveModel("delete-model")).thenReturn("delete-model");
+        LlmController controller = controller(
+                registry,
+                mock(JavaGraphContextService.class),
+                mock(FocusGraphContextService.class),
+                llmClient
+        );
+        DeleteAgentService deleteAgentService = mock(DeleteAgentService.class);
+        PythonModifyAgentService pythonAgentService = mock(PythonModifyAgentService.class);
+        ReflectionTestUtils.setField(controller, "deleteAgentService", deleteAgentService);
+        ReflectionTestUtils.setField(controller, "pythonModifyAgentService", pythonAgentService);
+        AgentRunContext run = preparedDeleteRun(registry, projectRoot);
+        SseEmitter emitter = new SseEmitter();
+        when(pythonAgentService.runDeletePipeline(run.runId(), "delete-model")).thenReturn(emitter);
+
+        assertSame(emitter, controller.streamResponse(run.runId(), AgentLanguage.EN, "delete-model"));
+
+        verify(pythonAgentService).runDeletePipeline(run.runId(), "delete-model");
+        verifyNoInteractions(deleteAgentService);
     }
 
     @Test
@@ -305,6 +399,23 @@ class LlmControllerTest {
             request.setLanguage(AgentLanguage.EN);
             return controller.modifyFeature(request);
         }
+    }
+
+    private AgentRunContext preparedDeleteRun(AgentRunRegistry registry, Path projectRoot) {
+        return registry.prepare(
+                "delete",
+                "Delete selected feature",
+                "Selected feature",
+                "delete context",
+                "Feature.java",
+                AgentLanguage.EN,
+                projectRoot.toString(),
+                projectRoot.toString(),
+                42,
+                7,
+                null,
+                List.of()
+        );
     }
 
     private LlmController controller(

@@ -7,6 +7,7 @@ import cn.edu.pku.lixutian.helper.ProjectFilePath;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static final int MAX_ADDITIONAL_FILES = 12;
@@ -42,6 +44,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static final int MAX_RETRY_RESPONSE_CHARS = 20_000;
     private static final long PIPELINE_TIMEOUT_MILLIS = TimeUnit.MINUTES.toMillis(30);
     private static final long PYTHON_SYNTAX_TIMEOUT_SECONDS = 20;
+    private static final String PROTECTED_SYMBOL_MARKER = "PROTECTED_SYMBOL:";
+    private static final String ALLOWED_DELETE_FILE_MARKER = "ALLOWED_DELETE_FILE:";
 
     private static class AdditionalFile {
         String filename;
@@ -68,7 +72,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String runId,
             String model,
             String projectLanguage,
-            boolean addition
+            AgentOperation operation
     ) {
         AgentRunContext context = agentRunRegistry.claim(runId);
         AgentRunEventStream eventStream = agentRunRegistry.eventStream(runId);
@@ -93,7 +97,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     context,
                     model,
                     projectLanguage,
-                    addition,
+                    operation,
                     eventStream,
                     terminal
             )));
@@ -113,7 +117,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentRunContext context,
             String model,
             String projectLanguage,
-            boolean addition,
+            AgentOperation operation,
             AgentEventSink eventSink,
             AtomicBoolean terminal
     ) {
@@ -124,7 +128,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             Set<String> existingFiles = new HashSet<>(ListFileHelper.findAllFiles(context.sourceRoot()));
 
             sendStatus(eventSink, context.language().stageOneDescription());
-            String agent1Prompt = buildAgent1Prompt(context, projectLanguage, addition);
+            String agent1Prompt = buildAgent1Prompt(context, projectLanguage, operation);
             Agent1ParsedResult agent1 = requestAndParseAgent1(
                     context,
                     "agent1",
@@ -178,7 +182,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
 
             sendStatus(eventSink, context.language().stageTwoDescription());
-            String agent2Prompt = buildAgent2Prompt(context, extraInfo, projectLanguage, addition);
+            String agent2Prompt = buildAgent2Prompt(context, extraInfo, projectLanguage, operation);
             Agent2ParsedResult agent2 = requestAndParseAgent2(
                     context,
                     "agent2",
@@ -201,16 +205,38 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             );
             StringBuilder priorGenerations = new StringBuilder();
             Map<String, String> modifications = new LinkedHashMap<>();
+            Set<String> protectedSymbols = markedValues(context.relatedCodes(), PROTECTED_SYMBOL_MARKER);
+            Set<String> allowedDeleteFiles = markedValues(context.relatedCodes(), ALLOWED_DELETE_FILE_MARKER).stream()
+                    .map(ProjectFilePath::normalize)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
 
             for (ModifiedFile file : agent2.modifiedFileList) {
                 ensureNotInterrupted();
                 sendStatus(eventSink, context.language().stageThreeDescription(file.filename));
+                Path targetPath = ProjectFilePath.resolve(Path.of(context.sourceRoot()), file.filename);
+                if (operation.isDeletion() && !Files.isRegularFile(targetPath)) {
+                    throw new IllegalArgumentException(
+                            "Delete Agent cannot create a new file: " + file.filename
+                    );
+                }
                 if ("delete".equals(file.action)) {
+                    if (operation.isDeletion() && !allowedDeleteFiles.contains(file.filename)) {
+                        throw new IllegalArgumentException(
+                                "Delete Agent cannot delete a whole file outside the deterministic deletion boundary: "
+                                        + file.filename
+                        );
+                    }
+                    if (operation.isDeletion()) {
+                        String originalContent = ListFileHelper.getProjectFileContent(
+                                context.sourceRoot(),
+                                file.filename
+                        );
+                        validateProtectedSymbols(file.filename, originalContent, "", protectedSymbols);
+                    }
                     modifications.put(file.filename, DELETE_FILE_SENTINEL);
                     priorGenerations.append("\nFILE DELETED: ").append(file.filename).append("\n");
                     continue;
                 }
-                Path targetPath = ProjectFilePath.resolve(Path.of(context.sourceRoot()), file.filename);
                 boolean createMode = !Files.isRegularFile(targetPath);
                 String fileContent = createMode
                         ? ""
@@ -227,7 +253,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         referenceContext,
                         boundedPromptSection(priorGenerations.toString(), MAX_PRIOR_GENERATION_CHARS),
                         projectLanguage,
-                        addition
+                        operation
                 );
                 String generatedContent = requestAndApplyAgent3(
                         context,
@@ -237,7 +263,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         file.filename,
                         fileContent,
                         createMode,
-                        context.language()
+                        context.language(),
+                        operation,
+                        protectedSymbols
                 );
                 modifications.put(file.filename, generatedContent);
                 priorGenerations.append("\nFILE: ").append(file.filename).append("\n")
@@ -351,7 +379,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 filename,
                 originalContent,
                 createMode,
-                language
+                language,
+                AgentOperation.MODIFY,
+                Set.of()
         );
     }
 
@@ -363,7 +393,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String filename,
             String originalContent,
             boolean createMode,
-            AgentLanguage language
+            AgentLanguage language,
+            AgentOperation operation,
+            Set<String> protectedSymbols
     ) throws IOException {
         Exception lastFailure = null;
         String previousResponse = "";
@@ -386,7 +418,16 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                                 eventSink,
                                 model
                         );
-                return applyAgent3Result(previousResponse, filename, originalContent, createMode);
+                String generatedContent = applyAgent3Result(
+                        previousResponse,
+                        filename,
+                        originalContent,
+                        createMode
+                );
+                if (operation.isDeletion()) {
+                    validateProtectedSymbols(filename, originalContent, generatedContent, protectedSymbols);
+                }
+                return generatedContent;
             } catch (IOException | RuntimeException exception) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new IOException("Agent pipeline was cancelled.", exception);
@@ -611,8 +652,12 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         return plan.toString();
     }
 
-    private String buildAgent1Prompt(AgentRunContext context, String projectLanguage, boolean addition) {
-        String originalSection = addition ? "" : """
+    private String buildAgent1Prompt(
+            AgentRunContext context,
+            String projectLanguage,
+            AgentOperation operation
+    ) {
+        String originalSection = operation.isAddition() ? "" : """
                 Original feature description:
                 \"\"\"
                 %s
@@ -652,7 +697,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 If no additional files are needed, return false and an empty array.
                 """.formatted(
                 projectLanguage,
-                addition ? "feature addition" : "feature modification",
+                operation.promptLabel(),
                 context.newRequest(),
                 originalSection,
                 boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
@@ -665,8 +710,15 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentRunContext context,
             String extraInfo,
             String projectLanguage,
-            boolean addition
+            AgentOperation operation
     ) {
+        String deleteConstraints = operation.isDeletion() ? """
+
+                This is a feature deletion. Preserve unrelated behavior and every protected shared symbol listed
+                in the supplied context. Prefer minimal rewrites. Use action=delete for a whole file only when the
+                context explicitly lists that path as ALLOWED_DELETE_FILE and the file is dedicated to this feature.
+                Do not create files during deletion.
+                """ : "";
         return """
                 You are Agent2 for a %s project. Produce a complete, internally consistent file-level plan for this %s.
 
@@ -707,14 +759,16 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 }
                 The submitted requirement is authoritative and must produce a concrete change. Do not return an
                 empty modifiedFileList merely because the requested behavior is small or unconventional.
+                %s
                 Write plan and note values in %s.
                 """.formatted(
                 projectLanguage,
-                addition ? "feature addition" : "feature modification",
+                operation.promptLabel(),
                 context.newRequest(),
                 context.oldRequest(),
                 boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
                 extraInfo,
+                deleteConstraints,
                 context.language().promptLanguageName()
         );
     }
@@ -728,7 +782,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String referenceContext,
             String priorGenerations,
             String projectLanguage,
-            boolean addition
+            AgentOperation operation
     ) {
         boolean javaFile = target.filename.endsWith(".java");
         String expectedPackage = javaFile ? JavaFilePath.packageName(target.filename) : "";
@@ -761,6 +815,14 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 - Use additional blocks for additional edits, including package or import changes.
                 - Do not use ellipses, line numbers, regexes, explanations, or omitted-code placeholders.
                 """;
+        String deleteConstraints = operation.isDeletion() ? """
+
+                Deletion safety rules:
+                - Preserve every PROTECTED_SYMBOL from the reference context.
+                - Remove only implementation that belongs to the selected feature or references made obsolete by it.
+                - Preserve unrelated public APIs, shared configuration, and shared behavior.
+                - This target already exists; do not use CREATE.
+                """ : "";
         return """
                 You are Agent3 for a %s project. Produce precise Search/Replace edits for one project file in a
                 coordinated multi-file %s.
@@ -801,13 +863,15 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
                 %s
 
+                %s
+
                 The resulting file must remain valid for its file type. FeatX applies the blocks only in memory;
                 it syntax-checks generated Java and Python files but does not compile or run the project.
                 Do not wrap the protocol in Markdown fences.
                 Write newly added or modified natural-language comments in %s.
                 """.formatted(
                 projectLanguage,
-                addition ? "feature addition" : "feature modification",
+                operation.promptLabel(),
                 context.newRequest(),
                 context.oldRequest(),
                 globalPlan,
@@ -818,8 +882,79 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 target.note,
                 originalFile,
                 outputContract,
+                deleteConstraints,
                 context.language().promptLanguageName()
         );
+    }
+
+    private Set<String> markedValues(String context, String marker) {
+        if (context == null || context.isBlank()) {
+            return Set.of();
+        }
+        Set<String> values = new java.util.LinkedHashSet<>();
+        for (String line : context.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(marker)) {
+                String value = trimmed.substring(marker.length()).trim();
+                if (!value.isBlank()) {
+                    values.add(value);
+                }
+            }
+        }
+        return values;
+    }
+
+    private void validateProtectedSymbols(
+            String filename,
+            String originalContent,
+            String generatedContent,
+            Set<String> protectedSymbols
+    ) {
+        for (String protectedSymbol : protectedSymbols) {
+            String callableName = callableName(protectedSymbol);
+            if (callableName.isBlank()) {
+                continue;
+            }
+            if (declaresCallable(filename, originalContent, callableName)
+                    && !declaresCallable(filename, generatedContent, callableName)) {
+                throw new IllegalArgumentException(
+                        "Delete Agent attempted to remove protected shared symbol " + protectedSymbol
+                                + " from " + filename + "."
+                );
+            }
+        }
+    }
+
+    private boolean declaresCallable(String filename, String content, String callableName) {
+        if (filename.endsWith(".java")) {
+            try {
+                return StaticJavaParser.parse(content).findAll(MethodDeclaration.class).stream()
+                        .anyMatch(method -> method.getNameAsString().equals(callableName));
+            } catch (RuntimeException invalidSource) {
+                return false;
+            }
+        }
+        if (filename.endsWith(".py")) {
+            Pattern definition = Pattern.compile(
+                    "(?m)^\\s*(?:async\\s+)?def\\s+" + Pattern.quote(callableName) + "\\s*\\("
+            );
+            return definition.matcher(content).find();
+        }
+        Pattern callable = Pattern.compile("\\b" + Pattern.quote(callableName) + "\\s*\\(");
+        return callable.matcher(content).find();
+    }
+
+    private String callableName(String signature) {
+        String value = signature == null ? "" : signature.trim();
+        int parameters = value.indexOf('(');
+        if (parameters >= 0) {
+            value = value.substring(0, parameters);
+        }
+        int separator = Math.max(
+                Math.max(value.lastIndexOf('.'), value.lastIndexOf('#')),
+                Math.max(value.lastIndexOf(':'), value.lastIndexOf(' '))
+        );
+        return separator >= 0 ? value.substring(separator + 1).trim() : value;
     }
 
     private JsonNode readJsonObject(String response) {
