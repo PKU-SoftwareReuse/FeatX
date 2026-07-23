@@ -18,7 +18,8 @@ services:
       retries: 30
     restart: unless-stopped
 
-  backend:
+  javabackend:
+    container_name: JavaBackend
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
@@ -26,7 +27,7 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      reposummary:
+      pybackend:
         condition: service_healthy
     environment:
       LTM_REPO_PATH: /workspace/repos
@@ -73,25 +74,26 @@ services:
       DB_USER: ${MYSQL_USER:-featx}
       DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
       REPOSUMMARY_PYTHON: /opt/reposummary-venv/bin/python
-      REPOSUMMARY_DIR: /app/RepoSummary
-      REPOSUMMARY_HTTP_URL: http://reposummary:8091
-      LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
+      REPOSUMMARY_DIR: /app/PyBackend
+      REPOSUMMARY_HTTP_URL: http://pybackend:8091
+      LOMBOK_JAR: /app/JavaBackend/tools/lombok-1.18.36.jar
     volumes:
       - ./repos:/workspace/repos
       - ./agent-logs:/workspace/agent-logs
-      - ./RepoSummary/output:/app/RepoSummary/output
+      - ./PyBackend/output:/app/PyBackend/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     restart: unless-stopped
 
-  reposummary:
+  pybackend:
+    container_name: PyBackend
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
     image: featx-backend:ase26
     command: ["/opt/reposummary-venv/bin/python", "-m", "src.http_service"]
-    working_dir: /app/RepoSummary
+    working_dir: /app/PyBackend
     depends_on:
       mysql:
         condition: service_healthy
@@ -126,7 +128,7 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
     volumes:
       - ./repos:/workspace/repos
-      - ./RepoSummary/output:/app/RepoSummary/output
+      - ./PyBackend/output:/app/PyBackend/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     healthcheck:
       test: ["CMD", "/opt/reposummary-venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health', timeout=2)"]
@@ -145,7 +147,7 @@ services:
         REACT_APP_DEFAULT_LANGUAGE: ${REACT_APP_DEFAULT_LANGUAGE:-CN}
     image: featx-frontend:ase26
     depends_on:
-      - backend
+      - javabackend
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     restart: unless-stopped

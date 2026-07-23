@@ -134,7 +134,7 @@ FeatX 会记录代码演化 Agent 每次模型调用的 prompt、原始响应、
 整次运行的 token 汇总。Docker Compose 默认将日志写入宿主机的
 `agent-logs/<runId>/`；如需关闭，可在 `.env` 中设置
 `AGENT_LOGS_ENABLED=false`。手动启动后端时默认目录为
-`Backend/logs/agent-runs`（从 `Backend` 目录启动的情形），也可通过
+`JavaBackend/logs/agent-runs`（从 `JavaBackend` 目录启动的情形），也可通过
 `AGENT_LOG_DIR` 修改。
 
 `GET /llm/run?runId=<runId>` 的响应包含 `tokenUsage` 和 `agentLogPath`。

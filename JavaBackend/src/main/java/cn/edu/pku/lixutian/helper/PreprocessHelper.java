@@ -345,7 +345,7 @@ public class PreprocessHelper {
 
         List<String> candidates = List.of(
                 "tools/lombok-1.18.36.jar",
-                "Backend/tools/lombok-1.18.36.jar",
+                "JavaBackend/tools/lombok-1.18.36.jar",
                 "./LoCoTeM/tools/lombok-1.18.36.jar"
         );
         for (String candidate : candidates) {

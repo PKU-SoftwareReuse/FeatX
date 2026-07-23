@@ -1,9 +1,8 @@
-# RepoSummary Module
+# PyBackend
 
-RepoSummary is the Python feature-extraction and repository-summarization module
-used by FeatX. It analyzes Java repositories, builds structural and semantic
-representations, clusters related code elements, and generates feature
-descriptions through an OpenAI-compatible LLM endpoint.
+PyBackend is the Python analysis service used by FeatX. It contains RepoSummary,
+FocusGraph ranking, Python static-analysis tooling, model serving, and embedding
+cache management.
 
 For ASE artifact evaluation, reviewers should normally run RepoSummary through
 the top-level Docker Compose deployment. The backend container installs the
@@ -49,7 +48,7 @@ OPENAI_API_MODEL=deepseek-v4-pro
 
 For manual FeatX deployment, `LOTM_REPO_PATH` and the database settings must
 match the Java backend configuration in
-`Backend/src/main/resources/application.properties`. Do not commit real API keys
+`JavaBackend/src/main/resources/application.properties`. Do not commit real API keys
 or reviewer credentials.
 
 ## Main Outputs

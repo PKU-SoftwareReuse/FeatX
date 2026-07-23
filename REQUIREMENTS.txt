@@ -55,15 +55,15 @@ Machine-readable dependency files included in the artifact:
 - `docker/mysql.Dockerfile`
 - `docker/backend.Dockerfile`
 - `docker/frontend.Dockerfile`
-- `Backend/pom.xml`
+- `JavaBackend/pom.xml`
 - `Frontend/package.json`
-- `RepoSummary/requirements.txt`
+- `PyBackend/requirements.txt`
 - `.env.example`
 
 Required software for manual deployment, not recommended for artifact review:
 
 - Java JDK 17.
-- Maven through the included `Backend/mvnw` wrapper.
+- Maven through the included `JavaBackend/mvnw` wrapper.
 - Node.js 20.x and npm 10.x.
 - Python 3.10.
 - MySQL 8.
@@ -72,9 +72,9 @@ Required software for manual deployment, not recommended for artifact review:
 Manual deployment configuration:
 
 - Configure the backend through
-  `Backend/src/main/resources/application.properties`, starting from
-  `Backend/src/main/resources/example.properties`.
-- Configure RepoSummary through `RepoSummary/.env`.
+  `JavaBackend/src/main/resources/application.properties`, starting from
+  `JavaBackend/src/main/resources/example.properties`.
+- Configure the Python backend through `PyBackend/.env`.
 - Backend and RepoSummary must point to the same MySQL database and repository
   cache path.
 

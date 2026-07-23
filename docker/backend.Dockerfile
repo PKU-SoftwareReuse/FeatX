@@ -1,11 +1,11 @@
-FROM eclipse-temurin:17-jdk-jammy AS backend-build
+FROM eclipse-temurin:17-jdk-jammy AS javabackend-build
 
-WORKDIR /src/Backend
-COPY Backend/.mvn .mvn
-COPY Backend/mvnw Backend/pom.xml ./
+WORKDIR /src/JavaBackend
+COPY JavaBackend/.mvn .mvn
+COPY JavaBackend/mvnw JavaBackend/pom.xml ./
 RUN ./mvnw -B -DskipTests dependency:go-offline
 
-COPY Backend/src src
+COPY JavaBackend/src src
 RUN ./mvnw -B -DskipTests package
 
 FROM eclipse-temurin:17-jdk-jammy
@@ -18,19 +18,19 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY RepoSummary/requirements.txt /tmp/reposummary-requirements.txt
+COPY PyBackend/requirements.txt /tmp/pybackend-requirements.txt
 RUN python3 -m venv /opt/reposummary-venv \
     && /opt/reposummary-venv/bin/pip install --upgrade pip \
     && /opt/reposummary-venv/bin/pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.5.1+cpu \
-    && /opt/reposummary-venv/bin/pip install --no-cache-dir -r /tmp/reposummary-requirements.txt
+    && /opt/reposummary-venv/bin/pip install --no-cache-dir -r /tmp/pybackend-requirements.txt
 
-COPY --from=backend-build /src/Backend/target/*.jar /app/featx-backend.jar
-COPY Backend/tools /app/Backend/tools
-COPY RepoSummary /app/RepoSummary
+COPY --from=javabackend-build /src/JavaBackend/target/*.jar /app/featx-javabackend.jar
+COPY JavaBackend/tools /app/JavaBackend/tools
+COPY PyBackend /app/PyBackend
 
 RUN mkdir -p /workspace/repos
 COPY datasets/repos /workspace/repos
 
 EXPOSE 8080
 
-CMD ["java", "-jar", "/app/featx-backend.jar"]
+CMD ["java", "-jar", "/app/featx-javabackend.jar"]

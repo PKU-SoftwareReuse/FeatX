@@ -932,7 +932,7 @@ public class CodeMapService {
     }
 
     private JsonNode runPythonDeletePlanner(List<String> featureMethods, Set<String> sharedMethods) throws IOException, InterruptedException {
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
+        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./PyBackend");
         Integer repoId = ProjectState.getInstance().getRepoId();
         if (repoId == null) {
             throw new IOException("Current repoId is not set.");
@@ -1061,7 +1061,7 @@ public class CodeMapService {
     }
 
     private static Map<String, String> loadPythonMethodFileMap() {
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
+        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./PyBackend");
         Integer repoId = ProjectState.getInstance().getRepoId();
         if (repoId == null) {
             return Collections.emptyMap();
@@ -1113,7 +1113,7 @@ public class CodeMapService {
     }
 
     private static Map<String, PythonMethodContainer> loadPythonMethodContainerMap() {
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
+        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./PyBackend");
         Integer repoId = ProjectState.getInstance().getRepoId();
         if (repoId == null) {
             return Collections.emptyMap();
@@ -1175,7 +1175,7 @@ public class CodeMapService {
     }
 
     private static List<PythonContainerEdge> loadPythonContainerEdges() {
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
+        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./PyBackend");
         Integer repoId = ProjectState.getInstance().getRepoId();
         if (repoId == null) {
             return null;

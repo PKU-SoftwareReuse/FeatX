@@ -131,21 +131,21 @@ you need to customize the runtime environment.
 
 Requirements:
 
-*   Java JDK 17 and Maven via `Backend/mvnw`
+*   Java JDK 17 and Maven via `JavaBackend/mvnw`
 *   Node.js 20.x and npm 10.x
-*   Python 3.10 and dependencies from `RepoSummary/requirements.txt`
+*   Python 3.10 and dependencies from `PyBackend/requirements.txt`
 *   MySQL 8 initialized with
-    `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`; the
-    backend then applies `Backend/src/main/resources/db/migration` automatically
+    `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`; the
+    backend then applies `JavaBackend/src/main/resources/db/migration` automatically
 *   An OpenAI-compatible LLM API endpoint for full workflows
 *   Nginx or another static server if serving the production frontend build
 
 Configuration files:
 
-*   `Backend/src/main/resources/application.properties` configures repository
+*   `JavaBackend/src/main/resources/application.properties` configures repository
     cache path, MySQL, and Java backend LLM settings. You can also start from
-    `Backend/src/main/resources/example.properties`.
-*   `RepoSummary/.env` configures the same repository cache path, MySQL
+    `JavaBackend/src/main/resources/example.properties`.
+*   `PyBackend/.env` configures the same repository cache path, MySQL
     connection, and Python-side LLM settings.
 *   The backend and RepoSummary database/repository-cache settings must point to
     the same MySQL database and repository directory.
@@ -155,7 +155,7 @@ Configuration files:
 Build and start the backend:
 
 ```bash
-cd Backend
+cd JavaBackend
 ./mvnw -DskipTests package
 java -jar target/*.jar
 ```
@@ -199,8 +199,8 @@ OpenAI-compatible API key and may incur provider-side cost.
 FeatX records every code-evolution Agent prompt, raw model response, call
 metadata, and the run-level token summary. Docker Compose writes these files to
 `agent-logs/<runId>/` on the host. Set `AGENT_LOGS_ENABLED=false` in `.env` to
-disable file logging. Manual deployments default to `Backend/logs/agent-runs`
-when the backend is started from the `Backend` directory; this can be changed
+disable file logging. Manual deployments default to `JavaBackend/logs/agent-runs`
+when the backend is started from the `JavaBackend` directory; this can be changed
 with `AGENT_LOG_DIR`.
 
 `GET /llm/run?runId=<runId>` includes `tokenUsage` and `agentLogPath`.

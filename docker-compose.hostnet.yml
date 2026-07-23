@@ -26,7 +26,8 @@ services:
       retries: 30
     restart: unless-stopped
 
-  backend:
+  javabackend:
+    container_name: JavaBackend
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
@@ -36,7 +37,7 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      reposummary:
+      pybackend:
         condition: service_healthy
     environment:
       SERVER_PORT: ${BACKEND_PORT:-28001}
@@ -85,17 +86,18 @@ services:
       DB_USER: ${MYSQL_USER:-featx}
       DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
       REPOSUMMARY_PYTHON: /opt/reposummary-venv/bin/python
-      REPOSUMMARY_DIR: /app/RepoSummary
+      REPOSUMMARY_DIR: /app/PyBackend
       REPOSUMMARY_HTTP_URL: http://127.0.0.1:${REPOSUMMARY_HTTP_PORT:-28002}
-      LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
+      LOMBOK_JAR: /app/JavaBackend/tools/lombok-1.18.36.jar
     volumes:
       - featx-repos:/workspace/repos
       - ./agent-logs:/workspace/agent-logs
-      - featx-reposummary-output:/app/RepoSummary/output
+      - featx-reposummary-output:/app/PyBackend/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     restart: unless-stopped
 
-  reposummary:
+  pybackend:
+    container_name: PyBackend
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
@@ -103,7 +105,7 @@ services:
     image: featx-merge-dev-backend:hostnet
     network_mode: host
     command: ["/opt/reposummary-venv/bin/python", "-m", "src.http_service"]
-    working_dir: /app/RepoSummary
+    working_dir: /app/PyBackend
     depends_on:
       mysql:
         condition: service_healthy
@@ -138,7 +140,7 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
     volumes:
       - featx-repos:/workspace/repos
-      - featx-reposummary-output:/app/RepoSummary/output
+      - featx-reposummary-output:/app/PyBackend/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
     healthcheck:
       test: ["CMD", "/opt/reposummary-venv/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['REPOSUMMARY_HTTP_PORT'] + '/health', timeout=2)"]
@@ -158,7 +160,7 @@ services:
     image: featx-merge-dev-frontend:hostnet
     network_mode: host
     depends_on:
-      - backend
+      - javabackend
     restart: unless-stopped
 
 volumes:

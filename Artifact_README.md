@@ -116,7 +116,8 @@ docker compose up -d
 Expected services:
 
 - `mysql`: MySQL 8 initialized with `datasets/mysql/featx_seed.sql`.
-- `backend`: Spring Boot backend plus RepoSummary Python dependencies.
+- `javabackend`: Spring Boot Java backend and Java-side analysis.
+- `pybackend`: Python analysis service containing RepoSummary and FocusGraph.
 - `frontend`: Nginx-served React UI with `/api` proxied to the backend.
 
 If host ports `8080` or `3000` are already in use, start with alternate ports:
@@ -138,7 +139,7 @@ curl -i http://localhost:3000/api/connect/test
 
 Expected result:
 
-- `docker compose ps` shows `mysql`, `backend`, and `frontend` running.
+- `docker compose ps` shows `mysql`, `javabackend`, `pybackend`, and `frontend` running.
 - `curl -i http://localhost:8080/connect/test` returns HTTP 200.
 - `curl -i http://localhost:3000/` returns the FeatX frontend HTML page.
 - `curl -i http://localhost:3000/api/connect/test` returns HTTP 200 through the
@@ -196,8 +197,8 @@ re-executed by the artifact package.
 ### Artifact layout
 
 - `Frontend/`: React user interface.
-- `Backend/`: Spring Boot backend and Java-side evolution service.
-- `RepoSummary/`: Python feature extraction and repository summarization module.
+- `JavaBackend/`: Spring Boot backend and Java-side evolution service.
+- `PyBackend/`: Python analysis service containing RepoSummary, FocusGraph, and Python tooling.
 - `datasets/commits/dataset.json`: 38 feature-editing commits from FlappyBird,
   PlayEdu, and NBlog.
 - `datasets/README.md`: data inventory, schema notes, and validation commands.
@@ -365,7 +366,7 @@ Warnings from source maps or ESLint do not block the production build.
 Python module:
 
 ```bash
-cd RepoSummary
+cd PyBackend
 python3 -m compileall -q src
 ```
 
@@ -374,7 +375,7 @@ Expected result: the command exits with status 0.
 Backend:
 
 ```bash
-cd Backend
+cd JavaBackend
 ./mvnw -DskipTests package
 ```
 
@@ -424,12 +425,12 @@ OpenAI-compatible LLM API for full workflows.
 At minimum:
 
 1. Create a MySQL database and initialize it with
-   `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`. Versioned
-   migrations under `Backend/src/main/resources/db/migration` run automatically
+   `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`. Versioned
+   migrations under `JavaBackend/src/main/resources/db/migration` run automatically
    when the backend starts.
-2. Create `Backend/src/main/resources/application.properties` from
-   `Backend/src/main/resources/example.properties`.
-3. Create `RepoSummary/.env` with the same database and repository-cache path.
+2. Create `JavaBackend/src/main/resources/application.properties` from
+   `JavaBackend/src/main/resources/example.properties`.
+3. Create `PyBackend/.env` with the same database and repository-cache path.
 4. Configure the LLM API endpoint and key for the backend, and configure the
    endpoint, key, and model for RepoSummary.
 5. Start the backend at `http://127.0.0.1:8080` and serve the frontend at

@@ -29,13 +29,13 @@ USAGE
 }
 
 HOST_MYSQL_CONTAINER=featx-merge-dev-mysql
-HOST_REPOSUMMARY_CONTAINER=featx-merge-dev-reposummary
-HOST_BACKEND_CONTAINER=featx-merge-dev-backend
+HOST_PYBACKEND_CONTAINER=PyBackend
+HOST_JAVABACKEND_CONTAINER=JavaBackend
 HOST_FRONTEND_CONTAINER=featx-merge-dev-frontend
 LEGACY_MYSQL_CONTAINER=featx_ae_current-mysql-1
 HOST_MYSQL_VOLUME=featx_ae_current_featx-mysql-data
 HOST_REPOS_VOLUME=featx_ae_current_featx-repos
-HOST_REPOSUMMARY_OUTPUT_VOLUME=featx_ae_current_featx-reposummary-output
+HOST_PYBACKEND_OUTPUT_VOLUME=featx_ae_current_featx-reposummary-output
 HOST_BASE_BACKEND_IMAGE=featx-backend-runtime:ase26
 HOST_MODEL_IMAGE=featx-models:ase26
 
@@ -72,7 +72,7 @@ write_env_value() {
 }
 
 prepare_backend_build_output() {
-  local target_dir="$ROOT_DIR/Backend/target"
+  local target_dir="$ROOT_DIR/JavaBackend/target"
   local current_uid stale_path
 
   [[ -d "$target_dir" ]] || return
@@ -306,7 +306,7 @@ prepare_ports() {
   local requested_frontend="${FRONTEND_PORT:-$(read_env_value FRONTEND_PORT 3000)}"
 
   if [[ -z "${BACKEND_PORT:-}" ]] && port_in_use "$requested_backend" \
-      && ! port_belongs_to_compose_service "$requested_backend" backend 8080 \
+      && ! port_belongs_to_compose_service "$requested_backend" javabackend 8080 \
       && ! rootlesskit_port_exists "$requested_backend"; then
     BACKEND_PORT="$(find_free_port "$requested_backend")"
     export BACKEND_PORT
@@ -368,7 +368,7 @@ host_overlay_build() {
   prepare_backend_build_output
   if command -v javac >/dev/null 2>&1; then
     echo "Building backend jar on host..."
-    (cd Backend && ./mvnw -q -DskipTests package)
+    (cd JavaBackend && ./mvnw -q -DskipTests package)
   else
     echo "Host javac was not found; building backend jar in a JDK 17 container..."
     docker run --rm \
@@ -376,7 +376,7 @@ host_overlay_build() {
       -e MAVEN_USER_HOME=/root/.m2 \
       -v "$ROOT_DIR:/workspace" \
       -v featx-maven-cache:/root/.m2 \
-      -w /workspace/Backend \
+      -w /workspace/JavaBackend \
       eclipse-temurin:17-jdk-jammy \
       sh -lc "./mvnw -q -DskipTests package && chmod -R a+rwX target"
   fi
@@ -390,23 +390,26 @@ host_overlay_build() {
   local tmp_dir
   local backend_jar
   tmp_dir="$(mktemp -d)"
-  backend_jar="$(find Backend/target -maxdepth 1 -type f -name '*.jar' | head -n 1)"
+  backend_jar="$(find JavaBackend/target -maxdepth 1 -type f -name '*.jar' | head -n 1)"
   if [[ -z "$backend_jar" ]]; then
-    echo "Backend jar was not found under Backend/target." >&2
+    echo "JavaBackend jar was not found under JavaBackend/target." >&2
     rm -rf "$tmp_dir"
     exit 1
   fi
 
   echo "Updating backend Docker image from existing FeatX runtime..."
   mkdir -p "$tmp_dir/backend"
-  cp "$backend_jar" "$tmp_dir/backend/featx-backend.jar"
-  cp -a RepoSummary "$tmp_dir/backend/RepoSummary"
+  cp "$backend_jar" "$tmp_dir/backend/featx-javabackend.jar"
+  cp -a JavaBackend/tools "$tmp_dir/backend/JavaBackend-tools"
+  cp -a PyBackend "$tmp_dir/backend/PyBackend"
   docker build --network host -t featx-backend:ase26 -f - "$tmp_dir/backend" <<'DOCKERFILE'
 FROM featx-models:ase26
 RUN command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*)
-COPY featx-backend.jar /app/featx-backend.jar
-RUN rm -rf /app/RepoSummary
-COPY RepoSummary /app/RepoSummary
+COPY featx-javabackend.jar /app/featx-javabackend.jar
+RUN rm -rf /app/RepoSummary /app/PyBackend
+COPY JavaBackend-tools /app/JavaBackend/tools
+COPY PyBackend /app/PyBackend
+CMD ["java", "-jar", "/app/featx-javabackend.jar"]
 DOCKERFILE
 
   echo "Updating frontend Docker image from existing Nginx runtime..."
@@ -443,7 +446,7 @@ force_stop_container() {
 
 remove_host_containers() {
   local container
-  for container in "$HOST_FRONTEND_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_MYSQL_CONTAINER"; do
+  for container in "$HOST_FRONTEND_CONTAINER" "$HOST_JAVABACKEND_CONTAINER" "$HOST_PYBACKEND_CONTAINER" "$HOST_MYSQL_CONTAINER"; do
     force_stop_container "$container"
     docker rm "$container" >/dev/null 2>&1 || true
   done
@@ -545,7 +548,7 @@ start_host_stack() {
   git_proxy_host="$(prepare_git_proxy_host "$git_proxy_host" "$git_proxy_port")"
 
   docker volume create "$HOST_MYSQL_VOLUME" >/dev/null
-  docker volume create "$HOST_REPOSUMMARY_OUTPUT_VOLUME" >/dev/null
+  docker volume create "$HOST_PYBACKEND_OUTPUT_VOLUME" >/dev/null
   seed_repos_volume
   remove_host_containers
   stop_legacy_mysql_if_needed
@@ -561,7 +564,7 @@ start_host_stack() {
 
   wait_for_mysql "$mysql_user" "$mysql_password"
 
-  docker run -d --name "$HOST_REPOSUMMARY_CONTAINER" --network host \
+  docker run -d --name "$HOST_PYBACKEND_CONTAINER" --network host \
     --env-file .env \
     -e REPOSUMMARY_HTTP_HOST=127.0.0.1 \
     -e REPOSUMMARY_HTTP_PORT="$reposummary_port" \
@@ -573,14 +576,14 @@ start_host_stack() {
     -e DB_USER="$mysql_user" \
     -e DB_PASSWORD="$mysql_password" \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
-    -v "$HOST_REPOSUMMARY_OUTPUT_VOLUME:/app/RepoSummary/output" \
-    -w /app/RepoSummary \
+    -v "$HOST_PYBACKEND_OUTPUT_VOLUME:/app/PyBackend/output" \
+    -w /app/PyBackend \
     --entrypoint /opt/reposummary-venv/bin/python \
     featx-backend:ase26 -m src.http_service >/dev/null
 
-  wait_for_url "http://127.0.0.1:${reposummary_port}/health" "RepoSummary model service" 120
+  wait_for_url "http://127.0.0.1:${reposummary_port}/health" "PyBackend model service" 120
 
-  docker run -d --name "$HOST_BACKEND_CONTAINER" --network host \
+  docker run -d --name "$HOST_JAVABACKEND_CONTAINER" --network host \
     --env-file .env \
     -e SERVER_PORT="$BACKEND_PORT" \
     -e LTM_REPO_PATH=/workspace/repos \
@@ -602,11 +605,11 @@ start_host_stack() {
     -e DB_USER="$mysql_user" \
     -e DB_PASSWORD="$mysql_password" \
     -e REPOSUMMARY_PYTHON=/opt/reposummary-venv/bin/python \
-    -e REPOSUMMARY_DIR=/app/RepoSummary \
+    -e REPOSUMMARY_DIR=/app/PyBackend \
     -e REPOSUMMARY_HTTP_URL="http://127.0.0.1:${reposummary_port}" \
-    -e LOMBOK_JAR=/app/Backend/tools/lombok-1.18.36.jar \
+    -e LOMBOK_JAR=/app/JavaBackend/tools/lombok-1.18.36.jar \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
-    -v "$HOST_REPOSUMMARY_OUTPUT_VOLUME:/app/RepoSummary/output" \
+    -v "$HOST_PYBACKEND_OUTPUT_VOLUME:/app/PyBackend/output" \
     featx-backend:ase26 >/dev/null
 
   write_host_nginx_conf
@@ -616,7 +619,7 @@ start_host_stack() {
 }
 
 restart_host_stack() {
-  docker restart "$HOST_MYSQL_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER" >/dev/null
+  docker restart "$HOST_MYSQL_CONTAINER" "$HOST_PYBACKEND_CONTAINER" "$HOST_JAVABACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER" >/dev/null
 }
 
 show_host_logs() {
@@ -624,7 +627,7 @@ show_host_logs() {
   local running_logs=0
 
   trap 'kill $(jobs -pr) 2>/dev/null || true' EXIT INT TERM
-  for container in "$HOST_MYSQL_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"; do
+  for container in "$HOST_MYSQL_CONTAINER" "$HOST_PYBACKEND_CONTAINER" "$HOST_JAVABACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"; do
     if docker inspect "$container" >/dev/null 2>&1; then
       docker logs --tail 100 -f "$container" 2>&1 \
         | sed -u "s/^/[$container] /" &
@@ -641,7 +644,7 @@ show_host_logs() {
 }
 
 show_host_ps() {
-  docker ps -a --filter "name=featx-merge-dev" \
+  docker ps -a --filter "name=featx-merge-dev" --filter "name=JavaBackend" --filter "name=PyBackend" \
     --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 }
 

@@ -7,7 +7,7 @@ gdshow
 Py
 out
 repos
-RepoSummary/output
+PyBackend/output
 models
 codex-workplace
 **/*.iml
@@ -19,10 +19,10 @@ codex-workplace
 **/*.pyc
 **/*.ipynb
 **/.pytest_cache
-Backend/Untitled-1.sh
+JavaBackend/Untitled-1.sh
 
 *.log
 .env
 Frontend/.env
-Backend/src/main/resources/application-local.properties
-RepoSummary/.env
+JavaBackend/src/main/resources/application-local.properties
+PyBackend/.env

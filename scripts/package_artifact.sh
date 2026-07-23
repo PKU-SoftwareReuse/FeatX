@@ -13,7 +13,7 @@ tar \
   --exclude="$REPO_NAME/out" \
   --exclude="$REPO_NAME/.run" \
   --exclude="$REPO_NAME/gdshow" \
-  --exclude="$REPO_NAME/Backend/Untitled-1.sh" \
+  --exclude="$REPO_NAME/JavaBackend/Untitled-1.sh" \
   --exclude="$REPO_NAME/**/*.iml" \
   --exclude="$REPO_NAME/**/*.ipynb" \
   --exclude="$REPO_NAME/**/node_modules" \

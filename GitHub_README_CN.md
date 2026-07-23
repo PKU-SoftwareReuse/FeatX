@@ -111,24 +111,24 @@ docker compose down -v
 
 要求：
 
-*   Java JDK 17，以及 `Backend/mvnw`
+*   Java JDK 17，以及 `JavaBackend/mvnw`
 *   Node.js 20.x 和 npm 10.x
-*   Python 3.10，以及 `RepoSummary/requirements.txt` 中的依赖
-*   MySQL 8，并使用 `Backend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql` 初始化 schema
+*   Python 3.10，以及 `PyBackend/requirements.txt` 中的依赖
+*   MySQL 8，并使用 `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql` 初始化 schema
 *   用于完整流程的 OpenAI-compatible LLM API
 *   生产环境前端可使用 Nginx 或其他静态文件服务器
 
 配置文件：
 
-*   `Backend/src/main/resources/application.properties` 配置仓库缓存路径、MySQL 和 Java 后端 LLM 参数，也可以参考 `Backend/src/main/resources/example.properties`。
-*   `RepoSummary/.env` 配置相同的仓库缓存路径、MySQL 连接和 Python 侧 LLM 参数。
+*   `JavaBackend/src/main/resources/application.properties` 配置仓库缓存路径、MySQL 和 Java 后端 LLM 参数，也可以参考 `JavaBackend/src/main/resources/example.properties`。
+*   `PyBackend/.env` 配置相同的仓库缓存路径、MySQL 连接和 Python 侧 LLM 参数。
 *   后端与 RepoSummary 的数据库和仓库缓存目录必须指向同一套环境。
 *   顶层 `.env` 只用于 Docker Compose。手工部署时请在上述组件配置文件中设置等价参数。
 
 构建并启动后端：
 
 ```bash
-cd Backend
+cd JavaBackend
 ./mvnw -DskipTests package
 java -jar target/*.jar
 ```
