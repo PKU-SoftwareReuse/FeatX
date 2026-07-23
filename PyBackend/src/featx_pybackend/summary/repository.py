@@ -24,10 +24,10 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
-from .llm_config import openai_base_url
-from .structure_analsis.java.java_method_analyzer import JavaMethodAnalyzer
+from ..analysis.java.method_analyzer import JavaMethodAnalyzer
+from ..config.llm import openai_base_url
+from ..paths import MODELS_ROOT, OUTPUT_ROOT
 import os
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 IGNORED_ANALYSIS_DIRECTORIES = {
     ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
@@ -1774,10 +1774,10 @@ def repo_summary(project_root: str, output_dir: str, repo_id: Optional[str] = No
             print(f"  Function ID: {function.func_id}, Name: {function.func_name}, Description: {function.func_desc}")
         print("\n")
 
-    default_model_path = os.path.join(BASE_DIR, "..", "models", "all-mpnet-base-v2")
+    default_model_path = MODELS_ROOT / "sentence-transformers" / "all-mpnet-base-v2"
     model_path = os.getenv("SENTENCE_TRANSFORMER_MODEL")
     if not model_path:
-        model_path = default_model_path if os.path.exists(default_model_path) else "sentence-transformers/all-mpnet-base-v2"
+        model_path = str(default_model_path) if default_model_path.exists() else "sentence-transformers/all-mpnet-base-v2"
     model = SentenceTransformer(model_path)
     for file in files:
         file.file_txt_vector = model.encode(file.file_desc).tolist()
@@ -1849,10 +1849,8 @@ def repo_summary(project_root: str, output_dir: str, repo_id: Optional[str] = No
 
 
 def main(project_id):
-    here = os.path.dirname(os.path.abspath(__file__))
     all_projects_dir = os.path.normpath(os.getenv("LOTM_REPO_PATH"))
-    output_dir = os.path.join(here, "..", "output", str(project_id))
-    output_dir = os.path.normpath(output_dir)
+    output_dir = str(OUTPUT_ROOT / str(project_id))
     repo_root = os.path.join(all_projects_dir, str(project_id))
     java_root = _analysis_root(repo_root, "java", ".java")
     python_root = _analysis_root(repo_root, "python", ".py")
@@ -1866,9 +1864,9 @@ def main(project_id):
         return
 
     if _has_source_files(python_root, ".py"):
-        from . import python_repo_summary
+        from . import python_repository
 
-        python_repo_summary.repo_summary(
+        python_repository.repo_summary(
             project_root=python_root,
             output_dir=output_dir
         )

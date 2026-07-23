@@ -17,9 +17,10 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 
-from . import RepoSummary, embedding_cache, extract_python_methods, focusgraph_cli, java_graph_rank_cli
-from . import python_delete_feature, translate_summary, write2database
-from . import python_repo_summary
+from ..analysis.python import delete_feature, method_extractor
+from ..graph import focus, java_rank
+from ..storage import database, embedding_cache
+from ..summary import python_repository, repository, translation
 
 
 SERVICE_VERSION = 1
@@ -94,7 +95,7 @@ class RepoSummaryHandler(BaseHTTPRequestHandler):
                 self._stream_result(lambda progress: _java_rank(request, progress))
                 return
             if parsed.path == "/v1/cache/sync":
-                self._json_response(HTTPStatus.OK, focusgraph_cli.sync_bge_code_cache(request))
+                self._json_response(HTTPStatus.OK, focus.sync_bge_code_cache(request))
                 return
             if parsed.path == "/v1/cache/sync-python":
                 self._json_response(HTTPStatus.OK, _sync_python_cache(request))
@@ -103,7 +104,7 @@ class RepoSummaryHandler(BaseHTTPRequestHandler):
                 self._json_response(HTTPStatus.OK, _sync_feature_index(request))
                 return
             if parsed.path == "/v1/python/delete-feature":
-                self._json_response(HTTPStatus.OK, python_delete_feature.plan_delete(request))
+                self._json_response(HTTPStatus.OK, delete_feature.plan_delete(request))
                 return
             if parsed.path == "/v1/python/extract-methods":
                 self._json_response(HTTPStatus.OK, _extract_python_methods(request))
@@ -173,25 +174,25 @@ class RepoSummaryHandler(BaseHTTPRequestHandler):
 
 
 def _focusgraph_context(request: dict[str, Any], progress: Callable[[dict[str, Any]], None]) -> Any:
-    with focusgraph_cli.progress_callback(progress):
-        return focusgraph_cli.build_context(request)
+    with focus.progress_callback(progress):
+        return focus.build_context(request)
 
 
 def _java_retrieve(request: dict[str, Any], progress: Callable[[dict[str, Any]], None]) -> Any:
-    with java_graph_rank_cli.progress_callback(progress):
-        return java_graph_rank_cli.retrieve_features(request)
+    with java_rank.progress_callback(progress):
+        return java_rank.retrieve_features(request)
 
 
 def _java_rank(request: dict[str, Any], progress: Callable[[dict[str, Any]], None]) -> Any:
-    with java_graph_rank_cli.progress_callback(progress):
-        return java_graph_rank_cli.rank_graph(request)
+    with java_rank.progress_callback(progress):
+        return java_rank.rank_graph(request)
 
 
 def _extract_python_methods(request: dict[str, Any]) -> dict[str, Any]:
     src_root = Path(str(request["srcRoot"])).resolve()
     methods: list[dict[str, str]] = []
     for file_name in request.get("files") or []:
-        methods.extend(extract_python_methods.extract_file(src_root, str(file_name)))
+        methods.extend(method_extractor.extract_file(src_root, str(file_name)))
     return {"methods": methods}
 
 
@@ -230,7 +231,7 @@ def _sync_python_cache(request: dict[str, Any]) -> dict[str, Any]:
         if source_path not in changed_set:
             continue
         signature = str(row.get("method_signature") or "")
-        entity_id = focusgraph_cli._normalize_symbol(signature)
+        entity_id = focus._normalize_symbol(signature)
         nodes.append(
             {
                 "id": entity_id,
@@ -238,7 +239,7 @@ def _sync_python_cache(request: dict[str, Any]) -> dict[str, Any]:
                 "text": f"{entity_id}\n{row.get('method_code') or ''}",
             }
         )
-    result = focusgraph_cli.sync_bge_code_cache(
+    result = focus.sync_bge_code_cache(
         {
             "repoId": repo_id,
             "entityKind": "graph-node",
@@ -256,18 +257,18 @@ def _sync_python_cache(request: dict[str, Any]) -> dict[str, Any]:
 
 def _refresh_python_structure_index(source_root: Path, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
-    python_repo_summary.enre_main([str(source_root), str(output_dir)])
+    python_repository.enre_main([str(source_root), str(output_dir)])
     methods_path = output_dir / "methods.csv"
     if not methods_path.exists():
         raise RuntimeError(f"ENRE did not produce methods.csv at {methods_path}")
-    methods_df = python_repo_summary.pd.read_csv(methods_path, dtype=str, keep_default_na=False)
-    methods_df = python_repo_summary._normalize_methods_df(methods_df, source_root)
+    methods_df = python_repository.pd.read_csv(methods_path, dtype=str, keep_default_na=False)
+    methods_df = python_repository._normalize_methods_df(methods_df, source_root)
     methods_df.to_csv(methods_path, index=False)
-    python_repo_summary._write_method_compat_files(output_dir)
-    python_repo_summary._write_headered_file_matrix(output_dir, source_root, methods_df)
-    python_repo_summary._write_method_file_map(methods_df, output_dir)
-    python_repo_summary._write_method_container_map(methods_df, output_dir, source_root)
-    python_repo_summary._write_container_edges(methods_df, output_dir)
+    python_repository._write_method_compat_files(output_dir)
+    python_repository._write_headered_file_matrix(output_dir, source_root, methods_df)
+    python_repository._write_method_file_map(methods_df, output_dir)
+    python_repository._write_method_container_map(methods_df, output_dir, source_root)
+    python_repository._write_container_edges(methods_df, output_dir)
     return methods_df
 
 
@@ -305,7 +306,7 @@ def _sync_feature_index(request: dict[str, Any]) -> dict[str, Any]:
             writer.writeheader()
             writer.writerows(rows)
         temporary.replace(target)
-        cache_result = focusgraph_cli.sync_feature_embedding_cache(
+        cache_result = focus.sync_feature_embedding_cache(
             {"repoId": repo_id, "features": features}
         )
     return {
@@ -347,15 +348,15 @@ def _run_summary_job(job_id: str, repo_id: str) -> None:
         stderr = _JobStream(job_id, sys.__stderr__)
         try:
             with redirect_stdout(stdout), redirect_stderr(stderr):
-                RepoSummary.main(repo_id)
+                repository.main(repo_id)
                 print("[reposummary-main] Translating English summaries to Chinese", flush=True)
-                translated_count = translate_summary.main(repo_id)
+                translated_count = translation.main(repo_id)
                 print(
                     f"[reposummary-main] Chinese translation complete ({translated_count} unique summaries)",
                     flush=True,
                 )
                 print("[reposummary-main] Writing summary to database", flush=True)
-                write2database.main(repo_id)
+                database.main(repo_id)
                 print("[reposummary-main] Database write complete", flush=True)
             stdout.flush()
             stderr.flush()
@@ -401,16 +402,16 @@ def _job_snapshot(job_id: str, cursor: int) -> dict[str, Any]:
 
 def _preload_models() -> None:
     started = time.perf_counter()
-    feature = focusgraph_cli._load_sentence_model("FOCUSGRAPH_FEATURE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    feature = focus._load_sentence_model("FOCUSGRAPH_FEATURE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     _MODEL_STATUS["feature"] = {
         "loaded": feature is not None,
         "model": os.getenv("FOCUSGRAPH_FEATURE_EMBEDDING_MODEL") or "all-MiniLM-L6-v2",
     }
     backend = os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_BACKEND", "bge-code").strip().lower()
     if backend in {"bge", "bge-code", "bge_code"}:
-        graph = focusgraph_cli._load_bge_code_model()
+        graph = focus._load_bge_code_model()
     else:
-        graph = focusgraph_cli._load_sentence_model("FOCUSGRAPH_GRAPH_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+        graph = focus._load_sentence_model("FOCUSGRAPH_GRAPH_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     _MODEL_STATUS["graph"] = {
         "loaded": graph is not None,
         "backend": backend,

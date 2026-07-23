@@ -104,8 +104,8 @@ services:
       network: host
     image: featx-merge-dev-backend:hostnet
     network_mode: host
-    command: ["/opt/reposummary-venv/bin/python", "-m", "src.http_service"]
-    working_dir: /app/PyBackend
+    command: ["/opt/reposummary-venv/bin/python", "-m", "featx_pybackend.api.server"]
+    working_dir: /app/PyBackend/src
     depends_on:
       mysql:
         condition: service_healthy

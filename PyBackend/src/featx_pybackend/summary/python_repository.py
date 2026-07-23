@@ -14,18 +14,18 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
-from . import RepoSummary as fg_summary
-from .llm_config import openai_base_url
-from .structure_analsis.python.ENRE_py.enre.__main__ import main as enre_main
+from ..analysis.python.enre.__main__ import main as enre_main
+from ..config.llm import openai_base_url
+from ..paths import MODELS_ROOT, WORKSPACE_ENV_FILE
+from . import repository as repository_summary
 
 
-BASE_DIR = Path(__file__).resolve().parent
 IGNORED_ANALYSIS_DIRECTORIES = {
     ".git", "node_modules", "target", "build", "dist", "__pycache__", ".venv", "venv", "env",
     "preprocess1", "delombok", "preprocess2"
 }
 
-load_dotenv(BASE_DIR.parent.parent / ".env")
+load_dotenv(WORKSPACE_ENV_FILE)
 load_dotenv()
 
 
@@ -721,7 +721,7 @@ def _load_codet5_model():
         return None
 
 
-def _apply_codet5_descriptions(functions: list[fg_summary.Function]) -> None:
+def _apply_codet5_descriptions(functions: list[repository_summary.Function]) -> None:
     if not _truthy_env("REPOSUMMARY_PYTHON_USE_CODET5", True):
         return
     loaded = _load_codet5_model()
@@ -801,15 +801,15 @@ def _apply_codet5_descriptions(functions: list[fg_summary.Function]) -> None:
             )
 
 
-def _load_python_functions(methods_df: pd.DataFrame) -> list[fg_summary.Function]:
-    functions: list[fg_summary.Function] = []
+def _load_python_functions(methods_df: pd.DataFrame) -> list[repository_summary.Function]:
+    functions: list[repository_summary.Function] = []
     for index, row in methods_df.fillna("").iterrows():
         signature = str(row.get("method_signature", "")).strip()
         if not signature:
             continue
         file_path = _normalize_rel_file(row.get("func_file", "")) or "unknown.py"
         code = str(row.get("method_code", "") or "")
-        function = fg_summary.Function(
+        function = repository_summary.Function(
             func_id=len(functions),
             func_name=_short_signature(signature),
             func_desc=_function_description(signature, file_path, code),
@@ -834,8 +834,8 @@ def _python_file_name(rel_path: str) -> str:
     return Path(rel_path).stem or rel_path.replace("/", ".")
 
 
-def _create_python_files(project_path: Path) -> list[fg_summary.File]:
-    files: list[fg_summary.File] = []
+def _create_python_files(project_path: Path) -> list[repository_summary.File]:
+    files: list[repository_summary.File] = []
     for path in sorted(project_path.rglob("*.py")):
         if any(part in IGNORED_ANALYSIS_DIRECTORIES for part in path.relative_to(project_path).parts):
             continue
@@ -846,7 +846,7 @@ def _create_python_files(project_path: Path) -> list[fg_summary.File]:
             file_code = ""
         file_desc = rel_path[:-3].replace("/", ".") if rel_path.endswith(".py") else rel_path.replace("/", ".")
         files.append(
-            fg_summary.File(
+            repository_summary.File(
                 file_id=len(files),
                 file_name=_python_file_name(rel_path),
                 file_path=rel_path,
@@ -860,7 +860,7 @@ def _create_python_files(project_path: Path) -> list[fg_summary.File]:
     return files
 
 
-def _attach_functions_to_files(files: list[fg_summary.File], functions: list[fg_summary.Function]) -> int:
+def _attach_functions_to_files(files: list[repository_summary.File], functions: list[repository_summary.Function]) -> int:
     files_by_path = {_normalize_rel_file(file.file_path): file for file in files}
     attached = 0
     for function in functions:
@@ -874,7 +874,7 @@ def _attach_functions_to_files(files: list[fg_summary.File], functions: list[fg_
 
 
 def _load_sentence_model():
-    default_model_path = BASE_DIR.parent / "models" / "all-mpnet-base-v2"
+    default_model_path = MODELS_ROOT / "sentence-transformers" / "all-mpnet-base-v2"
     model_path = (
         os.getenv("PYTHON_SENTENCE_TRANSFORMER_MODEL")
         or os.getenv("SENTENCE_TRANSFORMER_MODEL")
@@ -935,7 +935,7 @@ def _encode_to_lists(model: Any, texts: list[str]) -> list[list[float]]:
     return [np.asarray(vector, dtype=float).tolist() for vector in vectors]
 
 
-def _feature_records(feature: fg_summary.Feature) -> list[dict[str, str]]:
+def _feature_records(feature: repository_summary.Feature) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     for function in feature.feature_func_list:
         records.append(
@@ -948,22 +948,22 @@ def _feature_records(feature: fg_summary.Feature) -> list[dict[str, str]]:
     return records
 
 
-def _feature_prompt(feature: fg_summary.Feature) -> str:
+def _feature_prompt(feature: repository_summary.Feature) -> str:
     code_content = ""
     for function in feature.feature_func_list:
         code_content += (
             "function name:" + str(function.func_fullName) + "\n"
             "function code:" + str(function.func_code) + "\n"
         )
-    return fg_summary.userstory_prompt.format(code_content=code_content)
+    return repository_summary.userstory_prompt.format(code_content=code_content)
 
 
-def _feature_files(feature: fg_summary.Feature) -> str:
+def _feature_files(feature: repository_summary.Feature) -> str:
     files = sorted({_normalize_rel_file(function.func_file) for function in feature.feature_func_list if function.func_file})
     return ";".join(files)
 
 
-def _describe_feature_cluster(feature: fg_summary.Feature) -> dict[str, Any]:
+def _describe_feature_cluster(feature: repository_summary.Feature) -> dict[str, Any]:
     started_at = time.perf_counter()
     records = _feature_records(feature)
     desc = None
@@ -977,7 +977,7 @@ def _describe_feature_cluster(feature: fg_summary.Feature) -> dict[str, Any]:
         else:
             source = "fallback:missing_openai_api_key"
     if not desc:
-        desc = fg_summary.fallback_feature_description(feature)
+        desc = repository_summary.fallback_feature_description(feature)
     feature.feature_desc = desc
     feature.feature_flow = flow
     feature.feature_notf = notf
@@ -994,7 +994,7 @@ def _describe_feature_cluster(feature: fg_summary.Feature) -> dict[str, Any]:
     }
 
 
-def _describe_features(feature_list: list[fg_summary.Feature], output_dir: Path) -> None:
+def _describe_features(feature_list: list[repository_summary.Feature], output_dir: Path) -> None:
     max_workers = min(
         _positive_int_env("REPOSUMMARY_PYTHON_LLM_MAX_WORKERS", 4),
         max(1, len(feature_list)),
@@ -1054,7 +1054,7 @@ def _describe_features(feature_list: list[fg_summary.Feature], output_dir: Path)
                             f"[python-reposummary] Description fallback for feature {feature.feature_id}: {exc}",
                             file=sys.stderr,
                         )
-                        feature.feature_desc = fg_summary.fallback_feature_description(feature)
+                        feature.feature_desc = repository_summary.fallback_feature_description(feature)
                         results.append(
                             {
                                 "feature_id": feature.feature_id,
@@ -1106,7 +1106,7 @@ def _extract_description_text(text: str) -> str:
     if not value:
         return ""
     try:
-        cleaned = fg_summary.clean_json_text(value)
+        cleaned = repository_summary.clean_json_text(value)
         data = json.loads(cleaned)
         if isinstance(data, dict):
             desc = data.get("description")
@@ -1120,7 +1120,7 @@ def _extract_description_text(text: str) -> str:
 
 def _parse_feature_payload(text: str) -> dict[str, str]:
     try:
-        data = fg_summary.parse_usecase_payload(text)
+        data = repository_summary.parse_usecase_payload(text)
     except Exception:
         data = {}
         desc = _extract_description_text(text)
@@ -1133,7 +1133,7 @@ def _parse_feature_payload(text: str) -> dict[str, str]:
     }
 
 
-def _llm_feature_description(feature: fg_summary.Feature) -> tuple[str | None, str, str, str]:
+def _llm_feature_description(feature: repository_summary.Feature) -> tuple[str | None, str, str, str]:
     if not _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
         return None, "", "", "fallback:description_disabled"
     api_key = os.getenv("OPENAI_API_KEY")
@@ -1168,7 +1168,7 @@ def _llm_feature_description(feature: fg_summary.Feature) -> tuple[str | None, s
         return None, "", "", f"fallback:exception:{type(exc).__name__}"
 
 
-def _llm_feature_description_with_retry(feature: fg_summary.Feature) -> tuple[str | None, str, str, str, int]:
+def _llm_feature_description_with_retry(feature: repository_summary.Feature) -> tuple[str | None, str, str, str, int]:
     retry_attempts = _non_negative_int_env("REPOSUMMARY_LLM_RETRY_ATTEMPTS", 2)
     max_attempts = retry_attempts + 1
     last_source = "fallback:not_attempted"
@@ -1292,8 +1292,8 @@ def _write_module_description_timing(output_dir: Path, rows: list[dict[str, Any]
 
 
 def _merge_features_by_method_cluster(
-    features: list[fg_summary.Feature],
-    method_clusters: list[fg_summary.method_Cluster],
+    features: list[repository_summary.Feature],
+    method_clusters: list[repository_summary.method_Cluster],
     output_dir: Path,
 ) -> None:
     merged_descriptions: list[str] = []
@@ -1303,7 +1303,7 @@ def _merge_features_by_method_cluster(
         started_at = time.perf_counter()
         related_features = [feature for feature in features if feature.cluster_id == method_cluster.cluster_id]
         if not related_features:
-            method_cluster.cluster_desc = fg_summary.fallback_module_description(method_cluster, related_features)
+            method_cluster.cluster_desc = repository_summary.fallback_module_description(method_cluster, related_features)
             module_rows.append(
                 {
                     "cluster_id": method_cluster.cluster_id,
@@ -1324,7 +1324,7 @@ def _merge_features_by_method_cluster(
             f"{index + 1}. {description}"
             for index, description in enumerate(merged_descriptions)
         )
-        prompt = fg_summary.merge_userstory_prompt.format(
+        prompt = repository_summary.merge_userstory_prompt.format(
             feature_list=feature_list,
             module_list=module_list,
         )
@@ -1337,7 +1337,7 @@ def _merge_features_by_method_cluster(
         )
         desc, source, attempts = _llm_module_description_with_retry(prompt, f"module {method_cluster.cluster_id}")
         if not desc:
-            desc = fg_summary.fallback_module_description(method_cluster, related_features)
+            desc = repository_summary.fallback_module_description(method_cluster, related_features)
         method_cluster.cluster_desc = desc
         merged_descriptions.append(desc)
         module_rows.append(
@@ -1363,7 +1363,7 @@ def _merge_features_by_method_cluster(
 
 def _write_cluster_results(
     output_dir: Path,
-    feature_list: list[fg_summary.Feature],
+    feature_list: list[repository_summary.Feature],
     summary: dict[str, Any],
 ) -> None:
     payload = {
@@ -1403,8 +1403,8 @@ def _json_safe(value: Any) -> Any:
 
 def _write_features_csv(
     output_dir: Path,
-    feature_list: list[fg_summary.Feature],
-    method_clusters: list[fg_summary.method_Cluster],
+    feature_list: list[repository_summary.Feature],
+    method_clusters: list[repository_summary.method_Cluster],
 ) -> int:
     cluster_desc_by_id = {
         method_cluster.cluster_id: method_cluster.cluster_desc
@@ -1442,7 +1442,7 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
     functions = _load_python_functions(methods_df)
     if not functions:
         raise RuntimeError("No Python functions found in methods.csv")
-    fg_summary.func_adj_matrix = _load_method_matrix(output_dir, len(functions))
+    repository_summary.func_adj_matrix = _load_method_matrix(output_dir, len(functions))
 
     files = _create_python_files(project_path)
     attached_functions = _attach_functions_to_files(files, functions)
@@ -1458,9 +1458,9 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
         file.file_txt_vector = vector
 
     if len(files) == 1:
-        method_clusters = [fg_summary.method_Cluster(0, "", files[0].func_list)]
+        method_clusters = [repository_summary.method_Cluster(0, "", files[0].func_list)]
     else:
-        best_gamma, best_labels, _ = fg_summary.find_best_resolution(
+        best_gamma, best_labels, _ = repository_summary.find_best_resolution(
             files,
             a=0.5,
             n_points=25,
@@ -1477,11 +1477,11 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
             use_silhouette=False,
         )
         method_clusters = []
-        for cluster in fg_summary.save_to_file_cluster(files, best_labels):
-            func_list: list[fg_summary.Function] = []
+        for cluster in repository_summary.save_to_file_cluster(files, best_labels):
+            func_list: list[repository_summary.Function] = []
             for file in cluster.cluster_file_list:
                 func_list.extend(file.func_list)
-            method_clusters.append(fg_summary.method_Cluster(cluster.cluster_id, "", func_list))
+            method_clusters.append(repository_summary.method_Cluster(cluster.cluster_id, "", func_list))
         print(
             f"[python-reposummary] File clustering gamma={best_gamma}; modules={len(method_clusters)}",
             file=sys.stderr,
@@ -1492,7 +1492,7 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
         for function, vector in zip(method_cluster.cluster_func_list, func_vectors):
             function.func_txt_vector = vector
 
-    feature_list, summary = fg_summary.cluster_all_functions_to_features(
+    feature_list, summary = repository_summary.cluster_all_functions_to_features(
         method_clusters,
         weight_parameter=0.25,
         gamma_min=0.05,
@@ -1568,6 +1568,9 @@ def repo_summary(project_root: str, output_dir: str) -> dict[str, Any]:
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        print("Usage: python -m src.python_repo_summary <project_root> <output_dir>", file=sys.stderr)
+        print(
+            "Usage: python -m featx_pybackend.summary.python_repository <project_root> <output_dir>",
+            file=sys.stderr,
+        )
         sys.exit(2)
     print(json.dumps(repo_summary(sys.argv[1], sys.argv[2]), ensure_ascii=False))

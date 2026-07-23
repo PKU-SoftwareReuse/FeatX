@@ -92,8 +92,8 @@ services:
       context: .
       dockerfile: docker/backend.Dockerfile
     image: featx-backend:ase26
-    command: ["/opt/reposummary-venv/bin/python", "-m", "src.http_service"]
-    working_dir: /app/PyBackend
+    command: ["/opt/reposummary-venv/bin/python", "-m", "featx_pybackend.api.server"]
+    working_dir: /app/PyBackend/src
     depends_on:
       mysql:
         condition: service_healthy

@@ -577,9 +577,9 @@ start_host_stack() {
     -e DB_PASSWORD="$mysql_password" \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
     -v "$HOST_PYBACKEND_OUTPUT_VOLUME:/app/PyBackend/output" \
-    -w /app/PyBackend \
+    -w /app/PyBackend/src \
     --entrypoint /opt/reposummary-venv/bin/python \
-    featx-backend:ase26 -m src.http_service >/dev/null
+    featx-backend:ase26 -m featx_pybackend.api.server >/dev/null
 
   wait_for_url "http://127.0.0.1:${reposummary_port}/health" "PyBackend model service" 120
 

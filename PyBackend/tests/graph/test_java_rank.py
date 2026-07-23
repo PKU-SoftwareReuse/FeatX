@@ -1,4 +1,4 @@
-from src.java_graph_rank_cli import rank_graph, retrieve_features
+from featx_pybackend.graph.java_rank import rank_graph, retrieve_features
 
 
 def test_modify_retrieval_forces_current_feature_to_rank_one():

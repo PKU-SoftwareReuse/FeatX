@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from src.write2database import insert_row, write_project_summary
+from featx_pybackend.storage.database import insert_row, write_project_summary
 
 
 class WriteToDatabaseTest(unittest.TestCase):
-    @patch("src.write2database.get_or_create_code_map")
-    @patch("src.write2database.get_or_create_feature", return_value=22)
-    @patch("src.write2database.get_or_create_module", return_value=11)
+    @patch("featx_pybackend.storage.database.get_or_create_code_map")
+    @patch("featx_pybackend.storage.database.get_or_create_feature", return_value=22)
+    @patch("featx_pybackend.storage.database.get_or_create_module", return_value=11)
     def test_insert_row_maps_english_and_chinese_descriptions(
         self,
         get_module,
@@ -35,10 +35,10 @@ class WriteToDatabaseTest(unittest.TestCase):
         )
         get_code_map.assert_called_once_with(cursor, 22, "a.A.review()")
 
-    @patch("src.write2database.set_finish")
-    @patch("src.write2database.save_edges")
-    @patch("src.write2database.save_features", side_effect=RuntimeError("invalid CSV"))
-    @patch("src.write2database.clear_project_data")
+    @patch("featx_pybackend.storage.database.set_finish")
+    @patch("featx_pybackend.storage.database.save_edges")
+    @patch("featx_pybackend.storage.database.save_features", side_effect=RuntimeError("invalid CSV"))
+    @patch("featx_pybackend.storage.database.clear_project_data")
     def test_write_failure_rolls_back_cleared_project_data(
         self,
         clear_project_data,

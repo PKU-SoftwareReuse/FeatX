@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.translate_summary import (
+from featx_pybackend.summary.translation import (
     build_translation_prompt,
     parse_translation_response,
     translate_features_file,

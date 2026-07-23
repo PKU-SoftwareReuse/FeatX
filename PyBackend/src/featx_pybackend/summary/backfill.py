@@ -6,7 +6,8 @@ from typing import Any
 
 import pandas as pd
 
-from .translate_summary import BASE_DIR, translate_targets
+from ..paths import OUTPUT_ROOT
+from .translation import translate_targets
 
 
 def _connect_database():
@@ -237,7 +238,7 @@ def main(repo_id: str) -> dict[str, Any]:
     )
     translations = translate_targets(targets)
     rows = build_translation_rows(modules, features, translations)
-    artifact_path = BASE_DIR.parent / "output" / str(repo_id) / "summary_translations.csv"
+    artifact_path = OUTPUT_ROOT / str(repo_id) / "summary_translations.csv"
     write_translation_artifact(rows, artifact_path)
 
     write_connection = _connect_database()
@@ -264,7 +265,7 @@ def apply_translation_parts(repo_id: str) -> dict[str, Any]:
     finally:
         read_connection.close()
 
-    parts_dir = BASE_DIR.parent / "output" / str(repo_id) / "translation_parts"
+    parts_dir = OUTPUT_ROOT / str(repo_id) / "translation_parts"
     module_translations, feature_translations = load_translation_parts(parts_dir)
     expected_module_ids = {int(row["id"]) for row in modules}
     expected_feature_ids = {int(row["id"]) for row in features}
@@ -278,7 +279,7 @@ def apply_translation_parts(repo_id: str) -> dict[str, Any]:
         raise RuntimeError(f"Feature translation IDs do not match the database; missing={missing}, extra={extra}")
 
     rows = build_id_translation_rows(modules, features, module_translations, feature_translations)
-    artifact_path = BASE_DIR.parent / "output" / str(repo_id) / "summary_translations.csv"
+    artifact_path = OUTPUT_ROOT / str(repo_id) / "summary_translations.csv"
     write_translation_artifact(rows, artifact_path)
 
     write_connection = _connect_database()
@@ -308,6 +309,6 @@ if __name__ == "__main__":
         main(sys.argv[1])
     else:
         raise SystemExit(
-            "Usage: python -m src.backfill_summary_cn <repo_id> | "
-            "python -m src.backfill_summary_cn --from-parts <repo_id>"
+            "Usage: python -m featx_pybackend.summary.backfill <repo_id> | "
+            "python -m featx_pybackend.summary.backfill --from-parts <repo_id>"
         )

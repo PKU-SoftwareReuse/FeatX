@@ -3,8 +3,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+from ..paths import repository_output_dir
 
 load_dotenv()
 
@@ -190,7 +189,7 @@ def insert_row(row, cursor, repo_id):
 
 
 def save_features(project_id, cursor):
-    file_path = os.path.join(BASE_DIR, "../output", project_id, "features.csv")
+    file_path = repository_output_dir(project_id) / "features.csv"
 
     df = ensure_nonempty_csv(
         file_path,
@@ -215,7 +214,7 @@ def get_or_create_graph_edge(cursor, src, dest, repo_id):
 
 
 def save_edges(project_id, cursor):
-    file_path = os.path.join(BASE_DIR, "../output", project_id, "file_adj_matrix.csv")
+    file_path = repository_output_dir(project_id) / "file_adj_matrix.csv"
 
     # 加载邻接矩阵CSV（假设第一行和第一列是节点名）
     df = pd.read_csv(file_path, index_col=0)

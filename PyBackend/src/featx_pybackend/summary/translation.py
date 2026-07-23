@@ -10,17 +10,17 @@ from typing import Callable
 import pandas as pd
 from dotenv import load_dotenv
 
-from .llm_config import openai_base_url
+from ..config.llm import openai_base_url
+from ..paths import OUTPUT_ROOT, WORKSPACE_ENV_FILE
 
 
-BASE_DIR = Path(__file__).resolve().parent
 REQUIRED_COLUMNS = {"id", "cluster_id", "module_desc", "desc", "method_name"}
 TRANSLATION_COLUMNS = {
     "module": ("module_desc", "module_desc_cn"),
     "feature": ("desc", "desc_cn"),
 }
 
-load_dotenv(BASE_DIR.parent.parent / ".env")
+load_dotenv(WORKSPACE_ENV_FILE)
 load_dotenv()
 
 
@@ -227,7 +227,7 @@ def translate_features_file(
 
 
 def main(project_id: str) -> int:
-    features_path = BASE_DIR.parent / "output" / str(project_id) / "features.csv"
+    features_path = OUTPUT_ROOT / str(project_id) / "features.csv"
     return translate_features_file(features_path)
 
 
@@ -235,5 +235,5 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) != 2:
-        raise SystemExit("Usage: python -m src.translate_summary <project_id>")
+        raise SystemExit("Usage: python -m featx_pybackend.summary.translation <project_id>")
     main(sys.argv[1])

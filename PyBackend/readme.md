@@ -4,6 +4,25 @@ PyBackend is the Python analysis service used by FeatX. It contains RepoSummary,
 FocusGraph ranking, Python static-analysis tooling, model serving, and embedding
 cache management.
 
+## Package Layout
+
+The service uses a standard `src` layout under `src/featx_pybackend`:
+
+```text
+featx_pybackend/
+├── api/          # HTTP server consumed by JavaBackend
+├── analysis/     # Java/Python static analysis and the embedded ENRE engine
+├── config/       # Environment and model-client configuration
+├── graph/        # FocusGraph retrieval and Java graph ranking
+├── storage/      # MySQL writes and the SQLite embedding cache
+├── summary/      # Java/Python RepoSummary and translation pipelines
+├── paths.py      # Shared project, model, and output locations
+└── __main__.py   # End-to-end RepoSummary command
+```
+
+The service entry point is `featx_pybackend.api.server`. RepoSummary remains
+the algorithm name; it is no longer used as a catch-all source directory.
+
 For ASE artifact evaluation, reviewers should normally run RepoSummary through
 the top-level Docker Compose deployment. The backend container installs the
 Python dependencies and invokes RepoSummary as part of FeatX workflows. A
@@ -29,6 +48,18 @@ Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
+```
+
+Start the HTTP service from this directory:
+
+```bash
+PYTHONPATH=src python -m featx_pybackend.api.server
+```
+
+Run the end-to-end summary command for one repository ID:
+
+```bash
+PYTHONPATH=src python -m featx_pybackend <repo_id>
 ```
 
 Create a local `.env` file when running RepoSummary outside Docker:

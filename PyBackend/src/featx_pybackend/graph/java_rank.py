@@ -6,10 +6,7 @@ from contextlib import contextmanager
 from collections import defaultdict
 from typing import Any, Callable, Iterator
 
-try:
-    from .focusgraph_cli import _score_graph_code_contexts, _score_texts_with_embedding
-except ImportError:
-    from focusgraph_cli import _score_graph_code_contexts, _score_texts_with_embedding
+from .focus import _score_graph_code_contexts, _score_texts_with_embedding
 
 
 PROGRESS_PREFIX = "__FOCUSGRAPH_PROGRESS__"

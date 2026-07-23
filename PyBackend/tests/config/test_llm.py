@@ -1,6 +1,6 @@
 import unittest
 
-from src.llm_config import normalize_openai_base_url
+from featx_pybackend.config.llm import normalize_openai_base_url
 
 
 class LlmConfigTest(unittest.TestCase):

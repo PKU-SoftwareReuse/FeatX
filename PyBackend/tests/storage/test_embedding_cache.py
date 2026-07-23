@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src import embedding_cache
+from featx_pybackend.storage import embedding_cache
 
 
 def _encoder(calls: list[list[str]]):

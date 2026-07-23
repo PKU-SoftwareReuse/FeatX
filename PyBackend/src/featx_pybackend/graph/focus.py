@@ -15,16 +15,11 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
-try:
-    from . import embedding_cache
-except ImportError:
-    import embedding_cache
+from ..paths import OUTPUT_ROOT, WORKSPACE_ENV_FILE
+from ..storage import embedding_cache
 
 
-BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_ROOT = (BASE_DIR / ".." / "output").resolve()
-
-load_dotenv(BASE_DIR.parent.parent / ".env")
+load_dotenv(WORKSPACE_ENV_FILE)
 load_dotenv()
 
 _PROGRESS_CONTEXT = threading.local()

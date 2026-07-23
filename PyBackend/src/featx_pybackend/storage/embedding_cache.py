@@ -10,9 +10,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 
-
-BASE_DIR = Path(__file__).resolve().parent
-OUTPUT_ROOT = (BASE_DIR / ".." / "output").resolve()
+from ..paths import OUTPUT_ROOT
 
 _LOCKS_GUARD = threading.Lock()
 _LOCKS: dict[Path, threading.RLock] = {}

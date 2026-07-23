@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pandas as pd
 
-from src.backfill_summary_cn import (
+from featx_pybackend.summary.backfill import (
     build_id_translation_rows,
     build_translation_rows,
     load_translation_parts,
