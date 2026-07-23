@@ -179,7 +179,7 @@ public class RewriteFileHelper {
             throw new IOException("Invalid Python file path: " + relativePath);
         }
 
-        Path rootPath = Paths.get(ProjectState.getInstance().getSrcPath()).normalize();
+        Path rootPath = Paths.get(ProjectState.getInstance().getProjectPath()).normalize();
         Path filePath = rootPath.resolve(normalizedRelativePath).normalize();
         if (!filePath.startsWith(rootPath)) {
             throw new IOException("Invalid Python file path: " + relativePath);

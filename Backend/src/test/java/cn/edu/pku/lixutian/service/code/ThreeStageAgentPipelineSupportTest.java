@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -139,6 +140,68 @@ class ThreeStageAgentPipelineSupportTest {
         assertEquals(10, callLog.path("usage").path("inputTokens").asLong());
         assertTrue(Files.readString(runLogs.resolve("001-agent1/prompt.txt")).contains("settings.yml"));
         assertTrue(Files.readString(runLogs.resolve("001-agent1/response.txt")).contains("needAdditionalFile"));
+    }
+
+    @Test
+    void standardJavaProjectReadsAndReturnsProjectRelativePaths(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Feature.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class Feature { int value = 1; }\n");
+        Files.writeString(projectRoot.resolve("pom.xml"), "<project/>\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(96);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "modify",
+                "Change the value",
+                "Value is one",
+                "Java graph context",
+                "pom.xml\nsrc/main/java/demo/Feature.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                9,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"src/main/java/demo/Feature.java",
+                          "action":"rewrite",
+                          "plan":"Change value to two.",
+                          "note":"Preserve the package and type."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                        int value = 1;
+                        =======
+                        int value = 2;
+                        >>>>>>> REPLACE
+                        """));
+
+        ModifyAgentService service = new ModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        String candidate = registry.modifications(context.runId())
+                .get("src/main/java/demo/Feature.java");
+        assertTrue(candidate.contains("package demo;"));
+        assertTrue(candidate.contains("int value = 2;"));
+        assertTrue(Files.readString(sourceFile).contains("int value = 1;"));
     }
 
     @Test
@@ -327,6 +390,78 @@ class ThreeStageAgentPipelineSupportTest {
 
         assertTrue(registry.snapshot(context.runId()).failureMessage().contains("protected shared symbol"));
         assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
+    @Test
+    void deleteReplansMissingFilesAndAcceptsAnExplicitNoChangeResult(@TempDir Path sourceRoot)
+            throws Exception {
+        Path api = sourceRoot.resolve("demo/Api.java");
+        Path caller = sourceRoot.resolve("demo/Caller.java");
+        Files.createDirectories(api.getParent());
+        Files.writeString(api, "package demo;\npublic interface Api {}\n");
+        Files.writeString(caller, "package demo;\nclass Caller { void call(Api api) { api.removed(); } }\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(95);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "Delete removed",
+                "Removed feature",
+                "FEATURE_SYMBOL: demo.Api.removed()\n",
+                "demo/Api.java\ndemo/Caller.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                11,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"demo/Mapper.xml",
+                          "action":"rewrite",
+                          "plan":"Remove an optional mapping.",
+                          "note":"Only if present."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"demo/Api.java",
+                          "action":"rewrite",
+                          "plan":"Remove removed() if it still exists.",
+                          "note":"The live source tree is authoritative."
+                        }]}
+                        """))
+                .thenReturn(generation("NO_CHANGES_REQUIRED"));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertTrue(registry.modifications(context.runId()).isEmpty());
+        assertEquals("package demo;\npublic interface Api {}\n", Files.readString(api));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(4)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        assertTrue(prompts.getAllValues().get(0).contains("FEATURE_SYMBOL_STATUS: MISSING demo.Api.removed()"));
+        assertTrue(prompts.getAllValues().get(0).contains("LIVE_REFERENCE_FILE: demo/Caller.java"));
+        assertTrue(prompts.getAllValues().get(2).contains("demo/Mapper.xml"));
     }
 
     private LlmGenerationResult generation(String content) {

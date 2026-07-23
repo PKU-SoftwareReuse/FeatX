@@ -14,6 +14,7 @@ public record AgentRunSnapshotResult(
         String model,
         String failureMessage,
         AgentTokenUsageResult tokenUsage,
-        String agentLogPath
+        String agentLogPath,
+        boolean metadataOnlyEligible
 ) {
 }

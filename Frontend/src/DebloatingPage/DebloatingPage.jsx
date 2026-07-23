@@ -14,6 +14,7 @@ import {
     ApartmentOutlined,
     CheckOutlined,
     CheckCircleOutlined,
+    CheckSquareOutlined,
     UndoOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
@@ -80,6 +81,16 @@ export const candidateNodeTypeForDraft = (candidateFile, draft) => {
     }
     const originalContent = candidateFile?.originalContent ?? "";
     return (draft ?? "") === originalContent ? "Default" : "Modify";
+};
+
+export const candidateIdentifiersForConfirmAll = (graphData, unstagedCandidatePaths = []) => {
+    const graphCandidateIds = Array.isArray(graphData?.nodes)
+        ? graphData.nodes
+            .filter((node) => node?.type === "Modify")
+            .map((node) => String(node.id || '').trim())
+            .filter(Boolean)
+        : [];
+    return [...new Set([...graphCandidateIds, ...unstagedCandidatePaths])];
 };
 
 const getWorkspaceSideGap = (viewportWidth) => (
@@ -299,10 +310,13 @@ const DEBLOATING_COPY = {
         noStagedFiles: "请先在 Diff Panel 中暂存至少一个文件。",
         partialCommitTitle: "确认部分提交",
         completeCommitTitle: "确认全部提交",
-        partialCommitDescription: "本次只提交已暂存文件，并同步更新功能数据、CodeMap 和静态分析；其余候选修改将被放弃。",
+        metadataCommitTitle: "确认同步过期功能数据",
+        partialCommitDescription: "这是选择性确认：本次只保留并提交已暂存文件；其余候选修改将被永久放弃，操作结束后不能继续提交。系统仍会完成本次功能确认，并同步更新功能数据、CodeMap 和静态分析。",
         completeCommitDescription: "所有候选文件均已确认；本次将提交剩余修改，并同步更新功能数据、CodeMap 和静态分析结果。",
+        metadataCommitDescription: "源码已经处于目标状态，本次不会修改文件；系统将创建一条可审计的空提交，并清理过期的 Feature 和 CodeMap 数据。",
         partialCommitSuccess: "已提交确认的文件，其余候选修改已放弃。",
         completeCommitSuccess: "全部候选修改已提交。",
+        metadataCommitSuccess: "源码无需修改，过期的功能数据已同步清理。",
         failedCommitChanges: "提交代码变更失败。",
         discardAllChanges: "放弃全部未提交修改",
         discardAllTitle: "放弃全部未提交修改？",
@@ -311,11 +325,12 @@ const DEBLOATING_COPY = {
         failedDiscardChanges: "放弃未提交修改失败。",
         committingChanges: "正在提交并更新项目数据……",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
-        confirmAllChanges: "确认所有代码变更",
-        reviewAllChanges: "您是否已检查全部代码变更（红色标记的节点）？",
-        confirmApply: "确认应用",
+        confirmAllChanges: "确认全部候选变更",
+        reviewAllChanges: "系统将自动接受所有尚未确认的 Agent 候选文件，不再要求逐文件暂存，并立即提交全部候选变更。请只在确认可以完整采用本次 Agent 输出时继续。",
+        confirmApply: "接受并提交全部",
         decline: "取消",
-        applyChanges: "确认应用代码变更",
+        failedConfirmAllChanges: "确认全部候选变更失败。",
+        incompleteConfirmAllChanges: "仍有候选文件无法自动确认，请逐文件检查后重试。",
         submittingFeatureDeletion: "正在提交功能删除。",
         submittingFeatureAddition: "正在提交新增功能。",
         submittingFeatureModification: "正在提交功能修改。",
@@ -394,10 +409,13 @@ const DEBLOATING_COPY = {
         noStagedFiles: "Stage at least one file in the Diff Panel first.",
         partialCommitTitle: "Confirm partial commit",
         completeCommitTitle: "Confirm complete commit",
-        partialCommitDescription: "Only staged files will be committed and applied to feature data, CodeMap, and static analysis. All other candidates will be discarded.",
+        metadataCommitTitle: "Confirm stale metadata reconciliation",
+        partialCommitDescription: "This is a selective confirmation. Only staged files will be kept and committed. Every other candidate will be permanently discarded and cannot be committed after this operation ends. FeatX will still complete the feature confirmation and update feature data, CodeMap, and static analysis.",
         completeCommitDescription: "All candidate files are confirmed. This commits the remaining changes and updates feature data, CodeMap, and static analysis.",
+        metadataCommitDescription: "The source already matches the target state. FeatX will create an auditable empty commit and remove the stale Feature and CodeMap data without changing files.",
         partialCommitSuccess: "Confirmed files were committed; all other candidates were discarded.",
         completeCommitSuccess: "All candidate changes were committed.",
+        metadataCommitSuccess: "No source changes were needed; stale feature data was reconciled.",
         failedCommitChanges: "Failed to commit code changes.",
         discardAllChanges: "Discard all uncommitted changes",
         discardAllTitle: "Discard all uncommitted changes?",
@@ -406,11 +424,12 @@ const DEBLOATING_COPY = {
         failedDiscardChanges: "Failed to discard uncommitted changes.",
         committingChanges: "Committing and updating project data...",
         noSubmittedChanges: "You haven't made any modifications. Please submit first.",
-        confirmAllChanges: "Confirm All Code Diff",
-        reviewAllChanges: "Have you read all the diff(the node marked with red)?",
-        confirmApply: "Yes",
-        decline: "No",
-        applyChanges: "Confirm Apply the Diff",
+        confirmAllChanges: "Confirm all candidate changes",
+        reviewAllChanges: "FeatX will automatically accept every unconfirmed Agent candidate without requiring each file to be staged individually, then immediately commit the complete candidate set. Continue only when the entire Agent output should be applied.",
+        confirmApply: "Accept and commit all",
+        decline: "Cancel",
+        failedConfirmAllChanges: "Failed to confirm all candidate changes.",
+        incompleteConfirmAllChanges: "Some candidate files could not be confirmed automatically. Review them individually and try again.",
         submittingFeatureDeletion: "Submitting feature deletion.",
         submittingFeatureAddition: "Submitting feature addition.",
         submittingFeatureModification: "Submitting feature modification.",
@@ -793,6 +812,7 @@ const DebloatingPage = () => {
 
     const [graphData, setGraphData] = useState({nodes: [], edges: []});
     const [activeRunId, setActiveRunId] = useState(null);
+    const [metadataOnlyEligible, setMetadataOnlyEligible] = useState(false);
     const [activeRunStorageReady, setActiveRunStorageReady] = useState(false);
 
     useEffect(() => {
@@ -1651,6 +1671,7 @@ const DebloatingPage = () => {
         let settled = false
         let checkingConnection = false
         setChatContent("");
+        setMetadataOnlyEligible(false)
         setChatMode(true)
         setModeTrans(true)
         const progressOperation = `${isPythonProject ? "python" : "java"}-${
@@ -1703,6 +1724,9 @@ const DebloatingPage = () => {
             })
             setLoadingFeatureList(false)
             setConfirmEnabled(true)
+            API.getAgentRun(runId)
+                .then((snapshot) => setMetadataOnlyEligible(Boolean(snapshot?.metadataOnlyEligible)))
+                .catch(() => setMetadataOnlyEligible(false))
             setRequestDraftDirty(false)
             clearFeatureRequestDraft()
 
@@ -1721,6 +1745,7 @@ const DebloatingPage = () => {
             stopProgressPolling()
             setLoadingFeatureList(false)
             setConfirmEnabled(false)
+            setMetadataOnlyEligible(false)
             setActiveRunId(null)
             setSubmitEnabled(true)
             setRequestDraftDirty(true)
@@ -1818,6 +1843,7 @@ const DebloatingPage = () => {
                 setEditedText(snapshot.request || getFeatureDescription(targetFeature, language))
                 setSubmitEnabled(false)
                 setConfirmEnabled(snapshot.status === 'COMPLETED')
+                setMetadataOnlyEligible(Boolean(snapshot.metadataOnlyEligible))
                 setLoadingFeatureList(snapshot.status === 'PREPARED' || snapshot.status === 'RUNNING')
                 const recoveringDelete = operationType === 'delete'
                     && snapshot.status !== 'COMPLETED';
@@ -1887,6 +1913,7 @@ const DebloatingPage = () => {
             clearFocusGraphStages();
             resetGraphDiffDrawer();
             setConfirmEnabled(false);
+            setMetadataOnlyEligible(false);
             setSubmitEnabled(false);
             setModeTrans(false);
             setChatMode(false);
@@ -2219,24 +2246,75 @@ const DebloatingPage = () => {
             : selectedType === 'edit' ? previousFeatureId : null;
         restoreSelectedFeature(features, preferredFeatureId);
         setConfirmEnabled(false);
+        setMetadataOnlyEligible(false);
         setOperationProgress(null);
         removeRunCandidateDrafts(completedRunId);
         setActiveRunId(null);
         resetGraphDiffDrawer();
     };
 
+    const commitPreparedFeatureChanges = async () => {
+        const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
+        setGitStatus(result.status || EMPTY_GIT_STATUS);
+        resetGraphDiffDrawer();
+        await finishFeatureCommit(result);
+        message.success(result.commitScope === 'METADATA_ONLY'
+            ? copy.metadataCommitSuccess
+            : result.commitScope === 'COMPLETE'
+                ? copy.completeCommitSuccess
+                : copy.partialCommitSuccess);
+        return result;
+    };
+
     const performFeatureCommit = async () => {
         setLoadingConfirm(true);
         try {
-            const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
-            setGitStatus(result.status || EMPTY_GIT_STATUS);
-            resetGraphDiffDrawer();
-            await finishFeatureCommit(result);
-            message.success(result.commitScope === 'COMPLETE'
-                ? copy.completeCommitSuccess
-                : copy.partialCommitSuccess);
+            await commitPreparedFeatureChanges();
         } catch (error) {
             message.error(errorMessage(error, copy.failedCommitChanges));
+            throw error;
+        } finally {
+            setLoadingConfirm(false);
+        }
+    };
+
+    const performConfirmAllChanges = async (status) => {
+        setLoadingConfirm(true);
+        try {
+            const normalizePath = (path) => String(path || '').replaceAll('\\', '/');
+            const originalPaths = new Set((status.unstagedCandidatePaths || []).map(normalizePath));
+            const remainingPaths = new Set(originalPaths);
+            const stagedKeys = new Set();
+            const identifiers = candidateIdentifiersForConfirmAll(
+                graphData,
+                status.unstagedCandidatePaths || []
+            );
+
+            for (const identifier of identifiers) {
+                const normalizedIdentifier = normalizePath(identifier);
+                if (originalPaths.has(normalizedIdentifier) && !remainingPaths.has(normalizedIdentifier)) {
+                    continue;
+                }
+                const candidate = await API.getCandidateDiff(identifier, selectedType, activeRunId);
+                const candidatePath = normalizePath(candidate?.path);
+                if (!candidate?.key || !remainingPaths.has(candidatePath) || stagedKeys.has(candidate.key)) {
+                    continue;
+                }
+                await API.stageCandidateFile(candidate.key, activeRunId);
+                stagedKeys.add(candidate.key);
+                remainingPaths.delete(candidatePath);
+            }
+
+            if (remainingPaths.size > 0) {
+                throw new Error(copy.incompleteConfirmAllChanges);
+            }
+            const readyToCommit = await refreshGitStatus();
+            if (readyToCommit.commitScope !== 'COMPLETE') {
+                throw new Error(copy.incompleteConfirmAllChanges);
+            }
+            await commitPreparedFeatureChanges();
+        } catch (error) {
+            message.error(errorMessage(error, copy.failedConfirmAllChanges));
             throw error;
         } finally {
             setLoadingConfirm(false);
@@ -2250,29 +2328,88 @@ const DebloatingPage = () => {
         }
         const status = await refreshGitStatus();
         const stagedCount = status.stagedPaths?.length || 0;
-        if (!stagedCount) {
+        const metadataOnly = selectedType === 'delete'
+            && confirmEnabled
+            && metadataOnlyEligible
+            && !stagedCount
+            && !(status.candidatePaths?.length || 0)
+            && !(status.pendingCandidatePaths?.length || 0);
+        if (!stagedCount && !metadataOnly) {
             message.warning(copy.noStagedFiles);
             return;
         }
 
         const complete = status.commitScope === 'COMPLETE';
+        const partial = !metadataOnly && !complete;
         const remainingCount = status.unstagedCandidatePaths?.length || 0;
         modal.confirm({
-            title: complete ? copy.completeCommitTitle : copy.partialCommitTitle,
+            title: metadataOnly
+                ? copy.metadataCommitTitle
+                : complete ? copy.completeCommitTitle : copy.partialCommitTitle,
             icon: <ExclamationCircleOutlined/>,
             content: (
                 <div className={styles.commitConfirmation}>
-                    <p>{complete ? copy.completeCommitDescription : copy.partialCommitDescription}</p>
-                    <p>
-                        {language === 'zh'
-                            ? `本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`
-                            : `This commit contains ${stagedCount} staged file${stagedCount === 1 ? '' : 's'}${remainingCount ? `; ${remainingCount} candidate file${remainingCount === 1 ? '' : 's'} remain unconfirmed` : ''}.`}
-                    </p>
+                    {partial ? (
+                        <Alert
+                            type="warning"
+                            showIcon
+                            message={copy.partialCommitTitle}
+                            description={copy.partialCommitDescription}
+                        />
+                    ) : (
+                        <p>{metadataOnly
+                            ? copy.metadataCommitDescription
+                            : copy.completeCommitDescription}</p>
+                    )}
+                    {!metadataOnly && (
+                        <p>
+                            {language === 'zh'
+                                ? `本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`
+                                : `This commit contains ${stagedCount} staged file${stagedCount === 1 ? '' : 's'}${remainingCount ? `; ${remainingCount} candidate file${remainingCount === 1 ? '' : 's'} remain unconfirmed` : ''}.`}
+                        </p>
+                    )}
                 </div>
             ),
             okText: copy.commitChanges,
+            okButtonProps: partial ? {danger: true} : undefined,
             cancelText: copy.cancel,
             onOk: performFeatureCommit,
+        });
+    };
+
+    const requestConfirmAllChanges = async () => {
+        if (candidateDirty || savingCandidate) {
+            message.warning(copy.saveBeforeApply);
+            return;
+        }
+        const status = await refreshGitStatus();
+        const remainingCount = status.unstagedCandidatePaths?.length || 0;
+        if (!remainingCount) {
+            await requestFeatureCommit();
+            return;
+        }
+
+        const totalCount = status.candidatePaths?.length || remainingCount;
+        modal.confirm({
+            title: copy.confirmAllChanges,
+            icon: <ExclamationCircleOutlined/>,
+            content: (
+                <div className={styles.commitConfirmation}>
+                    <Alert
+                        type="warning"
+                        showIcon
+                        message={copy.confirmAllChanges}
+                        description={copy.reviewAllChanges}
+                    />
+                    <p>{language === 'zh'
+                        ? `将确认并提交全部 ${totalCount} 个候选文件，其中 ${remainingCount} 个尚未逐文件确认。`
+                        : `All ${totalCount} candidate file${totalCount === 1 ? '' : 's'} will be committed; ${remainingCount} ${remainingCount === 1 ? 'has' : 'have'} not been confirmed individually.`}</p>
+                </div>
+            ),
+            okText: copy.confirmApply,
+            okButtonProps: {danger: true},
+            cancelText: copy.decline,
+            onOk: () => performConfirmAllChanges(status),
         });
     };
 
@@ -2280,6 +2417,16 @@ const DebloatingPage = () => {
         && Array.isArray(focusGraphStages)
         && focusGraphStages.length > 0;
     const stagedFileCount = gitStatus.stagedPaths?.length || 0;
+    const unstagedCandidateCount = gitStatus.unstagedCandidatePaths?.length || 0;
+    const metadataOnlyDeleteReady = Boolean(
+        activeRunId
+        && confirmEnabled
+        && metadataOnlyEligible
+        && selectedType === 'delete'
+        && !stagedFileCount
+        && !(gitStatus.candidatePaths?.length || 0)
+        && !(gitStatus.pendingCandidatePaths?.length || 0)
+    );
     const candidateHasStagedChanges = Boolean(
         candidateFile?.path && gitStatus.stagedPaths?.includes(candidateFile.path)
     );
@@ -2519,12 +2666,15 @@ const DebloatingPage = () => {
                                         <div className={styles.panelActions}>
                                             {showGitOperationActions && (
                                                 <>
-                                                    <Tooltip title={stagedFileCount ? copy.commitChanges : copy.noStagedFiles}>
+                                                    <Tooltip title={stagedFileCount || metadataOnlyDeleteReady
+                                                        ? copy.commitChanges
+                                                        : copy.noStagedFiles}>
                                                         <Button
                                                             type="primary"
                                                             size="small"
                                                             icon={<CheckCircleOutlined/>}
-                                                            disabled={!stagedFileCount || candidateDirty || savingCandidate || stagingCandidate}
+                                                            disabled={(!stagedFileCount && !metadataOnlyDeleteReady)
+                                                                || candidateDirty || savingCandidate || stagingCandidate}
                                                             onClick={(event) => {
                                                                 event.stopPropagation();
                                                                 requestFeatureCommit();
@@ -2533,6 +2683,28 @@ const DebloatingPage = () => {
                                                             aria-label={copy.commitChanges}
                                                         >
                                                             {stagedFileCount > 0 ? stagedFileCount : null}
+                                                        </Button>
+                                                    </Tooltip>
+                                                    <Tooltip title={copy.confirmAllChanges}>
+                                                        <Button
+                                                            type="primary"
+                                                            danger
+                                                            size="small"
+                                                            icon={<CheckSquareOutlined/>}
+                                                            disabled={!unstagedCandidateCount
+                                                                || !confirmEnabled
+                                                                || loadingConfirm
+                                                                || candidateDirty
+                                                                || savingCandidate
+                                                                || stagingCandidate}
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                requestConfirmAllChanges();
+                                                            }}
+                                                            className={styles.gitCommitButton}
+                                                            aria-label={copy.confirmAllChanges}
+                                                        >
+                                                            {unstagedCandidateCount || null}
                                                         </Button>
                                                     </Tooltip>
                                                     <Tooltip title={copy.discardAllChanges}>

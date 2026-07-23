@@ -1,14 +1,17 @@
 package cn.edu.pku.lixutian.service;
 
-import cn.edu.pku.lixutian.config.ClusterState;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.GitCommitResult;
 import cn.edu.pku.lixutian.dto.result.GitWorkspaceStatusResult;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import com.github.javaparser.ParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -20,22 +23,27 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class FeatureGitWorkflowService {
+    private static final Logger logger = LoggerFactory.getLogger(FeatureGitWorkflowService.class);
+
     private final RepositoryGitService repositoryGitService;
     private final CandidateCodeService candidateCodeService;
     private final CodeMapService codeMapService;
     private final AgentRunRegistry agentRunRegistry;
+    private final FeatureOperationJournalService journalService;
     private final Map<Integer, Object> commitLocks = new ConcurrentHashMap<>();
 
     public FeatureGitWorkflowService(
             RepositoryGitService repositoryGitService,
             CandidateCodeService candidateCodeService,
             CodeMapService codeMapService,
-            AgentRunRegistry agentRunRegistry
+            AgentRunRegistry agentRunRegistry,
+            FeatureOperationJournalService journalService
     ) {
         this.repositoryGitService = repositoryGitService;
         this.candidateCodeService = candidateCodeService;
         this.codeMapService = codeMapService;
         this.agentRunRegistry = agentRunRegistry;
+        this.journalService = journalService;
     }
 
     public GitWorkspaceStatusResult status() throws IOException, InterruptedException {
@@ -89,51 +97,99 @@ public class FeatureGitWorkflowService {
     ) throws IOException, InterruptedException, ParseException {
         GitWorkspaceStatusResult before = repositoryGitService.status();
         Set<String> stagedKeys = candidateCodeService.candidateKeysForProjectPaths(before.getStagedPaths());
-        if (stagedKeys.isEmpty()) {
+        boolean metadataOnly = "delete".equals(operation)
+                && stagedKeys.isEmpty()
+                && before.getStagedPaths().isEmpty()
+                && agentRunRegistry.modifications(runId).isEmpty()
+                && agentRunRegistry.metadataOnlyEligible(runId);
+        if (stagedKeys.isEmpty() && !metadataOnly) {
             throw new IllegalStateException("Confirm at least one file in the Diff Panel before committing.");
         }
 
         boolean complete = "COMPLETE".equals(before.getCommitScope());
-        String commitScope = complete ? "COMPLETE" : "PARTIAL";
+        String commitScope = metadataOnly ? "METADATA_ONLY" : complete ? "COMPLETE" : "PARTIAL";
 
         Map<String, String> allModifications = new LinkedHashMap<>(ProjectState.getInstance().getModifications());
         List<String> candidatePaths = candidateCodeService.projectPathsForCandidateKeys(stagedKeys);
         Map<String, String> stagedContents = repositoryGitService.readIndexContents(candidatePaths);
+        String baseCommit = repositoryGitService.headCommit();
+        journalService.begin(agentRun, operation, commitScope, baseCommit);
 
         Integer featureId;
-        String commitHash;
+        String commitHash = null;
         boolean committed = false;
         try {
-            Map<String, String> selectedModifications = candidateCodeService.adoptStagedCandidateContents(
-                    stagedKeys,
-                    stagedContents
-            );
-            if (selectedModifications.isEmpty()) {
-                throw new IllegalStateException("The staged files are not part of the active feature operation.");
+            if (!metadataOnly) {
+                Map<String, String> selectedModifications = candidateCodeService.adoptStagedCandidateContents(
+                        stagedKeys,
+                        stagedContents
+                );
+                if (selectedModifications.isEmpty()) {
+                    throw new IllegalStateException("The staged files are not part of the active feature operation.");
+                }
+                candidateCodeService.validateCandidateSet(stagedKeys);
+                agentRunRegistry.replaceCompletedModifications(runId, selectedModifications);
             }
-            candidateCodeService.validateCandidateSet(stagedKeys);
-            agentRunRegistry.replaceCompletedModifications(runId, selectedModifications);
-            featureId = confirmFeatureOperation(operation, agentRun);
             for (String stagedKey : stagedKeys) {
                 candidateCodeService.materializeCandidate(stagedKey);
             }
-            repositoryGitService.replaceStagedPaths(candidatePaths);
+            if (!metadataOnly) {
+                repositoryGitService.replaceStagedPaths(candidatePaths);
+            }
             GitWorkspaceStatusResult readyToCommit = repositoryGitService.status();
-            if (readyToCommit.getStagedPaths().isEmpty()) {
+            if (!metadataOnly && readyToCommit.getStagedPaths().isEmpty()) {
                 throw new IllegalStateException("There are no staged changes to commit.");
             }
             commitHash = repositoryGitService.commit(defaultCommitMessage(
                     requestedMessage,
                     operation,
                     commitScope
-            ));
+            ), metadataOnly);
             committed = true;
+            journalService.markGitCommitted(runId, commitHash);
+            featureId = confirmFeatureOperation(operation, agentRun, metadataOnly);
+            codeMapService.verifyFeatureOperation(operation, agentRun.featureId(), featureId);
+            if (!commitHash.equals(repositoryGitService.headCommit())) {
+                throw new IllegalStateException("Repository HEAD changed while feature metadata was being updated.");
+            }
+            markJournalCompletedAfterCommit(runId);
             repositoryGitService.discardUncommittedChanges();
             agentRunRegistry.clear();
         } catch (IOException | InterruptedException | ParseException | RuntimeException exception) {
-            if (!committed) {
+            RuntimeException compensationFailure = null;
+            String compensationCommit = null;
+            if (committed) {
+                try {
+                    repositoryGitService.restoreRepositoryToHead();
+                    compensationCommit = repositoryGitService.revertCommit(commitHash);
+                    repositoryGitService.restoreRepositoryToHead();
+                } catch (IOException | InterruptedException | RuntimeException failure) {
+                    compensationFailure = new IllegalStateException(
+                            "Feature metadata update failed after Git commit " + commitHash
+                                    + ", and automatic Git compensation also failed. Manual reconciliation is required.",
+                            failure
+                    );
+                }
+            }
+            codeMapService.invalidateRepository(agentRun.repositoryId());
+            try {
+                if (!committed) {
+                    journalService.markFailed(runId, exception);
+                } else if (compensationFailure == null) {
+                    journalService.markCompensated(runId, compensationCommit, exception);
+                } else {
+                    journalService.markReconciliationRequired(runId, compensationFailure);
+                }
+            } catch (RuntimeException journalFailure) {
+                logger.error("Could not update feature operation journal for run {}", runId, journalFailure);
+            }
+            if (!committed || compensationFailure == null) {
                 candidateCodeService.restoreCandidateModifications(allModifications);
                 agentRunRegistry.replaceCompletedModifications(runId, allModifications);
+            }
+            if (compensationFailure != null) {
+                compensationFailure.addSuppressed(exception);
+                throw compensationFailure;
             }
             throw exception;
         }
@@ -146,22 +202,46 @@ public class FeatureGitWorkflowService {
         return result;
     }
 
+    private void markJournalCompletedAfterCommit(String runId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            journalService.markCompleted(runId);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    journalService.markCompleted(runId);
+                } catch (RuntimeException failure) {
+                    logger.error("Could not mark committed feature operation {} as complete", runId, failure);
+                }
+            }
+        });
+    }
+
     public GitWorkspaceStatusResult discard() throws IOException, InterruptedException {
         GitWorkspaceStatusResult result = repositoryGitService.discardUncommittedChanges();
         agentRunRegistry.clear();
         return result;
     }
 
-    private Integer confirmFeatureOperation(String operation, AgentRunContext agentRun)
+    private Integer confirmFeatureOperation(
+            String operation,
+            AgentRunContext agentRun,
+            boolean metadataOnly
+    )
             throws ParseException, IOException, InterruptedException {
-        ClusterState state = ClusterState.getInstance();
         return switch (operation) {
             case "delete" -> {
-                if (state.getCandidateFeature() == null || state.getCandidateFeature().getFeatureId() == null) {
-                    throw new IllegalStateException("No feature is selected for deletion.");
+                if (agentRun.featureId() == null) {
+                    throw new IllegalStateException("The completed delete run has no feature id.");
                 }
-                Integer deletedFeatureId = state.getCandidateFeature().getFeatureId();
-                codeMapService.deleteFeatureFromMemoryAndDatabase(deletedFeatureId);
+                Integer deletedFeatureId = agentRun.featureId();
+                if (metadataOnly) {
+                    codeMapService.deleteFeatureMetadataOnly(deletedFeatureId);
+                } else {
+                    codeMapService.deleteFeatureFromMemoryAndDatabase(deletedFeatureId);
+                }
                 yield deletedFeatureId;
             }
             case "edit" -> {
@@ -205,6 +285,8 @@ public class FeatureGitWorkflowService {
         };
         return "PARTIAL".equals(scope)
                 ? "FeatX: commit part of " + action
+                : "METADATA_ONLY".equals(scope)
+                ? "FeatX: reconcile " + action + " metadata"
                 : "FeatX: apply " + action;
     }
 }

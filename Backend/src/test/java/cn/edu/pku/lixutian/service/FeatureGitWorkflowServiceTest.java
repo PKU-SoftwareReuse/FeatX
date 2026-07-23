@@ -22,6 +22,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -51,7 +52,8 @@ class FeatureGitWorkflowServiceTest {
                 gitService,
                 candidateService,
                 codeMapService,
-                runRegistry
+                runRegistry,
+                mock(FeatureOperationJournalService.class)
         );
         selectFeatureForEdit();
 
@@ -59,7 +61,7 @@ class FeatureGitWorkflowServiceTest {
         assertEquals("PARTIAL", stagedFirst.getCommitScope());
         assertEquals(java.util.List.of("first.py"), stagedFirst.getStagedPaths());
         assertEquals(java.util.List.of("second.py"), stagedFirst.getUnstagedCandidatePaths());
-        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
+        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", AgentLanguage.EN))
                 .thenReturn(7);
 
         GitCommitResult partial = workflow.commit("edit", null, runId);
@@ -75,8 +77,9 @@ class FeatureGitWorkflowServiceTest {
         verify(codeMapService).modifyFeatureFromMemoryAndDatabase(
                 7,
                 "updated feature",
-                ClusterState.getInstance().getAgentLanguage()
+                AgentLanguage.EN
         );
+        verify(codeMapService).verifyFeatureOperation("edit", 7, 7);
     }
 
     @Test
@@ -91,10 +94,11 @@ class FeatureGitWorkflowServiceTest {
                 gitService,
                 candidateService,
                 codeMapService,
-                runRegistry
+                runRegistry,
+                mock(FeatureOperationJournalService.class)
         );
         selectFeatureForEdit();
-        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", ClusterState.getInstance().getAgentLanguage()))
+        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", AgentLanguage.EN))
                 .thenReturn(7);
 
         workflow.stageCandidate("first.py", run.runId());
@@ -122,9 +126,10 @@ class FeatureGitWorkflowServiceTest {
                 gitService,
                 candidateService,
                 codeMapService,
-                run.registry()
+                run.registry(),
+                mock(FeatureOperationJournalService.class)
         );
-        selectFeatureForEdit();
+        selectFeature(99);
 
         workflow.stageCandidate("first.py", run.runId());
         GitCommitResult result = workflow.commit("delete", null, run.runId());
@@ -139,6 +144,83 @@ class FeatureGitWorkflowServiceTest {
         assertFalse(run.registry().hasActiveOperation(52));
         assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
         verify(codeMapService).deleteFeatureFromMemoryAndDatabase(7);
+        verify(codeMapService).verifyFeatureOperation("delete", 7, 7);
+    }
+
+    @Test
+    void metadataFailureRevertsTheGitCommitAndKeepsTheRunRetryable(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        CandidateCodeService candidateService = prepareTwoPythonCandidates(repository);
+        RepositoryGitService gitService = new RepositoryGitService(candidateService);
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        TestRun run = completedEditRun();
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                gitService,
+                candidateService,
+                codeMapService,
+                run.registry(),
+                mock(FeatureOperationJournalService.class)
+        );
+        when(codeMapService.modifyFeatureFromMemoryAndDatabase(7, "updated feature", AgentLanguage.EN))
+                .thenThrow(new IllegalStateException("database unavailable"));
+
+        workflow.stageCandidate("first.py", run.runId());
+        IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> workflow.commit("edit", null, run.runId())
+        );
+
+        assertTrue(failure.getMessage().contains("database unavailable"));
+        assertEquals("print('first')\n", Files.readString(repository.resolve("first.py")));
+        assertEquals("print('second')\n", Files.readString(repository.resolve("second.py")));
+        assertEquals("3", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        assertTrue(runGit(repository, "log", "-1", "--pretty=%s").startsWith("Revert"));
+        assertTrue(run.registry().hasActiveOperation(52));
+        assertEquals(Set.of("first.py", "second.py"), ProjectState.getInstance().getModifications().keySet());
+    }
+
+    @Test
+    void metadataOnlyDeleteCreatesAnAuditableEmptyCommit(@TempDir Path repository) throws Exception {
+        initializeRepository(repository);
+        ProjectState.getInstance().setProjectPath(repository.toString(), "PYTHON");
+        ProjectState.getInstance().setRepoId(52);
+        CandidateCodeService candidateService = new CandidateCodeService();
+        CodeMapService codeMapService = mock(CodeMapService.class);
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "",
+                "stale feature metadata",
+                "",
+                "first.py\nsecond.py",
+                AgentLanguage.EN,
+                ProjectState.getInstance().getSrcPath(),
+                ProjectState.getInstance().getProjectPath(),
+                52,
+                7,
+                null,
+                java.util.List.of()
+        );
+        registry.completePrepared(context.runId(), Map.of());
+        FeatureGitWorkflowService workflow = new FeatureGitWorkflowService(
+                new RepositoryGitService(candidateService),
+                candidateService,
+                codeMapService,
+                registry,
+                mock(FeatureOperationJournalService.class)
+        );
+
+        GitCommitResult result = workflow.commit("delete", null, context.runId());
+
+        assertEquals("METADATA_ONLY", result.getCommitScope());
+        assertEquals("2", runGit(repository, "rev-list", "--count", "HEAD").trim());
+        assertEquals(
+                "FeatX: reconcile feature deletion metadata",
+                runGit(repository, "log", "-1", "--pretty=%s").trim()
+        );
+        verify(codeMapService).deleteFeatureMetadataOnly(7);
+        verify(codeMapService).verifyFeatureOperation("delete", 7, 7);
+        assertFalse(registry.hasActiveOperation(52));
     }
 
     @Test
@@ -205,7 +287,8 @@ class FeatureGitWorkflowServiceTest {
                 gitService,
                 candidateService,
                 mock(CodeMapService.class),
-                run.registry()
+                run.registry(),
+                mock(FeatureOperationJournalService.class)
         );
 
         workflow.stageCandidate("first.py", run.runId());
@@ -240,7 +323,8 @@ class FeatureGitWorkflowServiceTest {
                 gitService,
                 candidateService,
                 mock(CodeMapService.class),
-                runRegistry
+                runRegistry,
+                mock(FeatureOperationJournalService.class)
         );
         selectFeatureForEdit();
 
@@ -282,7 +366,8 @@ class FeatureGitWorkflowServiceTest {
                 new RepositoryGitService(candidateService),
                 candidateService,
                 mock(CodeMapService.class),
-                new AgentRunRegistry()
+                new AgentRunRegistry(),
+                mock(FeatureOperationJournalService.class)
         );
 
         GitWorkspaceStatusResult discarded = workflow.discard();
@@ -356,8 +441,12 @@ class FeatureGitWorkflowServiceTest {
     }
 
     private void selectFeatureForEdit() {
+        selectFeature(7);
+    }
+
+    private void selectFeature(Integer featureId) {
         FeatureResult feature = new FeatureResult();
-        feature.setFeatureId(7);
+        feature.setFeatureId(featureId);
         ClusterState.getInstance().setCandidateFeature(feature);
         ClusterState.getInstance().setNewFeatureDescription("updated feature");
     }

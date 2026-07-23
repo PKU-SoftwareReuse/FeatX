@@ -69,6 +69,7 @@ public class AgentRunRegistry {
         private long reasoningOutputTokens;
         private long totalTokens;
         private String agentLogPath;
+        private boolean metadataOnlyEligible;
         private final List<AgentEvent> events = new ArrayList<>();
         private final Set<SseEmitter> subscribers = new LinkedHashSet<>();
 
@@ -193,7 +194,9 @@ public class AgentRunRegistry {
         if (state.status != Status.PREPARED) {
             throw statusMismatch(state, Status.PREPARED);
         }
-        publishCompletedState(state, modifications);
+        boolean metadataOnlyEligible = "delete".equals(requireContext(state).mode())
+                && (modifications == null || modifications.isEmpty());
+        publishCompletedState(state, modifications, metadataOnlyEligible);
     }
 
     public synchronized void selectModel(String runId, String model) {
@@ -228,13 +231,26 @@ public class AgentRunRegistry {
     }
 
     public synchronized void complete(String runId, Map<String, String> modifications) {
-        RunState state = requireStatus(runId, Status.RUNNING);
-        publishCompletedState(state, modifications);
+        complete(runId, modifications, false);
     }
 
-    private void publishCompletedState(RunState state, Map<String, String> modifications) {
+    public synchronized void complete(
+            String runId,
+            Map<String, String> modifications,
+            boolean metadataOnlyEligible
+    ) {
+        RunState state = requireStatus(runId, Status.RUNNING);
+        publishCompletedState(state, modifications, metadataOnlyEligible);
+    }
+
+    private void publishCompletedState(
+            RunState state,
+            Map<String, String> modifications,
+            boolean metadataOnlyEligible
+    ) {
         Map<String, String> published = immutableModifications(modifications);
         state.modifications = published;
+        state.metadataOnlyEligible = metadataOnlyEligible && published.isEmpty();
         projectState(state).setModifications(published);
         state.status = Status.COMPLETED;
         state.cancellation = null;
@@ -251,6 +267,7 @@ public class AgentRunRegistry {
         state.preparingThread = null;
         state.cancellation = null;
         state.modifications = Map.of();
+        state.metadataOnlyEligible = false;
         projectState(state).setModifications(Map.of());
         state.failureMessage = failure == null ? "Unknown Agent failure" : failure.getMessage();
         state.statusChangedAt = Instant.now();
@@ -297,6 +314,10 @@ public class AgentRunRegistry {
     public synchronized Map<String, String> modifications(String runId) {
         RunState state = requireStatus(runId, Status.COMPLETED);
         return state.modifications;
+    }
+
+    public synchronized boolean metadataOnlyEligible(String runId) {
+        return requireStatus(runId, Status.COMPLETED).metadataOnlyEligible;
     }
 
     public synchronized void replaceCompletedModifications(String runId, Map<String, String> modifications) {
@@ -357,7 +378,8 @@ public class AgentRunRegistry {
                 state.model,
                 state.failureMessage,
                 tokenUsage(state),
-                state.agentLogPath
+                state.agentLogPath,
+                state.metadataOnlyEligible
         );
     }
 
@@ -384,7 +406,7 @@ public class AgentRunRegistry {
                 if (!hasTerminalEvent(state)) {
                     String eventName = state.status == Status.COMPLETED ? "completed" : "failed";
                     String content = state.status == Status.COMPLETED
-                            ? "\n# === Pipeline complete! ===\n"
+                            ? "\n> Pipeline complete.\n"
                             : state.failureMessage == null ? "Agent generation failed." : state.failureMessage;
                     sendToSubscriber(emitter, eventName, content);
                 }

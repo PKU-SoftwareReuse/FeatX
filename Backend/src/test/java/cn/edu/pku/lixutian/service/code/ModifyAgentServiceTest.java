@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -116,6 +117,18 @@ class ModifyAgentServiceTest {
         );
 
         assertTrue(error.getMessage().contains("produced no changes"));
+    }
+
+    @Test
+    void acceptsTheExplicitNoChangesProtocolWithoutInventingADiff() {
+        String result = service.applyAgent3Result(
+                "NO_CHANGES_REQUIRED",
+                "cn/edu/pku/Foo.java",
+                ORIGINAL,
+                false
+        );
+
+        assertEquals(ORIGINAL, result);
     }
 
     @Test

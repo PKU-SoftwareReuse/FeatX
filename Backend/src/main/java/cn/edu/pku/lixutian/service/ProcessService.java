@@ -29,7 +29,7 @@ public class ProcessService {
         }
         Object buildLock = repositoryBuildLocks.computeIfAbsent(repositoryId, ignored -> new Object());
         synchronized (buildLock) {
-            SKG existing = SKG.getInstance();
+            SKG existing = SKG.findInstance().orElse(null);
             if (existing != null && existing.isBuilt() && !project.isForcePreprocessOption()) {
                 return;
             }
@@ -43,6 +43,16 @@ public class ProcessService {
             skg.cluster();
             project.setForcePreprocessOption(false);
         }
+    }
+
+    /** Rebuilds every Java preprocessing stage and the in-memory static graph from confirmed source files. */
+    public void rebuildAfterConfirmedSourceChange() throws ParseException, IOException, InterruptedException {
+        ProjectState project = ProjectState.getInstance();
+        if (!project.isJava()) {
+            return;
+        }
+        project.setForcePreprocessOption(true);
+        process();
     }
 
     public void clearRepository(Integer repositoryId) {

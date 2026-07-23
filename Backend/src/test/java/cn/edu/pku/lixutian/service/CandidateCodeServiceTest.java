@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -164,6 +165,22 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void javaGraphCandidateKeysAreReportedRelativeToTheRepository(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\n\nclass Example {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        service.beginOperation("delete", Set.of("demo/Example.java"));
+
+        assertEquals(
+                java.util.List.of("src/main/java/demo/Example.java"),
+                service.pendingCandidateProjectPaths()
+        );
+    }
+
+    @Test
     void completeValidationAcceptsAReviewedJavaCandidate(@TempDir Path projectRoot) throws Exception {
         Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
         Files.createDirectories(sourceFile.getParent());
@@ -256,6 +273,9 @@ class CandidateCodeServiceTest {
     @Test
     void javaProjectCanReviewAndMaterializeANonJavaAgentCandidate(@TempDir Path projectRoot) throws Exception {
         Path sourceFile = projectRoot.resolve("application.yml");
+        Path javaSource = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(javaSource.getParent());
+        Files.writeString(javaSource, "package demo; class Example {}\n");
         Files.writeString(sourceFile, "feature: disabled\n");
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
@@ -270,6 +290,27 @@ class CandidateCodeServiceTest {
         assertTrue(candidate.getDiff().contains("feature: enabled"));
         service.materializeCandidate("application.yml");
         assertEquals("feature: enabled\n", Files.readString(sourceFile));
+    }
+
+    @Test
+    void projectRelativeJavaCandidateMapsBackToTheAnalysisRoot(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Example.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo; class Example {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        CandidateCodeService service = new CandidateCodeService();
+        String projectPath = "src/main/java/demo/Example.java";
+        String edited = "package demo; class Example { int changed; }\n";
+        ProjectState.getInstance().setModifications(Map.of(projectPath, edited));
+
+        CodeFileDiffResult candidate = service.prepareProjectCandidate(projectPath, edited);
+
+        assertEquals(projectPath, candidate.getKey());
+        assertEquals(projectPath, candidate.getPath());
+        assertEquals("demo/Example.java", service.javaSourceRelativePath(projectPath).orElseThrow());
+        service.materializeCandidate(projectPath);
+        assertEquals(edited, Files.readString(sourceFile));
     }
 
     @Test

@@ -41,8 +41,11 @@ public final class ProjectState {
     private static final ThreadLocal<Binding> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<ProjectState> UNBOUND = ThreadLocal.withInitial(ProjectState::new);
 
+    /** Original imported Git workspace. Agent file paths are relative to this root. */
     private volatile String projectPath;
+    /** Original language-analysis root. Java preprocessing reads files only from this tree. */
     private volatile String srcPath;
+    /** Derived Java-only trees; every file keeps its path relative to {@link #srcPath}. */
     private volatile String preprocess1Path;
     private volatile String delombokPath;
     private volatile String preprocess2Path;

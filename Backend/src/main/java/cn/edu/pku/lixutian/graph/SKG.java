@@ -27,6 +27,10 @@ public class SKG extends SoftwareGraph<Arc> {
         return instance;
     }
 
+    public static Optional<SKG> findInstance() {
+        return Optional.ofNullable(INSTANCES.get(ProjectState.currentRepositoryKey()));
+    }
+
     public static SKG getNewInstance() {
         SKG instance = new SKG();
         INSTANCES.put(ProjectState.currentRepositoryKey(), instance);

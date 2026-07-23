@@ -4,6 +4,7 @@ import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.ProjectFilePath;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
@@ -20,6 +21,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
@@ -46,6 +48,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static final long PYTHON_SYNTAX_TIMEOUT_SECONDS = 20;
     private static final String PROTECTED_SYMBOL_MARKER = "PROTECTED_SYMBOL:";
     private static final String ALLOWED_DELETE_FILE_MARKER = "ALLOWED_DELETE_FILE:";
+    private static final String FEATURE_SYMBOL_MARKER = "FEATURE_SYMBOL:";
+    private static final String NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED";
+    private static final int MAX_LIVE_REFERENCE_FILES = 24;
+    private static final long MAX_LIVE_REFERENCE_FILE_BYTES = 2L * 1024 * 1024;
 
     private static class AdditionalFile {
         String filename;
@@ -66,6 +72,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
     private static class Agent2ParsedResult {
         List<ModifiedFile> modifiedFileList = new ArrayList<>();
+    }
+
+    private record Agent3Result(String content, boolean noChangesRequired) {
     }
 
     protected SseEmitter runThreeStagePipeline(
@@ -125,10 +134,18 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             if ("Python".equals(projectLanguage)) {
                 ProjectState.getInstance().setPythonModifiedMethods(Set.of());
             }
-            Set<String> existingFiles = new HashSet<>(ListFileHelper.findAllFiles(context.sourceRoot()));
+            Set<String> existingFiles = new HashSet<>(ListFileHelper.findAllFiles(context.projectRoot()));
+            String liveSourceVerification = operation.isDeletion()
+                    ? buildLiveSourceVerification(context, existingFiles)
+                    : "";
 
             sendStatus(eventSink, context.language().stageOneDescription());
-            String agent1Prompt = buildAgent1Prompt(context, projectLanguage, operation);
+            String agent1Prompt = buildAgent1Prompt(
+                    context,
+                    projectLanguage,
+                    operation,
+                    liveSourceVerification
+            );
             Agent1ParsedResult agent1 = requestAndParseAgent1(
                     context,
                     "agent1",
@@ -139,14 +156,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     context.language()
             );
 
-            String extraInfo = loadAdditionalContext(context.sourceRoot(), agent1, context.language());
+            String extraInfo = loadAdditionalContext(context.projectRoot(), agent1, context.language());
             if (agent1.needAdditionalFile) {
-                sendStatus(
-                        eventSink,
-                        context.language() == AgentLanguage.CN
-                                ? "\n# === 阶段 I：补充上下文复核 ===\n"
-                                : "\n# === Stage I: Additional Context Recheck ===\n"
-                );
+                sendStatus(eventSink, context.language().stageOneRecheckDescription());
                 String followUpPrompt = agent1Prompt + "\n\nThe following requested files are now available:\n"
                         + boundedPromptSection(extraInfo, MAX_REFERENCE_CONTEXT_CHARS)
                         + "\nRe-evaluate sufficiency once. Do not request a file already shown above.";
@@ -171,7 +183,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     if (!followUp.additionalFileList.isEmpty()) {
                         extraInfo = boundedPromptSection(
                                 extraInfo + "\n" + loadAdditionalContext(
-                                        context.sourceRoot(),
+                                        context.projectRoot(),
                                         followUp,
                                         context.language()
                                 ),
@@ -182,15 +194,22 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
 
             sendStatus(eventSink, context.language().stageTwoDescription());
-            String agent2Prompt = buildAgent2Prompt(context, extraInfo, projectLanguage, operation);
+            String agent2Prompt = buildAgent2Prompt(
+                    context,
+                    extraInfo,
+                    projectLanguage,
+                    operation,
+                    liveSourceVerification
+            );
             Agent2ParsedResult agent2 = requestAndParseAgent2(
                     context,
                     "agent2",
                     agent2Prompt,
                     eventSink,
                     model,
-                    context.sourceRoot(),
-                    context.language()
+                    context.projectRoot(),
+                    context.language(),
+                    operation
             );
             if (agent2.modifiedFileList.isEmpty()) {
                 throw new IllegalStateException(
@@ -200,7 +219,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
             String globalPlan = renderGlobalPlan(agent2.modifiedFileList);
             String referenceContext = boundedPromptSection(
-                    context.relatedCodes() + "\n\nAdditional file context:\n" + extraInfo,
+                    context.relatedCodes()
+                            + "\n\n" + liveSourceVerification
+                            + "\n\nAdditional file context:\n" + extraInfo,
                     MAX_REFERENCE_CONTEXT_CHARS
             );
             StringBuilder priorGenerations = new StringBuilder();
@@ -210,13 +231,14 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     .map(ProjectFilePath::normalize)
                     .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
 
+            sendStatus(eventSink, context.language().stageThreeDescription());
             for (ModifiedFile file : agent2.modifiedFileList) {
                 ensureNotInterrupted();
-                sendStatus(eventSink, context.language().stageThreeDescription(file.filename));
-                Path targetPath = ProjectFilePath.resolve(Path.of(context.sourceRoot()), file.filename);
+                sendStatus(eventSink, context.language().stageThreeFileDescription(file.filename));
+                Path targetPath = ProjectFilePath.resolve(Path.of(context.projectRoot()), file.filename);
                 if (operation.isDeletion() && !Files.isRegularFile(targetPath)) {
                     throw new IllegalArgumentException(
-                            "Delete Agent cannot create a new file: " + file.filename
+                            "The deletion plan references a file that does not exist: " + file.filename
                     );
                 }
                 if ("delete".equals(file.action)) {
@@ -228,7 +250,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     }
                     if (operation.isDeletion()) {
                         String originalContent = ListFileHelper.getProjectFileContent(
-                                context.sourceRoot(),
+                                context.projectRoot(),
                                 file.filename
                         );
                         validateProtectedSymbols(file.filename, originalContent, "", protectedSymbols);
@@ -240,7 +262,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 boolean createMode = !Files.isRegularFile(targetPath);
                 String fileContent = createMode
                         ? ""
-                        : ListFileHelper.getProjectFileContent(context.sourceRoot(), file.filename);
+                        : ListFileHelper.getProjectFileContent(context.projectRoot(), file.filename);
                 if (fileContent.isBlank()) {
                     createMode = true;
                 }
@@ -255,7 +277,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         projectLanguage,
                         operation
                 );
-                String generatedContent = requestAndApplyAgent3(
+                Agent3Result generated = requestAndApplyAgent3Result(
                         context,
                         agent3Prompt,
                         eventSink,
@@ -267,12 +289,21 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         operation,
                         protectedSymbols
                 );
+                if (generated.noChangesRequired()) {
+                    sendStatus(eventSink, context.language().fileAlreadyCurrentDescription(file.filename));
+                    continue;
+                }
+                String generatedContent = generated.content();
                 modifications.put(file.filename, generatedContent);
                 priorGenerations.append("\nFILE: ").append(file.filename).append("\n")
                         .append(generatedContent).append("\nEND FILE\n");
             }
 
-            agentRunRegistry.complete(context.runId(), modifications);
+            agentRunRegistry.complete(
+                    context.runId(),
+                    modifications,
+                    operation.isDeletion() && modifications.isEmpty()
+            );
             terminal.set(true);
             try {
                 sendCompleted(eventSink, context.language().pipelineCompleteDescription());
@@ -290,13 +321,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 }
             }
             terminal.set(true);
-            agentRunRegistry.fail(context.runId(), exception);
+            String userMessage = userFacingFailureMessage(context.language(), exception);
+            agentRunRegistry.fail(context.runId(), new IllegalStateException(userMessage, exception));
             logger.error("{} Agent pipeline failed for run {}", projectLanguage, context.runId(), exception);
             try {
-                sendFailed(
-                        eventSink,
-                        context.language().pipelineErrorDescription() + " " + safeFailureMessage(exception)
-                );
+                sendFailed(eventSink, "\n" + userMessage + "\n");
             } catch (IOException ignored) {
                 logger.debug("Could not deliver Agent failure event for run {}", context.runId());
             }
@@ -312,19 +341,23 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             Set<String> existingFiles,
             AgentLanguage language
     ) throws IOException {
-        String response = generateAgentResponse(context, stage, prompt, eventSink, model);
+        String response = generateAgentResponse(context, stage, prompt, withoutDeltas(eventSink), model);
         try {
-            return parseAndValidateAgent1(response, existingFiles);
+            Agent1ParsedResult parsed = parseAndValidateAgent1(response, existingFiles);
+            publishValidatedResponse(eventSink, response);
+            return parsed;
         } catch (RuntimeException exception) {
             sendStatus(eventSink, retryMessage(language, "Agent1", exception));
             String retried = generateAgentResponse(
                     context,
                     stage + "-repair",
-                    repairPrompt(prompt, "Agent1"),
-                    eventSink,
+                    repairPrompt(prompt, "Agent1", exception),
+                    withoutDeltas(eventSink),
                     model
             );
-            return parseAndValidateAgent1(retried, existingFiles);
+            Agent1ParsedResult parsed = parseAndValidateAgent1(retried, existingFiles);
+            publishValidatedResponse(eventSink, retried);
+            return parsed;
         }
     }
 
@@ -335,21 +368,30 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentEventSink eventSink,
             String model,
             String sourceRoot,
-            AgentLanguage language
+            AgentLanguage language,
+            AgentOperation operation
     ) throws IOException {
-        String response = generateAgentResponse(context, stage, prompt, eventSink, model);
+        String response = generateAgentResponse(context, stage, prompt, withoutDeltas(eventSink), model);
         try {
-            return requirePlannedFiles(parseAndValidateAgent2(response, sourceRoot));
+            Agent2ParsedResult parsed = requirePlannedFiles(
+                    parseAndValidateAgent2(response, sourceRoot, operation)
+            );
+            publishValidatedResponse(eventSink, response);
+            return parsed;
         } catch (RuntimeException exception) {
             sendStatus(eventSink, retryMessage(language, "Agent2", exception));
             String retried = generateAgentResponse(
                     context,
                     stage + "-repair",
                     repairPrompt(prompt, "Agent2", exception),
-                    eventSink,
+                    withoutDeltas(eventSink),
                     model
             );
-            return requirePlannedFiles(parseAndValidateAgent2(retried, sourceRoot));
+            Agent2ParsedResult parsed = requirePlannedFiles(
+                    parseAndValidateAgent2(retried, sourceRoot, operation)
+            );
+            publishValidatedResponse(eventSink, retried);
+            return parsed;
         }
     }
 
@@ -371,7 +413,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             boolean createMode,
             AgentLanguage language
     ) throws IOException {
-        return requestAndApplyAgent3(
+        return requestAndApplyAgent3Result(
                 null,
                 prompt,
                 eventSink,
@@ -382,10 +424,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 language,
                 AgentOperation.MODIFY,
                 Set.of()
-        );
+        ).content();
     }
 
-    private String requestAndApplyAgent3(
+    private Agent3Result requestAndApplyAgent3Result(
             AgentRunContext context,
             String prompt,
             AgentEventSink eventSink,
@@ -415,19 +457,26 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                                 context,
                                 "agent3-" + filename + "-attempt-" + (attempt + 1),
                                 attemptPrompt,
-                                eventSink,
+                                withoutDeltas(eventSink),
                                 model
                         );
+                if (isNoChangesRequired(previousResponse)) {
+                    return new Agent3Result(originalContent, true);
+                }
                 String generatedContent = applyAgent3Result(
                         previousResponse,
                         filename,
                         originalContent,
-                        createMode
+                        createMode,
+                        context
                 );
                 if (operation.isDeletion()) {
                     validateProtectedSymbols(filename, originalContent, generatedContent, protectedSymbols);
                 }
-                return generatedContent;
+                if (context != null) {
+                    publishValidatedResponse(eventSink, previousResponse);
+                }
+                return new Agent3Result(generatedContent, false);
             } catch (IOException | RuntimeException exception) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new IOException("Agent pipeline was cancelled.", exception);
@@ -450,6 +499,25 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
         }
         throw new IOException("Agent3 failed for " + filename + ".", lastFailure);
+    }
+
+    private AgentEventSink withoutDeltas(AgentEventSink eventSink) {
+        return (eventName, content) -> {
+            if (!"delta".equals(eventName)) {
+                eventSink.send(eventName, content);
+            }
+        };
+    }
+
+    private void publishValidatedResponse(AgentEventSink eventSink, String response) throws IOException {
+        String content = response == null ? "" : response.strip();
+        if (!content.isEmpty()) {
+            sendEvent(eventSink, "delta", content + "\n");
+        }
+    }
+
+    private boolean isNoChangesRequired(String response) {
+        return response != null && NO_CHANGES_REQUIRED.equals(response.trim());
     }
 
     private Agent1ParsedResult parseAndValidateAgent1(String response, Set<String> existingFiles) {
@@ -488,7 +556,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         return result;
     }
 
-    private Agent2ParsedResult parseAndValidateAgent2(String response, String sourceRoot) {
+    private Agent2ParsedResult parseAndValidateAgent2(
+            String response,
+            String sourceRoot,
+            AgentOperation operation
+    ) {
         JsonNode root = readJsonObject(response);
         JsonNode filesNode = root.get("modifiedFileList");
         if (filesNode == null || !filesNode.isArray()) {
@@ -512,8 +584,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             if (!Set.of("rewrite", "delete").contains(file.action)) {
                 throw new IllegalArgumentException("Agent2 returned an unsupported file action: " + file.action);
             }
-            if ("delete".equals(file.action) && !Files.isRegularFile(resolved)) {
-                throw new IllegalArgumentException("Agent2 cannot delete a file that does not exist: " + filename);
+            if ((operation.isDeletion() || "delete".equals(file.action)) && !Files.isRegularFile(resolved)) {
+                throw new IllegalArgumentException(
+                        "The plan references a file that does not exist in the current project: " + filename
+                );
             }
             file.plan = requiredText(fileNode, "plan", "Agent2");
             file.note = optionalText(fileNode, "note");
@@ -528,9 +602,22 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String originalContent,
             boolean createMode
     ) {
+        return applyAgent3Result(response, filename, originalContent, createMode, null);
+    }
+
+    private String applyAgent3Result(
+            String response,
+            String filename,
+            String originalContent,
+            boolean createMode,
+            AgentRunContext context
+    ) {
         try {
+            if (isNoChangesRequired(response)) {
+                return originalContent;
+            }
             String generatedContent = SearchReplacePatch.apply(response, originalContent, createMode);
-            validateGeneratedContent(filename, generatedContent);
+            validateGeneratedContent(context, filename, generatedContent);
             return generatedContent;
         } catch (RuntimeException exception) {
             throw new IllegalArgumentException(
@@ -541,17 +628,17 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         }
     }
 
-    private void validateGeneratedContent(String filename, String content) {
+    private void validateGeneratedContent(AgentRunContext context, String filename, String content) {
         if (filename.endsWith(".java")) {
-            validateJavaSource(filename, content);
+            validateJavaSource(context, filename, content);
         } else if (filename.endsWith(".py")) {
             validatePythonSyntax(filename, content);
         }
     }
 
-    private void validateJavaSource(String filename, String content) {
+    private void validateJavaSource(AgentRunContext context, String filename, String content) {
         CompilationUnit compilationUnit = StaticJavaParser.parse(content);
-        String expectedType = JavaFilePath.simpleTypeName(filename);
+        String expectedType = javaTypeName(filename);
         boolean expectedTypePresent = compilationUnit.getTypes().stream()
                 .anyMatch(type -> type.getNameAsString().equals(expectedType));
         if (!expectedTypePresent) {
@@ -566,16 +653,35 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     "Generated file " + filename + " declares a different public top-level type."
             );
         }
-        String expectedPackage = JavaFilePath.packageName(filename);
-        String actualPackage = compilationUnit.getPackageDeclaration()
-                .map(declaration -> declaration.getNameAsString())
-                .orElse("");
-        if (!expectedPackage.equals(actualPackage)) {
-            throw new IllegalArgumentException(
-                    "Generated file " + filename + " must declare package "
-                            + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
-            );
+        expectedJavaPackage(context, filename).ifPresent(expectedPackage -> {
+            String actualPackage = compilationUnit.getPackageDeclaration()
+                    .map(declaration -> declaration.getNameAsString())
+                    .orElse("");
+            if (!expectedPackage.equals(actualPackage)) {
+                throw new IllegalArgumentException(
+                        "Generated file " + filename + " must declare package "
+                                + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
+                );
+            }
+        });
+    }
+
+    private Optional<String> expectedJavaPackage(AgentRunContext context, String filename) {
+        if (context == null) {
+            return Optional.of(JavaFilePath.packageName(filename));
         }
+        Path projectRoot = Path.of(context.projectRoot()).toAbsolutePath().normalize();
+        Path sourceRoot = Path.of(context.sourceRoot()).toAbsolutePath().normalize();
+        return ProjectPathMapping.projectRelativeToSource(projectRoot, sourceRoot, filename)
+                .map(JavaFilePath::packageName);
+    }
+
+    private String javaTypeName(String filename) {
+        String fileName = Path.of(ProjectFilePath.normalize(filename)).getFileName().toString();
+        if (!fileName.endsWith(".java") || fileName.length() == ".java".length()) {
+            throw new IllegalArgumentException("Invalid Java project path: " + filename);
+        }
+        return fileName.substring(0, fileName.length() - ".java".length());
     }
 
     private void validatePythonSyntax(String filename, String content) {
@@ -641,6 +747,102 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         return boundedPromptSection(extra.toString(), MAX_REFERENCE_CONTEXT_CHARS);
     }
 
+    private String buildLiveSourceVerification(
+            AgentRunContext context,
+            Set<String> existingFiles
+    ) {
+        Set<String> featureSymbols = markedValues(context.relatedCodes(), FEATURE_SYMBOL_MARKER);
+        if (featureSymbols.isEmpty()) {
+            return "";
+        }
+
+        Path sourceRoot = Path.of(context.sourceRoot()).toAbsolutePath().normalize();
+        Path projectRoot = Path.of(context.projectRoot()).toAbsolutePath().normalize();
+        StringBuilder verification = new StringBuilder(
+                "## Live Source Verification\n\n"
+                        + "This section comes from the current source tree and overrides stale graph or CodeMap text.\n"
+        );
+        for (String symbol : featureSymbols.stream().sorted().toList()) {
+            Boolean declared = javaDeclarationExists(sourceRoot, symbol);
+            if (declared != null) {
+                verification.append("FEATURE_SYMBOL_STATUS: ")
+                        .append(declared ? "PRESENT " : "MISSING ")
+                        .append(symbol)
+                        .append('\n');
+            }
+        }
+
+        Map<String, List<String>> references = new LinkedHashMap<>();
+        List<Pattern> callablePatterns = featureSymbols.stream()
+                .map(this::callableName)
+                .filter(name -> !name.isBlank())
+                .distinct()
+                .map(name -> Pattern.compile("\\b" + Pattern.quote(name) + "\\s*\\("))
+                .toList();
+        for (String relativePath : existingFiles.stream().sorted().toList()) {
+            if (references.size() >= MAX_LIVE_REFERENCE_FILES) {
+                break;
+            }
+            if (!relativePath.endsWith(".java") && !relativePath.endsWith(".py")) {
+                continue;
+            }
+            Path file = ProjectFilePath.resolve(projectRoot, relativePath);
+            try {
+                if (!Files.isRegularFile(file) || Files.size(file) > MAX_LIVE_REFERENCE_FILE_BYTES) {
+                    continue;
+                }
+                String[] lines = Files.readString(file, StandardCharsets.UTF_8).split("\\R", -1);
+                List<String> matches = new ArrayList<>();
+                for (int index = 0; index < lines.length && matches.size() < 4; index++) {
+                    String line = lines[index];
+                    if (callablePatterns.stream().anyMatch(pattern -> pattern.matcher(line).find())) {
+                        matches.add("line " + (index + 1) + ": " + line.strip());
+                    }
+                }
+                if (!matches.isEmpty()) {
+                    references.put(relativePath, matches);
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // One unreadable source file must not block the deletion safety scan.
+            }
+        }
+
+        verification.append("\nFiles containing current declarations or references:\n");
+        if (references.isEmpty()) {
+            verification.append("None\n");
+        } else {
+            references.forEach((file, matches) -> {
+                verification.append("LIVE_REFERENCE_FILE: ").append(file).append('\n');
+                matches.forEach(match -> verification.append("  ").append(match).append('\n'));
+            });
+        }
+        return verification.toString();
+    }
+
+    private Boolean javaDeclarationExists(Path sourceRoot, String signature) {
+        int parameters = signature.indexOf('(');
+        String callable = callableName(signature);
+        if (parameters < 0 || callable.isBlank()) {
+            return null;
+        }
+        String ownerAndCallable = signature.substring(0, parameters).trim();
+        int separator = ownerAndCallable.lastIndexOf('.');
+        if (separator <= 0) {
+            return null;
+        }
+        String ownerClass = ownerAndCallable.substring(0, separator);
+        try {
+            Path sourceFile = JavaFilePath.resolve(sourceRoot, JavaFilePath.fromClassName(ownerClass));
+            if (!Files.isRegularFile(sourceFile)) {
+                return false;
+            }
+            return StaticJavaParser.parse(sourceFile).findAll(MethodDeclaration.class).stream()
+                    .anyMatch(method -> method.getNameAsString().equals(callable));
+        } catch (IOException | RuntimeException ignored) {
+            return null;
+        }
+    }
+
     private String renderGlobalPlan(List<ModifiedFile> files) {
         StringBuilder plan = new StringBuilder();
         for (ModifiedFile file : files) {
@@ -655,7 +857,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private String buildAgent1Prompt(
             AgentRunContext context,
             String projectLanguage,
-            AgentOperation operation
+            AgentOperation operation,
+            String liveSourceVerification
     ) {
         String originalSection = operation.isAddition() ? "" : """
                 Original feature description:
@@ -679,9 +882,14 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 %s
                 \"\"\"
 
-                Complete project file list from the original source root. It includes source code, configuration,
+                Live source verification, if available:
+                \"\"\"
+                %s
+                \"\"\"
+
+                Complete project file list from the original project workspace. It includes source code, configuration,
                 metadata, templates, scripts, tests, and other project files without filtering by extension.
-                Every filename is source-root-relative. Return filenames in exactly this format:
+                Every filename is project-root-relative. Return filenames in exactly this format:
                 \"\"\"
                 %s
                 \"\"\"
@@ -701,6 +909,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 context.newRequest(),
                 originalSection,
                 boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
+                boundedPromptSection(liveSourceVerification, MAX_REFERENCE_CONTEXT_CHARS),
                 context.allFiles(),
                 context.language().promptLanguageName()
         );
@@ -710,14 +919,18 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentRunContext context,
             String extraInfo,
             String projectLanguage,
-            AgentOperation operation
+            AgentOperation operation,
+            String liveSourceVerification
     ) {
         String deleteConstraints = operation.isDeletion() ? """
 
                 This is a feature deletion. Preserve unrelated behavior and every protected shared symbol listed
                 in the supplied context. Prefer minimal rewrites. Use action=delete for a whole file only when the
                 context explicitly lists that path as ALLOWED_DELETE_FILE and the file is dedicated to this feature.
-                Do not create files during deletion.
+                Do not create files during deletion. Every planned file must exist in the supplied project list and
+                current source tree. Never include hypothetical or optional mapping files. A symbol marked MISSING by
+                live source verification is already absent and does not need another edit. Include current
+                LIVE_REFERENCE_FILE call sites when their references become invalid.
                 """ : "";
         return """
                 You are Agent2 for a %s project. Produce a complete, internally consistent file-level plan for this %s.
@@ -742,7 +955,12 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 %s
                 \"\"\"
 
-                Every filename must be relative to the original source root. Include every edited, newly created,
+                Live source verification, if available:
+                \"\"\"
+                %s
+                \"\"\"
+
+                Every filename must be relative to the original project workspace root. Include every edited, newly created,
                 or deleted project file regardless of extension. Make shared API names, signatures, data types,
                 configuration keys, and call sites explicit so independent edits stay consistent.
 
@@ -768,6 +986,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 context.oldRequest(),
                 boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
                 extraInfo,
+                boundedPromptSection(liveSourceVerification, MAX_REFERENCE_CONTEXT_CHARS),
                 deleteConstraints,
                 context.language().promptLanguageName()
         );
@@ -785,9 +1004,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentOperation operation
     ) {
         boolean javaFile = target.filename.endsWith(".java");
-        String expectedPackage = javaFile ? JavaFilePath.packageName(target.filename) : "";
+        String expectedPackage = javaFile ? expectedJavaPackage(context, target.filename).orElse("") : "";
         String packageDeclaration = expectedPackage.isEmpty() ? "" : "package " + expectedPackage + ";\n\n";
-        String expectedTypeName = javaFile ? JavaFilePath.simpleTypeName(target.filename) : "";
+        String expectedTypeName = javaFile ? javaTypeName(target.filename) : "";
         String createExample = javaFile
                 ? packageDeclaration + "public class " + expectedTypeName + " {\n}"
                 : "complete content for " + target.filename;
@@ -799,7 +1018,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
                 CREATE is the only case where complete-file generation is allowed.
                 """.formatted(createExample) : """
-                Return only minimal exact Search/Replace blocks in application order:
+                If the target already satisfies its plan because the relevant code is absent or already has the
+                required state, return exactly this token and nothing else:
+                NO_CHANGES_REQUIRED
+
+                Otherwise return only minimal exact Search/Replace blocks in application order:
                 <<<<<<< SEARCH
                 exact text copied from the current target file
                 =======
@@ -1020,7 +1243,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 + boundedPromptSection(previousResponse, MAX_RETRY_RESPONSE_CHARS) + "\n\n"
                 + "Generate a fresh protocol response against the ORIGINAL target content. Do not apply edits "
                 + "to the previous response. Every REPLACE must differ from SEARCH, and the resulting file must "
-                + "differ from the original. Correct the reported failure and follow the protocol exactly.";
+                + "differ from the original. If the requested target state is already present, return exactly "
+                + NO_CHANGES_REQUIRED + ". Correct the reported failure and follow the protocol exactly.";
     }
 
     private String agent3RetryMessage(
@@ -1029,18 +1253,46 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             int retryNumber,
             Exception failure
     ) {
-        String reason = safeFailureMessage(failure);
         return language == AgentLanguage.CN
-                ? "\n# Agent3 " + filename + " 执行失败，正在重试 " + retryNumber + "/"
-                        + MAX_AGENT3_RETRIES + "：" + reason + "\n"
-                : "\n# Agent3 " + filename + " failed; retry " + retryNumber + "/"
-                        + MAX_AGENT3_RETRIES + ": " + reason + "\n";
+                ? "\n> `" + filename + "` 的补丁未能安全应用，正在重新生成（"
+                        + retryNumber + "/" + MAX_AGENT3_RETRIES + "）。\n"
+                : "\n> The patch for `" + filename + "` could not be applied safely; regenerating ("
+                        + retryNumber + "/" + MAX_AGENT3_RETRIES + ").\n";
     }
 
     private String retryMessage(AgentLanguage language, String agent, Exception exception) {
         return language == AgentLanguage.CN
-                ? "\n# " + agent + " 输出校验失败，正在按严格协议重试。\n"
-                : "\n# " + agent + " output validation failed; retrying with the strict contract.\n";
+                ? "\n> " + agent + " 输出未通过校验，正在重新生成。\n"
+                : "\n> " + agent + " output did not pass validation; regenerating.\n";
+    }
+
+    private String userFacingFailureMessage(AgentLanguage language, Exception exception) {
+        String detail = safeFailureMessage(exception);
+        boolean chinese = language == AgentLanguage.CN;
+        if (detail.contains("file that does not exist") || detail.contains("does not exist in the current project")) {
+            String filename = detail.substring(detail.lastIndexOf(':') + 1).trim();
+            return chinese
+                    ? "删除方案引用了当前项目中不存在的文件 " + filename
+                            + "。本次操作已停止，仓库和数据库均未修改。"
+                    : "The deletion plan referenced a file that is not in the current project: " + filename
+                            + ". The operation stopped without changing the repository or database.";
+        }
+        if (detail.contains("protected shared symbol")) {
+            return chinese
+                    ? "删除方案试图移除其他功能仍在使用的共享代码。本次操作已停止，仓库和数据库均未修改。"
+                    : "The deletion plan attempted to remove a protected shared symbol. The operation stopped "
+                            + "without changing the repository or database.";
+        }
+        if (detail.contains("Agent3 failed for")) {
+            return chinese
+                    ? "无法为其中一个文件生成可安全应用的修改。本次操作已停止，仓库和数据库均未修改。"
+                    : "A safe file change could not be generated. The operation stopped without changing the "
+                            + "repository or database.";
+        }
+        return chinese
+                ? "无法完成代码生成。本次操作已停止，仓库和数据库均未修改。"
+                : "Code generation could not be completed. The operation stopped without changing the repository "
+                        + "or database.";
     }
 
     private String safeFailureMessage(Exception exception) {

@@ -104,6 +104,61 @@ class LlmControllerTest {
     }
 
     @Test
+    void standardJavaProjectUsesRepositoryRelativeAgentPaths(@TempDir Path projectRoot) throws Exception {
+        Path javaSource = projectRoot.resolve("src/main/java/demo/Feature.java");
+        Path resource = projectRoot.resolve("src/main/resources/application.yml");
+        Files.createDirectories(javaSource.getParent());
+        Files.createDirectories(resource.getParent());
+        Files.writeString(javaSource, "package demo; class Feature {}\n");
+        Files.writeString(resource, "feature: disabled\n");
+        Files.writeString(projectRoot.resolve("pom.xml"), "<project/>\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(43);
+        FeatureResult feature = selectedFeature(8, "Old feature");
+
+        FocusGraphContextResult graphContext = new FocusGraphContextResult();
+        graphContext.setContextPrompt("Java graph context");
+        JavaGraphContextService javaGraphService = mock(JavaGraphContextService.class);
+        when(javaGraphService.buildModifyContext(
+                any(FeatureResult.class),
+                anyString(),
+                anyString(),
+                anyString(),
+                any(AgentLanguage.class)
+        )).thenReturn(graphContext);
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.generateWithSinglePrompt(anyString()))
+                .thenReturn("{\"deltaQuery\":\"enable feature\"}");
+        AgentRunRegistry registry = new AgentRunRegistry();
+        LlmController controller = controller(
+                registry,
+                javaGraphService,
+                mock(FocusGraphContextService.class),
+                llmClient
+        );
+        AddOrModifyRequest request = new AddOrModifyRequest();
+        request.setFeatureDescription("Enable feature");
+        request.setLanguage(AgentLanguage.EN);
+
+        AgentRunContext run = registry.requireActiveContext(controller.modifyFeature(request).runId());
+
+        assertEquals(projectRoot.resolve("src/main/java").toString(), run.sourceRoot());
+        assertEquals(projectRoot.toString(), run.projectRoot());
+        assertTrue(run.allFiles().contains("src/main/java/demo/Feature.java"));
+        assertTrue(run.allFiles().contains("src/main/resources/application.yml"));
+        assertTrue(run.allFiles().contains("pom.xml"));
+        assertTrue(!run.allFiles().contains("\ndemo/Feature.java\n"));
+        verify(javaGraphService).buildModifyContext(
+                feature,
+                "Old feature",
+                "Enable feature",
+                "enable feature",
+                AgentLanguage.EN
+        );
+    }
+
+    @Test
     void javaAddStoresReasoningStagesAndTargetModuleInRunContext(@TempDir Path projectRoot) throws Exception {
         prepareProject(projectRoot, "JAVA");
         FocusGraphContextResult graphContext = new FocusGraphContextResult();

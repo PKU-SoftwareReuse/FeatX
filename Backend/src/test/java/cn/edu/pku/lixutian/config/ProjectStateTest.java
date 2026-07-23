@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,6 +18,22 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectStateTest {
+    @Test
+    void standardJavaProjectSeparatesOriginalAndDerivedRoots(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/com/acme/App.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package com.acme; class App {}\n");
+
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+
+        assertEquals(projectRoot.toString(), project.getProjectPath());
+        assertEquals(projectRoot.resolve("src/main/java").toString(), project.getSrcPath());
+        assertEquals(projectRoot.resolve("preprocess1/main/java").toString(), project.getPreprocess1Path());
+        assertEquals(projectRoot.resolve("delombok/main/java").toString(), project.getDelombokPath());
+        assertEquals(projectRoot.resolve("preprocess2/main/java").toString(), project.getPreprocess2Path());
+    }
+
     @Test
     void unboundThreadsDoNotShareAProcessWideProjectState() throws Exception {
         ProjectState.clearWorkspace(ProjectState.currentWorkspaceId());

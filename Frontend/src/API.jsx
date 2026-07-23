@@ -259,9 +259,6 @@ const API = {
             .then(response => response.data);
     },
 
-    confirmDelete: (runId) => {
-        return http.post(`${BASE_URL}/feature/confirm/delete`, null, {params: {runId}})
-    },
     deleteFeature: (requestData) => {
         return http.post(`${BASE_URL}/feature/delete`, requestData)
             .then(response => response.data)
@@ -273,18 +270,9 @@ const API = {
             language: language,
         }).then(response => response.data)
     },
-    confirmModify: (runId) => {
-        return http.post(`${BASE_URL}/feature/confirm/modify`, null, {params: {runId}})
-            .then(response => response.data);
-    },
-
     addFeature: (requestData) => {
         return http.post(`${BASE_URL}/feature/add`, requestData)
             .then(response => response.data)
-    },
-    confirmAdd: (runId) => {
-        return http.post(`${BASE_URL}/feature/confirm/add`, null, {params: {runId}})
-            .then(response => response.data);
     },
     getLlmModels: () => {
         return http.get(`${BASE_URL}/llm/models`)

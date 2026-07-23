@@ -146,7 +146,11 @@ public class ProjectController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("repoId", state == null ? null : state.getRepoId());
         result.put("projectType", state == null ? null : state.getProjectType());
+        result.put("projectRoot", state == null ? null : state.getProjectPath());
         result.put("sourceRoot", state == null ? null : state.getSrcPath());
+        result.put("preprocess1Root", state == null ? null : state.getPreprocess1Path());
+        result.put("delombokRoot", state == null ? null : state.getDelombokPath());
+        result.put("preprocess2Root", state == null ? null : state.getPreprocess2Path());
         return result;
     }
 

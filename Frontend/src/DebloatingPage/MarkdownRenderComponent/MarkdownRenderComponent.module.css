@@ -3,15 +3,43 @@
 }
 
 .markdownContent h1 {
-    font-size: 20px;
+    margin: 16px 0 9px;
+    font-size: 17px;
 }
 
 .markdownContent h2 {
-    font-size: 18px;
+    margin: 18px 0 9px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid #d8dee4;
+    color: #24292f;
+    font-size: 16px;
+    line-height: 1.4;
 }
 
 .markdownContent h3 {
-    font-size: 16px;
+    margin: 13px 0 7px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.markdownContent h4 {
+    margin: 11px 0 6px;
+    color: #57606a;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.markdownContent blockquote {
+    margin: 8px 0;
+    padding: 5px 9px;
+    border-left: 3px solid #afb8c1;
+    background: #f6f8fa;
+    color: #57606a;
+}
+
+.markdownContent blockquote p {
+    margin: 0;
 }
 
 .markdownContent table {

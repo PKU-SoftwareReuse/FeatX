@@ -17,6 +17,95 @@ const CREATE_START = '<<<<<<< CREATE'
 const CREATE_END = '>>>>>>> CREATE'
 const JSON_FENCE = '```json'
 
+const cleanHeadingText = (line) => line
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^===\s*/, '')
+    .replace(/\s*===\s*$/, '')
+    .trim()
+
+export const normalizeAgentPresentation = (content = '') => {
+    const seenStages = new Set()
+    const normalized = []
+    let insideProtocol = false
+
+    content.split('\n').forEach((line) => {
+        if (line.trim() === SEARCH_START
+            || line.trim() === CREATE_START
+            || line.trim() === PYTHON_FILE_START) {
+            insideProtocol = true
+            normalized.push(line)
+            return
+        }
+        if (insideProtocol) {
+            normalized.push(line)
+            if (line.trim() === REPLACE_END
+                || line.trim() === CREATE_END
+                || line.trim() === PYTHON_FILE_END) {
+                insideProtocol = false
+            }
+            return
+        }
+
+        const heading = cleanHeadingText(line)
+        const chineseStage = heading.match(/^阶段\s*(I|II|III)\s*[：:]\s*(.*)$/i)
+        const englishStage = heading.match(/^Stage\s*(I|II|III)\s*[：:]\s*(.*)$/i)
+        const stageMatch = chineseStage || englishStage
+        if (!stageMatch || !/^#{1,6}\s/.test(line)) {
+            normalized.push(line)
+            return
+        }
+
+        const language = chineseStage ? 'CN' : 'EN'
+        const stage = stageMatch[1].toUpperCase()
+        const detail = stageMatch[2].trim()
+        if (stage === 'I' && /^(补充上下文复核|Additional Context Recheck)$/i.test(detail)) {
+            normalized.push(language === 'CN' ? '#### 补充上下文复核' : '#### Additional Context Recheck')
+            return
+        }
+
+        const primaryDetailMatches = stage === 'I'
+            ? /^(信息需求分析|Information Requirement Analysis)$/i.test(detail)
+            : stage === 'II'
+                ? /^(修改方案规划|Modification Planning)$/i.test(detail)
+                : /^(具体文件修改|Concrete File Modification)(?:\s+.*)?$/i.test(detail)
+        if (!primaryDetailMatches) {
+            normalized.push(line)
+            return
+        }
+
+        if (stage === 'III') {
+            const prefix = language === 'CN' ? '具体文件修改' : 'Concrete File Modification'
+            const filename = detail.startsWith(prefix) ? detail.slice(prefix.length).trim() : ''
+            if (!seenStages.has(stage)) {
+                seenStages.add(stage)
+                normalized.push(language === 'CN'
+                    ? '## 阶段 III：具体文件修改'
+                    : '## Stage III: Concrete File Modification')
+            }
+            if (filename) {
+                normalized.push(language === 'CN'
+                    ? `#### 文件：\`${filename}\``
+                    : `#### File: \`${filename}\``)
+            }
+            return
+        }
+
+        if (seenStages.has(stage)) return
+        seenStages.add(stage)
+        if (stage === 'I') {
+            normalized.push(language === 'CN'
+                ? '## 阶段 I：信息需求分析'
+                : '## Stage I: Information Requirement Analysis')
+        } else {
+            normalized.push(language === 'CN'
+                ? '## 阶段 II：修改方案规划'
+                : '## Stage II: Modification Planning')
+        }
+    })
+
+    return normalized.join('\n')
+}
+
 const trimCodeEdges = (code) => code
     .replace(/^[\r\n]+/, '')
     .replace(/[\r\n]+$/, '')
@@ -94,7 +183,8 @@ const afterClosingJsonFence = (content, jsonEnd) => {
     return content.startsWith('```', cursor) ? cursor + 3 : jsonEnd
 }
 
-export const splitAgentContent = (content = '') => {
+export const splitAgentContent = (rawContent = '') => {
+    const content = normalizeAgentPresentation(rawContent)
     const segments = []
     let cursor = 0
 

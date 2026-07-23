@@ -185,27 +185,82 @@ public class RepositoryGitService {
     }
 
     public String commit(String message) throws IOException, InterruptedException {
+        return commit(message, false);
+    }
+
+    public String commit(String message, boolean allowEmpty) throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
             Path repository = repositoryRoot();
             String normalizedMessage = normalizeCommitMessage(message);
-            runGit(repository, List.of(
+            List<String> command = new ArrayList<>(List.of(
                     "git",
                     "-c", "user.name=FeatX",
                     "-c", "user.email=featx@localhost",
-                    "commit", "-m", normalizedMessage
-            ), 0);
+                    "commit"
+            ));
+            if (allowEmpty) {
+                command.add("--allow-empty");
+            }
+            command.add("-m");
+            command.add(normalizedMessage);
+            runGit(repository, command, 0);
             return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+        }
+    }
+
+    public String headCommit() throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+        }
+    }
+
+    public String revertCommit(String commitHash) throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            if (commitHash == null || commitHash.isBlank()) {
+                throw new IllegalArgumentException("Commit hash is required for compensation.");
+            }
+            Path repository = repositoryRoot();
+            String head = runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+            if (!head.equals(commitHash.trim())) {
+                throw new IllegalStateException(
+                        "Cannot compensate commit " + commitHash + " because repository HEAD changed to " + head + "."
+                );
+            }
+            try {
+                runGit(repository, List.of(
+                        "git",
+                        "-c", "user.name=FeatX",
+                        "-c", "user.email=featx@localhost",
+                        "revert", "--no-edit", commitHash.trim()
+                ), 0);
+            } catch (IOException failure) {
+                runGit(repository, List.of("git", "revert", "--abort"), 0, 128);
+                throw failure;
+            }
+            return runGit(repository, List.of("git", "rev-parse", "HEAD"), 0).trim();
+        }
+    }
+
+    public void restoreRepositoryToHead() throws IOException, InterruptedException {
+        synchronized (currentRepositoryLock()) {
+            Path repository = repositoryRoot();
+            restoreRepositoryToHeadLocked(repository);
         }
     }
 
     public GitWorkspaceStatusResult discardUncommittedChanges() throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
             Path repository = repositoryRoot();
-            runGit(repository, List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "."), 0);
-            runGit(repository, List.of("git", "clean", "-fd", "--", "."), 0);
+            restoreRepositoryToHeadLocked(repository);
             candidateCodeService.discardCandidateState();
             return statusLocked();
         }
+    }
+
+    private void restoreRepositoryToHeadLocked(Path repository) throws IOException, InterruptedException {
+        runGit(repository, List.of("git", "restore", "--source=HEAD", "--staged", "--worktree", "--", "."), 0);
+        runGit(repository, List.of("git", "clean", "-fd", "--", "."), 0);
     }
 
     private Object currentRepositoryLock() {

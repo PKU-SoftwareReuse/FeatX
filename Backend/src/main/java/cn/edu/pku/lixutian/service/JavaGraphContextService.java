@@ -10,6 +10,7 @@ import cn.edu.pku.lixutian.graph.softwareGraph.arc.CallArc;
 import cn.edu.pku.lixutian.graph.softwareGraph.arc.ClassArc;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -690,14 +691,18 @@ public class JavaGraphContextService {
 
     private String sourceFile(BodyDeclaration<?> declaration) {
         try {
+            ProjectState project = ProjectState.getInstance();
             Path source = declaration.findCompilationUnit().orElseThrow().getStorage().orElseThrow().getPath().toAbsolutePath().normalize();
-            Path preprocessRoot = Path.of(ProjectState.getInstance().getPreprocess2Path()).toAbsolutePath().normalize();
+            Path preprocessRoot = Path.of(project.getPreprocess2Path()).toAbsolutePath().normalize();
             if (source.startsWith(preprocessRoot)) {
-                return preprocessRoot.relativize(source).toString().replace(File.separatorChar, '/');
+                String sourceRelativePath = preprocessRoot.relativize(source)
+                        .toString()
+                        .replace(File.separatorChar, '/');
+                return ProjectPathMapping.sourceRelativeToProject(project, sourceRelativePath);
             }
-            Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
+            Path sourceRoot = Path.of(project.getSrcPath()).toAbsolutePath().normalize();
             if (source.startsWith(sourceRoot)) {
-                return sourceRoot.relativize(source).toString().replace(File.separatorChar, '/');
+                return ProjectPathMapping.absoluteToProject(project, source);
             }
             return source.getFileName().toString();
         } catch (Exception ignored) {

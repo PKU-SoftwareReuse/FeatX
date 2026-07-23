@@ -21,6 +21,7 @@ import cn.edu.pku.lixutian.graph.softwareGraph.vertex.VertexMap;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ProjectFilePath;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import com.github.javaparser.ParseException;
 import com.github.javaparser.StaticJavaParser;
@@ -132,6 +133,35 @@ public class CodeMapService {
     public void invalidateRepository(Integer repositoryId) {
         if (repositoryId != null) {
             moduleResultsByRepository.remove(repositoryId);
+        }
+    }
+
+    public void verifyFeatureOperation(
+            String operation,
+            Integer requestedFeatureId,
+            Integer resultingFeatureId
+    ) {
+        entityManager.flush();
+        switch (operation) {
+            case "delete" -> {
+                if (requestedFeatureId == null) {
+                    throw new IllegalStateException("The completed delete run has no feature id.");
+                }
+                if (featureRepository.existsById(requestedFeatureId)
+                        || !codeMapRepository.findByFeature_Id(requestedFeatureId).isEmpty()) {
+                    throw new IllegalStateException(
+                            "Feature " + requestedFeatureId + " or its CodeMap still exists after deletion."
+                    );
+                }
+            }
+            case "edit", "add" -> {
+                if (resultingFeatureId == null || !featureRepository.existsById(resultingFeatureId)) {
+                    throw new IllegalStateException(
+                            "Feature metadata was not persisted for the completed " + operation + " operation."
+                    );
+                }
+            }
+            default -> throw new IllegalArgumentException("Unsupported feature operation: " + operation);
         }
     }
 
@@ -484,6 +514,26 @@ public class CodeMapService {
      * 4. 重建SKG
      */
     @Transactional(rollbackFor = Exception.class)
+    public boolean deleteFeatureMetadataOnly(Integer featureId) {
+        if (featureId == null) {
+            throw new IllegalArgumentException("Feature id is required for metadata reconciliation.");
+        }
+        Feature feature = featureRepository.findById(featureId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Feature " + featureId + " is no longer available for deletion."
+                ));
+        Integer moduleId = feature.getModule() == null ? null : feature.getModule().getId();
+        codeMapRepository.deleteByFeature_Id(featureId);
+        featureRepository.deleteById(featureId);
+        entityManager.flush();
+        if (moduleId != null && featureRepository.findByModule_Id(moduleId).isEmpty()) {
+            moduleRepository.deleteById(moduleId);
+        }
+        invalidateCurrentRepository();
+        return true;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public boolean deleteFeatureFromMemoryAndDatabase(Integer featureId) throws ParseException, IOException, InterruptedException {
         if (ProjectState.getInstance().isPython()) {
             return deletePythonFeatureFromMemoryAndDatabase(featureId);
@@ -506,8 +556,11 @@ public class CodeMapService {
                 break;
             }
         }
-        assert candidateModule != null && candidateFeature != null;
+        if (candidateModule == null || candidateFeature == null) {
+            throw new IllegalStateException("Feature " + featureId + " is no longer available for deletion.");
+        }
         candidateModule.getFeatureList().remove(candidateFeature);
+        codeMapRepository.deleteByFeature_Id(candidateFeature.getFeatureId());
         featureRepository.deleteById(candidateFeature.getFeatureId());
         if (candidateModule.getFeatureList().isEmpty()) {
             moduleResults.remove(candidateModule);
@@ -539,14 +592,14 @@ public class CodeMapService {
         // Manual edits may add candidates outside the feature's original delete graph.
         for (String candidateKey : ProjectState.getInstance().getModifications().keySet()) {
             Optional<String> editedContent = candidateCodeService.authoritativeJavaContent(candidateKey);
-            if (editedContent.isPresent()) {
-                RewriteFileHelper.rewriteJavaFileContent(JavaFilePath.normalize(candidateKey), editedContent.get());
+            Optional<String> javaSourcePath = candidateCodeService.javaSourceRelativePath(candidateKey);
+            if (editedContent.isPresent() && javaSourcePath.isPresent()) {
+                RewriteFileHelper.rewriteJavaFileContent(javaSourcePath.get(), editedContent.get());
             }
         }
 
         // 4. 重建SKG
-        ProjectState.getInstance().setForcePreprocessOption(true);
-        processService.process();
+        processService.rebuildAfterConfirmedSourceChange();
 
         invalidateCurrentRepository();
 
@@ -569,20 +622,6 @@ public class CodeMapService {
             AgentLanguage language
     ) throws ParseException, IOException, InterruptedException {
         return modifyOrAddFeatureFromMemoryAndDatabase(moduleId, newFeatureDescription, "add", language);
-    }
-
-    public Integer modifyFeatureFromMemoryAndDatabase(
-            Integer featureId,
-            String newFeatureDescription
-    ) throws ParseException, IOException, InterruptedException {
-        return modifyFeatureFromMemoryAndDatabase(featureId, newFeatureDescription, AgentLanguage.EN);
-    }
-
-    public Integer addFeatureFromMemoryAndDatabase(
-            Integer moduleId,
-            String newFeatureDescription
-    ) throws ParseException, IOException, InterruptedException {
-        return addFeatureFromMemoryAndDatabase(moduleId, newFeatureDescription, AgentLanguage.EN);
     }
 
     private Integer modifyOrAddFeatureFromMemoryAndDatabase(
@@ -668,7 +707,12 @@ public class CodeMapService {
                 continue;
             }
             try {
-                String javaFilePath = JavaFilePath.normalize(entry.getKey());
+                Optional<String> sourceRelativePath = candidateCodeService.javaSourceRelativePath(entry.getKey());
+                if (sourceRelativePath.isEmpty()) {
+                    // Java files outside the configured analysis root remain in Git but do not enter the main SKG.
+                    continue;
+                }
+                String javaFilePath = sourceRelativePath.get();
                 if (AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue())) {
                     Files.deleteIfExists(ProjectFilePath.resolve(
                             Path.of(ProjectState.getInstance().getSrcPath()),
@@ -677,9 +721,9 @@ public class CodeMapService {
                     continue;
                 }
                 String currentFile = JavaFilePath.toClassName(javaFilePath);
-                String editedContent = candidateCodeService.authoritativeJavaContent(javaFilePath)
+                String editedContent = candidateCodeService.authoritativeJavaContent(entry.getKey())
                         .orElseThrow(() -> new IllegalStateException(
-                                "Review and confirm the complete candidate before updating CodeMap: " + javaFilePath
+                                "Review and confirm the complete candidate before updating CodeMap: " + entry.getKey()
                         ));
 
                 List<String> javaFiles = ListFileHelper.findJavaFiles(ProjectState.getInstance().getSrcPath());
@@ -786,8 +830,7 @@ public class CodeMapService {
         }
 
         // 4. 重建SKG
-        ProjectState.getInstance().setForcePreprocessOption(true);
-        processService.process();
+        processService.rebuildAfterConfirmedSourceChange();
 
         invalidateCurrentRepository();
 
@@ -818,11 +861,7 @@ public class CodeMapService {
         Map<String, String> modifications = currentPythonModifications();
         applyPythonModifications(modifications);
 
-        List<String> changedFiles = modifications.entrySet().stream()
-                .filter(entry -> !AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue()))
-                .filter(entry -> entry.getKey().endsWith(".py"))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toCollection(ArrayList::new));
+        List<String> changedFiles = pythonAnalysisFiles(modifications);
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
 
         invalidateCurrentRepository();
@@ -844,11 +883,7 @@ public class CodeMapService {
         Map<String, String> modifications = currentPythonModifications();
         applyPythonModifications(modifications);
 
-        List<String> changedFiles = modifications.entrySet().stream()
-                .filter(entry -> !AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue()))
-                .filter(entry -> entry.getKey().endsWith(".py"))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toCollection(ArrayList::new));
+        List<String> changedFiles = pythonAnalysisFiles(modifications);
         savePythonCodeMapForChangedFiles(featureId, changedFiles);
 
         invalidateCurrentRepository();
@@ -958,6 +993,16 @@ public class CodeMapService {
         return ProjectState.getInstance().getModifications();
     }
 
+    private List<String> pythonAnalysisFiles(Map<String, String> modifications) {
+        return modifications.entrySet().stream()
+                .filter(entry -> !AgentService.DELETE_FILE_SENTINEL.equals(entry.getValue()))
+                .filter(entry -> entry.getKey().endsWith(".py"))
+                .map(Map.Entry::getKey)
+                .map(path -> ProjectPathMapping.projectRelativeToSource(ProjectState.getInstance(), path))
+                .flatMap(Optional::stream)
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
     private void applyPythonModifications(Map<String, String> modifications) throws IOException {
         for (Map.Entry<String, String> entry : modifications.entrySet()) {
             if (!entry.getKey().endsWith(".py")) {
@@ -985,7 +1030,7 @@ public class CodeMapService {
             throw new IOException("Invalid Python file path: " + relativePath);
         }
 
-        Path rootPath = Path.of(ProjectState.getInstance().getSrcPath()).normalize();
+        Path rootPath = Path.of(ProjectState.getInstance().getProjectPath()).normalize();
         Path filePath = rootPath.resolve(normalizedRelativePath).normalize();
         if (!filePath.startsWith(rootPath)) {
             throw new IOException("Invalid Python file path: " + relativePath);

@@ -4,6 +4,7 @@ import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ProjectFilePath;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import com.github.javaparser.StaticJavaParser;
@@ -298,7 +299,7 @@ public class CandidateCodeService {
                 ? RewriteFileHelper.buildJavaFileContent(filePath, candidateBody, null)
                 : candidateBody;
         if (!modifiedContent.isBlank()) {
-            validateJavaCandidate(filePath, modifiedContent);
+            validateJavaCandidate(filePath, sourceFile, modifiedContent);
         }
         CandidateDocument document = new CandidateDocument(
                 filePath,
@@ -323,8 +324,7 @@ public class CandidateCodeService {
     public CodeFileDiffResult prepareProjectCandidate(String relativePath, String candidateContent)
             throws IOException, InterruptedException {
         String key = ProjectFilePath.normalize(relativePath);
-        Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-        Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
+        Path sourceFile = ProjectPathMapping.resolveProjectFile(ProjectState.getInstance(), key);
         CandidateDocument cached = state().candidateDocuments.get(key);
         boolean originalExists = cached == null ? Files.isRegularFile(sourceFile) : cached.originalExists;
         String originalContent = cached == null
@@ -332,7 +332,7 @@ public class CandidateCodeService {
                 : cached.originalContent;
         String modifiedContent = AgentService.DELETE_FILE_SENTINEL.equals(candidateContent) ? "" : candidateContent;
         if (key.endsWith(".java") && modifiedContent != null && !modifiedContent.isBlank()) {
-            validateJavaCandidate(key, modifiedContent);
+            validateJavaCandidate(key, sourceFile, modifiedContent);
         }
         boolean pending = !Objects.equals(originalContent, modifiedContent == null ? originalContent : modifiedContent);
         CandidateDocument document = new CandidateDocument(
@@ -389,8 +389,7 @@ public class CandidateCodeService {
         if (cached != null) {
             return toResult(cached);
         }
-        Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-        Path sourceFile = ProjectFilePath.resolve(sourceRoot, normalizedPath);
+        Path sourceFile = ProjectPathMapping.resolveProjectFile(ProjectState.getInstance(), normalizedPath);
         if (!Files.isRegularFile(sourceFile)) {
             throw new IllegalStateException("Source file does not exist for " + relativePath + ".");
         }
@@ -448,7 +447,20 @@ public class CandidateCodeService {
     }
 
     public Optional<String> authoritativeJavaContent(String classId) {
-        CandidateDocument document = state().candidateDocuments.get(JavaFilePath.normalize(classId));
+        String normalizedClassPath = JavaFilePath.normalize(classId);
+        CandidateDocument document = state().candidateDocuments.get(normalizedClassPath);
+        if (document == null) {
+            document = state().candidateDocuments.values().stream()
+                    .filter(candidate -> "java".equals(candidate.language))
+                    .filter(candidate -> ProjectPathMapping.projectRelativeToSource(
+                                    ProjectState.getInstance(),
+                                    candidate.path
+                            )
+                            .filter(normalizedClassPath::equals)
+                            .isPresent())
+                    .findFirst()
+                    .orElse(null);
+        }
         if (document == null || !document.authoritative) {
             return Optional.empty();
         }
@@ -496,14 +508,19 @@ public class CandidateCodeService {
                 );
             }
             if ("java".equals(document.language) && !document.modifiedContent.isBlank()) {
-                validateJavaCandidate(key, document.modifiedContent);
+                validateJavaCandidate(
+                        key,
+                        ProjectPathMapping.resolveProjectFile(ProjectState.getInstance(), document.path),
+                        document.modifiedContent
+                );
             }
         }
     }
 
-    private void validateJavaCandidate(String key, String content) {
-        String normalizedKey = JavaFilePath.normalize(key);
-        String expectedTypeName = JavaFilePath.simpleTypeName(normalizedKey);
+    private void validateJavaCandidate(String key, Path sourceFile, String content) {
+        String normalizedKey = ProjectFilePath.normalize(key);
+        String sourceFileName = sourceFile.getFileName().toString();
+        String expectedTypeName = sourceFileName.substring(0, sourceFileName.length() - ".java".length());
         CompilationUnit compilationUnit;
         try {
             compilationUnit = StaticJavaParser.parse(content);
@@ -531,15 +548,21 @@ public class CandidateCodeService {
                     );
                 });
 
-        String expectedPackage = JavaFilePath.packageName(normalizedKey);
-        String actualPackage = compilationUnit.getPackageDeclaration()
-                .map(declaration -> declaration.getNameAsString())
-                .orElse("");
-        if (!expectedPackage.equals(actualPackage)) {
-            throw new IllegalStateException(
-                    "Candidate " + normalizedKey + " must declare package "
-                            + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
-            );
+        Path analysisRoot = ProjectPathMapping.sourceRoot(ProjectState.getInstance());
+        if (sourceFile.startsWith(analysisRoot)) {
+            String analysisRelativePath = analysisRoot.relativize(sourceFile)
+                    .toString()
+                    .replace('\\', '/');
+            String expectedPackage = JavaFilePath.packageName(analysisRelativePath);
+            String actualPackage = compilationUnit.getPackageDeclaration()
+                    .map(declaration -> declaration.getNameAsString())
+                    .orElse("");
+            if (!expectedPackage.equals(actualPackage)) {
+                throw new IllegalStateException(
+                        "Candidate " + normalizedKey + " must declare package "
+                                + (expectedPackage.isEmpty() ? "<default>" : expectedPackage) + "."
+                );
+            }
         }
     }
 
@@ -611,12 +634,31 @@ public class CandidateCodeService {
             return Optional.of(normalizeProjectPath(document.path));
         }
         try {
-            Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath()).toAbsolutePath().normalize();
-            Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
-            return Optional.of(projectRelativePath(sourceFile));
+            ProjectState project = ProjectState.getInstance();
+            Path projectFile = ProjectPathMapping.resolveProjectFile(project, key);
+            if (project.isJava()) {
+                Path sourceRoot = ProjectPathMapping.sourceRoot(project);
+                if (!projectFile.startsWith(sourceRoot)) {
+                    // Java graph candidates are keyed relative to srcPath, while Git
+                    // status is reported relative to the repository root.
+                    Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
+                    if (sourceFile.startsWith(ProjectPathMapping.projectRoot(project))) {
+                        projectFile = sourceFile;
+                    }
+                }
+            }
+            return Optional.of(projectRelativePath(projectFile));
         } catch (IllegalArgumentException exception) {
             return Optional.empty();
         }
+    }
+
+    public Optional<String> javaSourceRelativePath(String key) {
+        String normalizedKey = normalizeCandidateKey(key);
+        CandidateDocument document = state().candidateDocuments.get(normalizedKey);
+        String projectPath = document == null ? normalizedKey : document.path;
+        return ProjectPathMapping.projectRelativeToSource(ProjectState.getInstance(), projectPath)
+                .filter(path -> path.endsWith(".java"));
     }
 
     private Path projectRoot() {

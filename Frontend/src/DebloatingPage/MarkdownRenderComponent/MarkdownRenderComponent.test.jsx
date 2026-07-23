@@ -1,7 +1,10 @@
 import {render, screen} from '@testing-library/react'
 import '@testing-library/jest-dom'
 
-import MarkdownRendererComponent, {splitAgentContent} from './MarkdownRenderComponent'
+import MarkdownRendererComponent, {
+    normalizeAgentPresentation,
+    splitAgentContent,
+} from './MarkdownRenderComponent'
 
 jest.mock('react-markdown', () => ({children}) => <div>{children}</div>)
 jest.mock('remark-gfm', () => () => null)
@@ -151,4 +154,33 @@ def main():
 
     expect(screen.getByText('PYTHON FILE')).toBeInTheDocument()
     expect(screen.getByText(/def main/)).toBeInTheDocument()
+})
+
+test('shows each primary stage once and weakens recheck and per-file headings', () => {
+    const normalized = normalizeAgentPresentation(`# === 阶段 I：信息需求分析 ===
+# === 阶段 I：补充上下文复核 ===
+# === 阶段 II：修改方案规划 ===
+# === 阶段 III：具体文件修改 top/naccl/Service.java ===
+# === 阶段 III：具体文件修改 top/naccl/Mapper.java ===
+`)
+
+    expect(normalized.match(/## 阶段 I：信息需求分析/g)).toHaveLength(1)
+    expect(normalized.match(/## 阶段 II：修改方案规划/g)).toHaveLength(1)
+    expect(normalized.match(/## 阶段 III：具体文件修改/g)).toHaveLength(1)
+    expect(normalized).toContain('#### 补充上下文复核')
+    expect(normalized).toContain('#### 文件：`top/naccl/Service.java`')
+    expect(normalized).toContain('#### 文件：`top/naccl/Mapper.java`')
+})
+
+test('does not normalize stage-like comments inside patch protocols', () => {
+    const normalized = normalizeAgentPresentation(`## Stage III: Concrete File Modification
+  <<<<<<< SEARCH
+# Stage II: Modification Planning
+  =======
+# Stage II: Modification Planning updated
+  >>>>>>> REPLACE
+`)
+
+    expect(normalized).toContain('# Stage II: Modification Planning\n  =======')
+    expect(normalized).toContain('# Stage II: Modification Planning updated')
 })

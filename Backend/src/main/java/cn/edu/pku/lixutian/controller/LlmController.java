@@ -15,6 +15,7 @@ import cn.edu.pku.lixutian.dto.result.FocusGraphContextResult;
 import cn.edu.pku.lixutian.dto.result.AgentRunStartResult;
 import cn.edu.pku.lixutian.dto.result.AgentRunSnapshotResult;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.FocusGraphContextService;
@@ -125,7 +126,7 @@ public class LlmController {
                     newRequest,
                     oldRequest,
                     graphContext.getContextPrompt(),
-                    String.join("\n", ListFileHelper.findAllFiles(project.getSrcPath())),
+                    String.join("\n", ListFileHelper.findAllFiles(project.getProjectPath())),
                     requestLanguage,
                     project.getSrcPath(),
                     project.getProjectPath(),
@@ -264,7 +265,7 @@ public class LlmController {
                     newRequest,
                     "",
                     graphContext.getContextPrompt(),
-                    String.join("\n", ListFileHelper.findAllFiles(project.getSrcPath())),
+                    String.join("\n", ListFileHelper.findAllFiles(project.getProjectPath())),
                     requestLanguage,
                     project.getSrcPath(),
                     project.getProjectPath(),
@@ -594,7 +595,9 @@ public class LlmController {
             deterministicPlan.path("deletedFiles").forEach(file -> {
                 String path = file.asText("").trim();
                 if (!path.isBlank()) {
-                    context.append("ALLOWED_DELETE_FILE: ").append(path).append('\n');
+                    context.append("ALLOWED_DELETE_FILE: ")
+                            .append(ProjectPathMapping.sourceRelativeToProject(ProjectState.getInstance(), path))
+                            .append('\n');
                 }
             });
         }
@@ -686,7 +689,7 @@ public class LlmController {
 
     private String projectFileList(ProjectState project) {
         StringBuilder fileList = new StringBuilder();
-        for (String projectFile : ListFileHelper.findAllFiles(project.getSrcPath())) {
+        for (String projectFile : ListFileHelper.findAllFiles(project.getProjectPath())) {
             fileList.append(projectFile).append("\n");
         }
         return fileList.toString();

@@ -38,7 +38,7 @@
 }
 
 .graphPanelCardCompact.graphPanelCardGitActions .card_title {
-    padding-right: 180px;
+    padding-right: 220px;
 }
 
 .gitCommitButton {
@@ -56,6 +56,10 @@
     margin-bottom: 0;
     color: #475467;
     font-size: 12px;
+}
+
+.commitConfirmation :global(.ant-alert) {
+    margin-bottom: 10px;
 }
 
 .modelControl {

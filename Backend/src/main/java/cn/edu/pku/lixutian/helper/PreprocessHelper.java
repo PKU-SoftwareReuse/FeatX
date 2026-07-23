@@ -26,7 +26,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 public class PreprocessHelper {
@@ -36,69 +38,59 @@ public class PreprocessHelper {
     );
 
     public static NodeList<CompilationUnit> parseAllFiles() throws ParseException, IOException, InterruptedException {
-        // 强制预处理，删除文件夹
-        if (ProjectState.getInstance().isForcePreprocessOption()) {
-            deleteDir(ProjectState.getInstance().getPreprocess1Path());
-            deleteDir(ProjectState.getInstance().getDelombokPath());
-            deleteDir(ProjectState.getInstance().getPreprocess2Path());
+        ProjectState project = ProjectState.getInstance();
+        if (!project.isJava()) {
+            throw new IllegalStateException("Java preprocessing can only run for a Java project.");
         }
-        return oldParseAllFiles();
+        if (project.isForcePreprocessOption() || !containsJavaFile(Path.of(project.getPreprocess2Path()))) {
+            rebuildPreprocessedSources(project);
+        }
+        ParserConfiguration configuration = parserConfiguration(project.getPreprocess2Path());
+        return finallyParseAllFiles(project.getPreprocess2Path(), configuration);
     }
 
     public static void deleteDir(String dirPath) throws IOException {
-        File dir = new File(dirPath);
-        if (dir.exists() && dir.isDirectory()) {
-            Files.walk(Paths.get(dirPath))
-                    .sorted((a, b) -> b.compareTo(a)) // 反向遍历，先删除文件，再删除文件夹
-                    .forEach(p -> {
-                        try {
-                            Files.delete(p);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        }
-                    });
+        Path directory = Paths.get(dirPath);
+        if (!Files.exists(directory)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(directory)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
         }
     }
 
+    private static void rebuildPreprocessedSources(ProjectState project)
+            throws ParseException, IOException, InterruptedException {
+        deleteDir(project.getPreprocess1Path());
+        deleteDir(project.getDelombokPath());
+        deleteDir(project.getPreprocess2Path());
 
-    public static NodeList<CompilationUnit> oldParseAllFiles() throws ParseException, IOException, InterruptedException {
-        System.out.println("==========0. Justify==========");
-        boolean needPreprocess = true;
-        File preprocessDir = new File(ProjectState.getInstance().getPreprocess2Path());
-        if (preprocessDir.exists() && preprocessDir.isDirectory()) {
-            needPreprocess = false;
-            System.out.println(" * 不需要进行预处理，直接解析");
+        NodeList<CompilationUnit> units1 = onlyParseAllFiles(project.getSrcPath());
+        if (units1.isEmpty()) {
+            throw new ParseException("No Java source files were found under " + project.getSrcPath());
         }
+        preprocess1(units1);
+        writeBack(units1, project.getSrcPath(), project.getPreprocess1Path());
 
-        if (needPreprocess) {
-            System.out.println("==========1. Pre Process 1 ==========");
-            NodeList<CompilationUnit> units1 = onlyParseAllFiles(ProjectState.getInstance().getSrcPath());
-            preprocess1(units1);
-            writeBack(
-                    units1,
-                    ProjectState.getInstance().getSrcPath(),
-                    ProjectState.getInstance().getPreprocess1Path()
-            );
-            System.out.println("==========2. Execute Delombok CMD ==========");
-            runDelombok(ProjectState.getInstance().getPreprocess1Path(), ProjectState.getInstance().getDelombokPath());
-            System.out.println("==========3. Pre Process 2 ==========");
-            NodeList<CompilationUnit> units2 = onlyParseAllFiles(ProjectState.getInstance().getDelombokPath());
-            preprocess2(units2);
-            writeBack(
-                    units2,
-                    ProjectState.getInstance().getDelombokPath(),
-                    ProjectState.getInstance().getPreprocess2Path()
-            );
-            System.out.println("==========4. Recursion ==========");
-            return oldParseAllFiles();
-        } else {
-            System.out.println("==========1. Finally Parse Preprocessed Files==========");
-            ParserConfiguration configuration = parserConfiguration(ProjectState.getInstance().getPreprocess2Path());
-            NodeList<CompilationUnit> units = finallyParseAllFiles(
-                    ProjectState.getInstance().getPreprocess2Path(),
-                    configuration
-            );
-            return units;
+        runDelombok(project.getPreprocess1Path(), project.getDelombokPath());
+
+        NodeList<CompilationUnit> units2 = onlyParseAllFiles(project.getDelombokPath());
+        preprocess2(units2);
+        writeBack(units2, project.getDelombokPath(), project.getPreprocess2Path());
+        if (!containsJavaFile(Path.of(project.getPreprocess2Path()))) {
+            throw new ParseException("Java preprocessing produced no files under " + project.getPreprocess2Path());
+        }
+    }
+
+    private static boolean containsJavaFile(Path root) throws IOException {
+        if (!Files.isDirectory(root)) {
+            return false;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            return paths.anyMatch(path -> Files.isRegularFile(path)
+                    && path.getFileName().toString().endsWith(".java"));
         }
     }
 
@@ -233,15 +225,17 @@ public class PreprocessHelper {
     ) throws IOException {
         Path inputRoot = Paths.get(inputRootPath).toAbsolutePath().normalize();
         for (CompilationUnit unit : units) {
-            assert unit.getStorage().isPresent();
-            Path sourcePath = unit.getStorage().get().getPath().toAbsolutePath().normalize();
+            if (unit.getStorage().isEmpty()) {
+                throw new IOException("Parsed Java file has no source path.");
+            }
+            Path sourcePath = unit.getStorage().orElseThrow().getPath().toAbsolutePath().normalize();
             if (!sourcePath.startsWith(inputRoot)) {
                 throw new IOException("Parsed Java file is outside the input root: " + sourcePath);
             }
             Path relativePath = inputRoot.relativize(sourcePath);
             Path newPath = Paths.get(preprocessPath, relativePath.toString());
             Files.createDirectories(newPath.getParent());
-            Files.write(newPath, unit.toString().getBytes());
+            Files.writeString(newPath, unit.toString(), StandardCharsets.UTF_8);
         }
     }
 
@@ -316,28 +310,31 @@ public class PreprocessHelper {
                 "--encoding", "UTF-8",
                 "-d", delombokPath
         );
-        // 设置工作目录为当前目录
         processBuilder.directory(new File("."));
-        // 合并标准输出和错误流
         processBuilder.redirectErrorStream(true);
-        // 启动进程
         Process process = processBuilder.start();
-        // 打印输出结果
-        new Thread(() -> {
+        StringBuilder output = new StringBuilder();
+        Thread outputReader = new Thread(() -> {
             try (var reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getInputStream(),"GBK"))) {
+                    new java.io.InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    System.out.println("[delombok] " + line);
+                    output.append(line).append('\n');
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                output.append(e.getMessage()).append('\n');
             }
-        }).start();
-        // 等待进程结束
-        int exitCode = process.waitFor();
-        System.out.println("Delombok finished with exit code: " + exitCode);
-
+        }, "featx-delombok-output");
+        outputReader.start();
+        if (!process.waitFor(120, TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            outputReader.join(TimeUnit.SECONDS.toMillis(5));
+            throw new IOException("Delombok timed out.\n" + output);
+        }
+        outputReader.join(TimeUnit.SECONDS.toMillis(5));
+        if (process.exitValue() != 0) {
+            throw new IOException("Delombok failed with exit code " + process.exitValue() + ".\n" + output);
+        }
     }
 
     private static String getLombokJarPath() {

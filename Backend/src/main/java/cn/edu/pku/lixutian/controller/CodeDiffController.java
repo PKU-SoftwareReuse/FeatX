@@ -11,6 +11,8 @@ import cn.edu.pku.lixutian.helper.CodeDiffHelper;
 import cn.edu.pku.lixutian.helper.ListFileHelper;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
 import cn.edu.pku.lixutian.helper.ProjectFilePath;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
+import cn.edu.pku.lixutian.helper.RewriteFileHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.DeleteHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.GraphAggregationHelper;
 import cn.edu.pku.lixutian.helper.graphAggregationHelper.OriginHelper;
@@ -181,7 +183,19 @@ public class CodeDiffController {
             if (!ProjectState.getInstance().isPython()
                     && filePath.endsWith(".java")
                     && "delete".equalsIgnoreCase(operation)) {
-                return candidateCodeService.prepareJavaCandidate(filePath, operation, deleteCodeByClass(classId));
+                String sourceRelativePath = ProjectPathMapping.projectRelativeToSource(
+                                ProjectState.getInstance(),
+                                filePath
+                        )
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Java graph file is outside the configured source root: " + filePath
+                        ));
+                String candidateContent = RewriteFileHelper.buildJavaFileContent(
+                        sourceRelativePath,
+                        deleteCodeByClass(classId),
+                        null
+                );
+                return candidateCodeService.prepareProjectCandidate(filePath, candidateContent);
             }
             throw new ResponseStatusException(HttpStatus.CONFLICT, "No generated candidate exists for " + filePath);
         } catch (IllegalArgumentException exception) {
@@ -275,20 +289,29 @@ public class CodeDiffController {
         }
         try {
             String projectPath = ProjectFilePath.normalize(classOrFileId);
-            Path sourceRoot = Path.of(ProjectState.getInstance().getSrcPath());
-            if (Files.isRegularFile(ProjectFilePath.resolve(sourceRoot, projectPath))) {
+            Path projectRoot = Path.of(ProjectState.getInstance().getProjectPath());
+            if (Files.isRegularFile(ProjectFilePath.resolve(projectRoot, projectPath))) {
                 return projectPath;
             }
         } catch (IllegalArgumentException ignored) {
             // Graph node ids are not always file paths; language-specific resolution follows.
         }
         if (ProjectState.getInstance().isPython()) {
-            return ProjectFilePath.normalize(CodeMapService.resolvePythonNodeToFile(classOrFileId));
+            return ProjectPathMapping.sourceRelativeToProject(
+                    ProjectState.getInstance(),
+                    CodeMapService.resolvePythonNodeToFile(classOrFileId)
+            );
         }
         if (classOrFileId.endsWith(".java")) {
-            return JavaFilePath.normalize(classOrFileId);
+            return ProjectPathMapping.sourceRelativeToProject(
+                    ProjectState.getInstance(),
+                    JavaFilePath.normalize(classOrFileId)
+            );
         }
-        return JavaFilePath.fromClassName(classOrFileId);
+        return ProjectPathMapping.sourceRelativeToProject(
+                ProjectState.getInstance(),
+                JavaFilePath.fromClassName(classOrFileId)
+        );
     }
 
     @GetMapping("/repositoryDiff")

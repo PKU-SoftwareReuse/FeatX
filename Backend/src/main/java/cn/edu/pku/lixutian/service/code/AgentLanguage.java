@@ -22,26 +22,44 @@ public enum AgentLanguage {
 
     public String stageOneDescription() {
         return this == CN
-                ? "# === 阶段 I：信息需求分析 ===\n"
-                : "# === Stage I: Information Requirement Analysis ===\n";
+                ? "## 阶段 I：信息需求分析\n"
+                : "## Stage I: Information Requirement Analysis\n";
+    }
+
+    public String stageOneRecheckDescription() {
+        return this == CN
+                ? "\n#### 补充上下文复核\n"
+                : "\n#### Additional Context Recheck\n";
     }
 
     public String stageTwoDescription() {
         return this == CN
-                ? "\n# === 阶段 II：修改方案规划 ===\n"
-                : "\n# === Stage II: Modification Planning ===\n";
+                ? "\n## 阶段 II：修改方案规划\n"
+                : "\n## Stage II: Modification Planning\n";
     }
 
-    public String stageThreeDescription(String filename) {
+    public String stageThreeDescription() {
         return this == CN
-                ? "\n# === 阶段 III：具体文件修改 " + filename + " ===\n"
-                : "\n# === Stage III: Concrete File Modification " + filename + " ===\n";
+                ? "\n## 阶段 III：具体文件修改\n"
+                : "\n## Stage III: Concrete File Modification\n";
+    }
+
+    public String stageThreeFileDescription(String filename) {
+        return this == CN
+                ? "\n#### 文件：`" + filename + "`\n"
+                : "\n#### File: `" + filename + "`\n";
+    }
+
+    public String fileAlreadyCurrentDescription(String filename) {
+        return this == CN
+                ? "\n> `" + filename + "` 已符合目标状态，本文件无需修改。\n"
+                : "\n> `" + filename + "` already matches the target state; no changes are required.\n";
     }
 
     public String pipelineCompleteDescription() {
         return this == CN
-                ? "\n# === 流程已完成！ ===\n"
-                : "\n# === Pipeline complete! ===\n";
+                ? "\n> 流程已完成。\n"
+                : "\n> Pipeline complete.\n";
     }
 
     public String pipelineErrorDescription() {

@@ -7,6 +7,7 @@ jest.mock("./FocusGraphStageModal/FocusGraphStageModal", () => () => null);
 
 import {
     activeRunStorageKey,
+    candidateIdentifiersForConfirmAll,
     candidateNodeTypeForDraft,
     FeatureListItem,
     resolveActiveRunIdForRepository,
@@ -41,6 +42,20 @@ describe("FeatureListItem", () => {
         expect(candidateNodeTypeForDraft(candidate, "class Demo { int value; }\n")).toBe("Modify");
         expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int value; }\n")).toBe("Staged");
         expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int changedAgain; }\n")).toBe("Modify");
+    });
+
+    test("collects modified graph nodes before path fallbacks for confirm-all", () => {
+        expect(candidateIdentifiersForConfirmAll({
+            nodes: [
+                {id: "demo.First", type: "Modify"},
+                {id: "demo.Second", type: "Staged"},
+                {id: "demo.Third", type: "Default"},
+            ],
+        }, ["src/demo/First.java", "resources/app.yml", "resources/app.yml"])).toEqual([
+            "demo.First",
+            "src/demo/First.java",
+            "resources/app.yml",
+        ]);
     });
 
     test("keeps the complete editor visible in the minimal compressed layout", () => {
