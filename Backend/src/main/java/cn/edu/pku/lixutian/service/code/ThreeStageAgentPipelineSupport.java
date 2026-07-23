@@ -12,7 +12,6 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,14 +41,14 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             contextLimit("JAVA_AGENT_MAX_REFERENCE_CONTEXT_CHARS", 0)
     );
     private static final int MAX_PRIOR_GENERATION_CHARS = 80_000;
-    private static final int MAX_AGENT3_RETRIES = 5;
+    private static final int MAX_AGENT_RETRIES = 5;
     private static final int MAX_RETRY_RESPONSE_CHARS = 20_000;
     private static final long PIPELINE_TIMEOUT_MILLIS = TimeUnit.MINUTES.toMillis(30);
-    private static final long PYTHON_SYNTAX_TIMEOUT_SECONDS = 20;
     private static final String PROTECTED_SYMBOL_MARKER = "PROTECTED_SYMBOL:";
     private static final String ALLOWED_DELETE_FILE_MARKER = "ALLOWED_DELETE_FILE:";
     private static final String FEATURE_SYMBOL_MARKER = "FEATURE_SYMBOL:";
     private static final String NO_CHANGES_REQUIRED = "NO_CHANGES_REQUIRED";
+    private static final String SKIP_FILE_SAFELY = "SKIP_FILE_SAFELY";
     private static final int MAX_LIVE_REFERENCE_FILES = 24;
     private static final long MAX_LIVE_REFERENCE_FILE_BYTES = 2L * 1024 * 1024;
 
@@ -74,7 +73,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         List<ModifiedFile> modifiedFileList = new ArrayList<>();
     }
 
-    private record Agent3Result(String content, boolean noChangesRequired) {
+    private record Agent3Result(String content, boolean noChangesRequired, boolean skippedForSafety) {
     }
 
     protected SseEmitter runThreeStagePipeline(
@@ -193,6 +192,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 }
             }
 
+            Set<String> protectedSymbols = markedValues(context.relatedCodes(), PROTECTED_SYMBOL_MARKER);
+            Set<String> allowedDeleteFiles = markedValues(context.relatedCodes(), ALLOWED_DELETE_FILE_MARKER).stream()
+                    .map(ProjectFilePath::normalize)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
             sendStatus(eventSink, context.language().stageTwoDescription());
             String agent2Prompt = buildAgent2Prompt(
                     context,
@@ -209,7 +212,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     model,
                     context.projectRoot(),
                     context.language(),
-                    operation
+                    operation,
+                    projectLanguage,
+                    allowedDeleteFiles,
+                    protectedSymbols
             );
             if (agent2.modifiedFileList.isEmpty()) {
                 throw new IllegalStateException(
@@ -226,10 +232,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             );
             StringBuilder priorGenerations = new StringBuilder();
             Map<String, String> modifications = new LinkedHashMap<>();
-            Set<String> protectedSymbols = markedValues(context.relatedCodes(), PROTECTED_SYMBOL_MARKER);
-            Set<String> allowedDeleteFiles = markedValues(context.relatedCodes(), ALLOWED_DELETE_FILE_MARKER).stream()
-                    .map(ProjectFilePath::normalize)
-                    .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+            boolean enforceWholeFileDeleteAllowlist = operation.isDeletion()
+                    && "Python".equalsIgnoreCase(projectLanguage);
 
             sendStatus(eventSink, context.language().stageThreeDescription());
             for (ModifiedFile file : agent2.modifiedFileList) {
@@ -242,7 +246,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     );
                 }
                 if ("delete".equals(file.action)) {
-                    if (operation.isDeletion() && !allowedDeleteFiles.contains(file.filename)) {
+                    if (enforceWholeFileDeleteAllowlist && !allowedDeleteFiles.contains(file.filename)) {
                         throw new IllegalArgumentException(
                                 "Delete Agent cannot delete a whole file outside the deterministic deletion boundary: "
                                         + file.filename
@@ -293,6 +297,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     sendStatus(eventSink, context.language().fileAlreadyCurrentDescription(file.filename));
                     continue;
                 }
+                if (generated.skippedForSafety()) {
+                    sendStatus(eventSink, context.language().fileSkippedForSafetyDescription(file.filename));
+                    continue;
+                }
                 String generatedContent = generated.content();
                 modifications.put(file.filename, generatedContent);
                 priorGenerations.append("\nFILE: ").append(file.filename).append("\n")
@@ -341,24 +349,44 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             Set<String> existingFiles,
             AgentLanguage language
     ) throws IOException {
-        String response = generateAgentResponse(context, stage, prompt, withoutDeltas(eventSink), model);
-        try {
-            Agent1ParsedResult parsed = parseAndValidateAgent1(response, existingFiles);
-            publishValidatedResponse(eventSink, response);
-            return parsed;
-        } catch (RuntimeException exception) {
-            sendStatus(eventSink, retryMessage(language, "Agent1", exception));
-            String retried = generateAgentResponse(
-                    context,
-                    stage + "-repair",
-                    repairPrompt(prompt, "Agent1", exception),
-                    withoutDeltas(eventSink),
-                    model
-            );
-            Agent1ParsedResult parsed = parseAndValidateAgent1(retried, existingFiles);
-            publishValidatedResponse(eventSink, retried);
-            return parsed;
+        Exception lastFailure = null;
+        for (int attempt = 0; attempt <= MAX_AGENT_RETRIES; attempt++) {
+            ensureNotInterrupted();
+            if (attempt > 0) {
+                sendStatus(eventSink, retryMessage(language, "Agent1", attempt));
+            }
+            try {
+                String response = generateAgentResponse(
+                        context,
+                        attempt == 0 ? stage : stage + "-repair-" + attempt,
+                        attempt == 0 ? prompt : repairPrompt(prompt, "Agent1", lastFailure),
+                        withoutDeltas(eventSink),
+                        model
+                );
+                Agent1ParsedResult parsed = parseAndValidateAgent1(response, existingFiles);
+                publishValidatedResponse(eventSink, response);
+                return parsed;
+            } catch (IOException | RuntimeException exception) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IOException("Agent1 was cancelled.", exception);
+                }
+                lastFailure = exception;
+                logger.warn(
+                        "Agent1 failed on attempt {}/{}: {}",
+                        attempt + 1,
+                        MAX_AGENT_RETRIES + 1,
+                        safeFailureMessage(exception)
+                );
+                if (attempt == MAX_AGENT_RETRIES) {
+                    throw new IOException(
+                            "Agent1 failed after " + (MAX_AGENT_RETRIES + 1)
+                                    + " attempts: " + safeFailureMessage(exception),
+                            exception
+                    );
+                }
+            }
         }
+        throw new IOException("Agent1 failed after all retry attempts.", lastFailure);
     }
 
     private Agent2ParsedResult requestAndParseAgent2(
@@ -369,30 +397,58 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String model,
             String sourceRoot,
             AgentLanguage language,
-            AgentOperation operation
+            AgentOperation operation,
+            String projectLanguage,
+            Set<String> allowedDeleteFiles,
+            Set<String> protectedSymbols
     ) throws IOException {
-        String response = generateAgentResponse(context, stage, prompt, withoutDeltas(eventSink), model);
-        try {
-            Agent2ParsedResult parsed = requirePlannedFiles(
-                    parseAndValidateAgent2(response, sourceRoot, operation)
-            );
-            publishValidatedResponse(eventSink, response);
-            return parsed;
-        } catch (RuntimeException exception) {
-            sendStatus(eventSink, retryMessage(language, "Agent2", exception));
-            String retried = generateAgentResponse(
-                    context,
-                    stage + "-repair",
-                    repairPrompt(prompt, "Agent2", exception),
-                    withoutDeltas(eventSink),
-                    model
-            );
-            Agent2ParsedResult parsed = requirePlannedFiles(
-                    parseAndValidateAgent2(retried, sourceRoot, operation)
-            );
-            publishValidatedResponse(eventSink, retried);
-            return parsed;
+        Exception lastFailure = null;
+        for (int attempt = 0; attempt <= MAX_AGENT_RETRIES; attempt++) {
+            ensureNotInterrupted();
+            if (attempt > 0) {
+                sendStatus(eventSink, retryMessage(language, "Agent2", attempt));
+            }
+            try {
+                String response = generateAgentResponse(
+                        context,
+                        attempt == 0 ? stage : stage + "-repair-" + attempt,
+                        attempt == 0 ? prompt : agent2RepairPrompt(prompt, lastFailure),
+                        withoutDeltas(eventSink),
+                        model
+                );
+                Agent2ParsedResult parsed = requirePlannedFiles(
+                        parseAndValidateAgent2(
+                                response,
+                                sourceRoot,
+                                operation,
+                                projectLanguage,
+                                allowedDeleteFiles,
+                                protectedSymbols
+                        )
+                );
+                publishValidatedResponse(eventSink, response);
+                return parsed;
+            } catch (IOException | RuntimeException exception) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IOException("Agent2 was cancelled.", exception);
+                }
+                lastFailure = exception;
+                logger.warn(
+                        "Agent2 failed on attempt {}/{}: {}",
+                        attempt + 1,
+                        MAX_AGENT_RETRIES + 1,
+                        safeFailureMessage(exception)
+                );
+                if (attempt == MAX_AGENT_RETRIES) {
+                    throw new IOException(
+                            "Agent2 failed after " + (MAX_AGENT_RETRIES + 1)
+                                    + " attempts: " + safeFailureMessage(exception),
+                            exception
+                    );
+                }
+            }
         }
+        throw new IOException("Agent2 failed after all retry attempts.", lastFailure);
     }
 
     private Agent2ParsedResult requirePlannedFiles(Agent2ParsedResult result) {
@@ -441,7 +497,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     ) throws IOException {
         Exception lastFailure = null;
         String previousResponse = "";
-        for (int attempt = 0; attempt <= MAX_AGENT3_RETRIES; attempt++) {
+        for (int attempt = 0; attempt <= MAX_AGENT_RETRIES; attempt++) {
             ensureNotInterrupted();
             String attemptPrompt = attempt == 0
                     ? prompt
@@ -461,7 +517,15 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                                 model
                         );
                 if (isNoChangesRequired(previousResponse)) {
-                    return new Agent3Result(originalContent, true);
+                    return new Agent3Result(originalContent, true, false);
+                }
+                if (isSkipFileSafely(previousResponse)) {
+                    if (!isSafetyBoundaryFailure(lastFailure)) {
+                        throw new IllegalArgumentException(
+                                SKIP_FILE_SAFELY + " is only allowed after this file triggered a safety boundary."
+                        );
+                    }
+                    return new Agent3Result(originalContent, false, true);
                 }
                 String generatedContent = applyAgent3Result(
                         previousResponse,
@@ -476,7 +540,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 if (context != null) {
                     publishValidatedResponse(eventSink, previousResponse);
                 }
-                return new Agent3Result(generatedContent, false);
+                return new Agent3Result(generatedContent, false, false);
             } catch (IOException | RuntimeException exception) {
                 if (Thread.currentThread().isInterrupted()) {
                     throw new IOException("Agent pipeline was cancelled.", exception);
@@ -486,12 +550,12 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         "Agent3 failed for {} on attempt {}/{}: {}",
                         filename,
                         attempt + 1,
-                        MAX_AGENT3_RETRIES + 1,
+                        MAX_AGENT_RETRIES + 1,
                         safeFailureMessage(exception)
                 );
-                if (attempt == MAX_AGENT3_RETRIES) {
+                if (attempt == MAX_AGENT_RETRIES) {
                     throw new IOException(
-                            "Agent3 failed for " + filename + " after " + (MAX_AGENT3_RETRIES + 1)
+                            "Agent3 failed for " + filename + " after " + (MAX_AGENT_RETRIES + 1)
                                     + " attempts: " + safeFailureMessage(exception),
                             exception
                     );
@@ -518,6 +582,23 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
     private boolean isNoChangesRequired(String response) {
         return response != null && NO_CHANGES_REQUIRED.equals(response.trim());
+    }
+
+    private boolean isSkipFileSafely(String response) {
+        return response != null && SKIP_FILE_SAFELY.equals(response.trim());
+    }
+
+    private boolean isSafetyBoundaryFailure(Exception failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && (message.contains("protected shared symbol")
+                    || message.contains("deterministic deletion boundary"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private Agent1ParsedResult parseAndValidateAgent1(String response, Set<String> existingFiles) {
@@ -559,10 +640,13 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private Agent2ParsedResult parseAndValidateAgent2(
             String response,
             String sourceRoot,
-            AgentOperation operation
+            AgentOperation operation,
+            String projectLanguage,
+            Set<String> allowedDeleteFiles,
+            Set<String> protectedSymbols
     ) {
-        JsonNode root = readJsonObject(response);
-        JsonNode filesNode = root.get("modifiedFileList");
+        JsonNode root = readAgent2Json(response);
+        JsonNode filesNode = root.isArray() ? root : root.get("modifiedFileList");
         if (filesNode == null || !filesNode.isArray()) {
             throw new IllegalArgumentException("Agent2 must return a modifiedFileList array.");
         }
@@ -588,6 +672,24 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 throw new IllegalArgumentException(
                         "The plan references a file that does not exist in the current project: " + filename
                 );
+            }
+            if (operation.isDeletion() && "delete".equals(file.action)) {
+                boolean enforceWholeFileDeleteAllowlist = "Python".equalsIgnoreCase(projectLanguage);
+                if (enforceWholeFileDeleteAllowlist && !allowedDeleteFiles.contains(filename)) {
+                    throw new IllegalArgumentException(
+                            "Delete Agent cannot delete a whole file outside the deterministic deletion boundary: "
+                                    + filename
+                    );
+                }
+                try {
+                    String originalContent = ListFileHelper.getProjectFileContent(sourceRoot, filename);
+                    validateProtectedSymbols(filename, originalContent, "", protectedSymbols);
+                } catch (IOException exception) {
+                    throw new IllegalArgumentException(
+                            "Agent2 could not inspect the planned deleted file: " + filename,
+                            exception
+                    );
+                }
             }
             file.plan = requiredText(fileNode, "plan", "Agent2");
             file.note = optionalText(fileNode, "note");
@@ -685,40 +787,90 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     }
 
     private void validatePythonSyntax(String filename, String content) {
-        String pythonExec = environmentOrDefault("REPOSUMMARY_PYTHON", "python3");
-        Process process = null;
+        // Spring always injects the shared HTTP client. The small fallback keeps direct, unmanaged
+        // service instances used by unit tests from opening a subprocess or requiring a live server.
+        if (repoSummaryHttpClient == null) {
+            validateBasicPythonSyntax(content);
+            return;
+        }
         try {
-            process = new ProcessBuilder(
-                    pythonExec,
-                    "-c",
-                    "import ast,sys; ast.parse(sys.stdin.read(), filename=sys.argv[1])",
-                    filename
-            ).start();
-            try (OutputStream stdin = process.getOutputStream()) {
-                stdin.write(content.getBytes(StandardCharsets.UTF_8));
-            }
-            if (!process.waitFor(PYTHON_SYNTAX_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
-                throw new IllegalArgumentException("Python syntax validation timed out.");
-            }
-            if (process.exitValue() != 0) {
-                String error = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
-                throw new IllegalArgumentException(
-                        "Generated Python syntax is invalid"
-                                + (error.isBlank() ? "." : ": " + boundedError(error))
-                );
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            if (process != null) {
-                process.destroyForcibly();
-            }
-            throw new IllegalArgumentException("Python syntax validation was interrupted.", exception);
+            var request = objectMapper.createObjectNode();
+            request.put("filename", filename);
+            request.put("content", content);
+            repoSummaryHttpClient.postJson("/v1/python/validate", request, 20);
         } catch (IOException exception) {
             throw new IllegalArgumentException(
-                    "Unable to run Python syntax validation with " + pythonExec + ".",
+                    "Generated Python syntax is invalid or the RepoSummary validation service is unavailable: "
+                            + boundedError(exception.getMessage() == null ? exception.toString() : exception.getMessage()),
                     exception
             );
+        }
+    }
+
+    private void validateBasicPythonSyntax(String content) {
+        int parentheses = 0;
+        int brackets = 0;
+        int braces = 0;
+        for (String rawLine : content.split("\\R", -1)) {
+            String line = rawLine.strip();
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            String header = line.startsWith("async ") ? line.substring("async ".length()).stripLeading() : line;
+            if ((header.startsWith("def ")
+                    || header.startsWith("class ")
+                    || header.startsWith("if ")
+                    || header.startsWith("elif ")
+                    || header.equals("else")
+                    || header.startsWith("for ")
+                    || header.startsWith("while ")
+                    || header.equals("try")
+                    || header.startsWith("except")
+                    || header.equals("finally")
+                    || header.startsWith("with ")
+                    || header.startsWith("match ")
+                    || header.startsWith("case "))
+                    && !header.endsWith(":")) {
+                throw new IllegalArgumentException("Generated Python syntax is invalid: block header must end with ':'.");
+            }
+            boolean singleQuoted = false;
+            boolean doubleQuoted = false;
+            boolean escaped = false;
+            for (int index = 0; index < rawLine.length(); index++) {
+                char character = rawLine.charAt(index);
+                if (escaped) {
+                    escaped = false;
+                    continue;
+                }
+                if (character == '\\') {
+                    escaped = true;
+                    continue;
+                }
+                if (character == '\'' && !doubleQuoted) {
+                    singleQuoted = !singleQuoted;
+                    continue;
+                }
+                if (character == '"' && !singleQuoted) {
+                    doubleQuoted = !doubleQuoted;
+                    continue;
+                }
+                if (singleQuoted || doubleQuoted || character == '#') {
+                    if (character == '#') break;
+                    continue;
+                }
+                if (character == '(') parentheses++;
+                if (character == ')') parentheses--;
+                if (character == '[') brackets++;
+                if (character == ']') brackets--;
+                if (character == '{') braces++;
+                if (character == '}') braces--;
+                if (parentheses < 0 || brackets < 0 || braces < 0) {
+                    throw new IllegalArgumentException("Generated Python syntax is invalid: unmatched delimiter.");
+                }
+            }
+        }
+        if (parentheses != 0 || brackets != 0 || braces != 0) {
+            throw new IllegalArgumentException("Generated Python syntax is invalid: unmatched delimiter.");
         }
     }
 
@@ -922,16 +1074,20 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentOperation operation,
             String liveSourceVerification
     ) {
+        String wholeFileDeleteRule = "Python".equalsIgnoreCase(projectLanguage)
+                ? "Use action=delete for a whole file only when the context explicitly lists that path as "
+                        + "ALLOWED_DELETE_FILE and the file is dedicated to this feature."
+                : "For Java, use action=delete when an existing file is dedicated to this feature and should be "
+                        + "removed completely. FeatX will still enforce project-path and protected-symbol safety.";
         String deleteConstraints = operation.isDeletion() ? """
 
                 This is a feature deletion. Preserve unrelated behavior and every protected shared symbol listed
-                in the supplied context. Prefer minimal rewrites. Use action=delete for a whole file only when the
-                context explicitly lists that path as ALLOWED_DELETE_FILE and the file is dedicated to this feature.
+                in the supplied context. Prefer minimal rewrites. %s
                 Do not create files during deletion. Every planned file must exist in the supplied project list and
                 current source tree. Never include hypothetical or optional mapping files. A symbol marked MISSING by
                 live source verification is already absent and does not need another edit. Include current
                 LIVE_REFERENCE_FILE call sites when their references become invalid.
-                """ : "";
+                """.formatted(wholeFileDeleteRule) : "";
         return """
                 You are Agent2 for a %s project. Produce a complete, internally consistent file-level plan for this %s.
 
@@ -1193,6 +1349,32 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         }
     }
 
+    private JsonNode readAgent2Json(String response) {
+        if (response == null || response.isBlank()) {
+            throw new IllegalArgumentException("Agent returned an empty response.");
+        }
+        String trimmed = response.trim();
+        int objectStart = trimmed.indexOf('{');
+        int arrayStart = trimmed.indexOf('[');
+        boolean arrayFirst = arrayStart >= 0 && (objectStart < 0 || arrayStart < objectStart);
+        if (!arrayFirst) {
+            return readJsonObject(response);
+        }
+        int arrayEnd = trimmed.lastIndexOf(']');
+        if (arrayEnd <= arrayStart) {
+            throw new IllegalArgumentException("Agent response does not contain a complete JSON array.");
+        }
+        try {
+            JsonNode root = objectMapper.readTree(trimmed.substring(arrayStart, arrayEnd + 1));
+            if (root == null || !root.isArray()) {
+                throw new IllegalArgumentException("Agent2 response must be a JSON object or array.");
+            }
+            return root;
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Agent returned malformed JSON.", exception);
+        }
+    }
+
     private String extractJsonObject(String response) {
         if (response == null || response.isBlank()) {
             throw new IllegalArgumentException("Agent returned an empty response.");
@@ -1230,17 +1412,31 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 + "\nTry once more and follow the output schema exactly.";
     }
 
+    private String agent2RepairPrompt(String originalPrompt, Exception failure) {
+        return repairPrompt(originalPrompt, "Agent2", failure)
+                + "\nReturn exactly one JSON object whose only top-level field is modifiedFileList. "
+                + "Escape every double quote inside filename, plan, and note string values with a backslash. "
+                + "Do not return a bare array, prose, comments, or Markdown fences.";
+    }
+
     private String buildAgent3RetryPrompt(
             String originalPrompt,
             int retryNumber,
             Exception failure,
             String previousResponse
     ) {
-        return originalPrompt + "\n\nRetry " + retryNumber + " of " + MAX_AGENT3_RETRIES + ".\n"
+        String safetyStopOption = isSafetyBoundaryFailure(failure)
+                ? "\nThis file crossed a safety boundary. First try a narrower patch that preserves the protected "
+                        + "code. If this file cannot be changed safely, return exactly " + SKIP_FILE_SAFELY
+                        + " and nothing else. FeatX will leave only this file unchanged and continue with the next "
+                        + "planned file. Do not use " + NO_CHANGES_REQUIRED + " for a safety conflict.\n"
+                : "";
+        return originalPrompt + "\n\nRetry " + retryNumber + " of " + MAX_AGENT_RETRIES + ".\n"
                 + "The previous attempt failed for this exact reason:\n"
                 + safeFailureMessage(failure) + "\n\n"
                 + "Previous response:\n"
                 + boundedPromptSection(previousResponse, MAX_RETRY_RESPONSE_CHARS) + "\n\n"
+                + safetyStopOption
                 + "Generate a fresh protocol response against the ORIGINAL target content. Do not apply edits "
                 + "to the previous response. Every REPLACE must differ from SEARCH, and the resulting file must "
                 + "differ from the original. If the requested target state is already present, return exactly "
@@ -1255,15 +1451,17 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     ) {
         return language == AgentLanguage.CN
                 ? "\n> `" + filename + "` 的补丁未能安全应用，正在重新生成（"
-                        + retryNumber + "/" + MAX_AGENT3_RETRIES + "）。\n"
+                        + retryNumber + "/" + MAX_AGENT_RETRIES + "）。\n"
                 : "\n> The patch for `" + filename + "` could not be applied safely; regenerating ("
-                        + retryNumber + "/" + MAX_AGENT3_RETRIES + ").\n";
+                        + retryNumber + "/" + MAX_AGENT_RETRIES + ").\n";
     }
 
-    private String retryMessage(AgentLanguage language, String agent, Exception exception) {
+    private String retryMessage(AgentLanguage language, String agent, int retryNumber) {
         return language == AgentLanguage.CN
-                ? "\n> " + agent + " 输出未通过校验，正在重新生成。\n"
-                : "\n> " + agent + " output did not pass validation; regenerating.\n";
+                ? "\n> " + agent + " 执行失败，正在进行第 " + retryNumber + "/"
+                        + MAX_AGENT_RETRIES + " 次重试。\n"
+                : "\n> " + agent + " failed; retrying (" + retryNumber + "/"
+                        + MAX_AGENT_RETRIES + ").\n";
     }
 
     private String userFacingFailureMessage(AgentLanguage language, Exception exception) {
@@ -1281,6 +1479,20 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             return chinese
                     ? "删除方案试图移除其他功能仍在使用的共享代码。本次操作已停止，仓库和数据库均未修改。"
                     : "The deletion plan attempted to remove a protected shared symbol. The operation stopped "
+                            + "without changing the repository or database.";
+        }
+        if (detail.contains("deterministic deletion boundary")) {
+            return chinese
+                    ? "Python 删除方案试图删除不在确定性 AST 边界内的整个文件。"
+                            + "本次操作已停止，仓库和数据库均未修改。"
+                    : "The Python deletion plan attempted to delete a whole file outside the deterministic AST "
+                            + "boundary. The operation stopped without changing the repository or database.";
+        }
+        if (detail.contains("Agent2") || detail.contains("malformed JSON")) {
+            return chinese
+                    ? "阶段 II 的文件修改计划格式无法解析，自动修复后仍未通过校验。"
+                            + "本次操作已停止，仓库和数据库均未修改。"
+                    : "The Stage II file plan could not be parsed after automatic repair. The operation stopped "
                             + "without changing the repository or database.";
         }
         if (detail.contains("Agent3 failed for")) {
@@ -1310,11 +1522,6 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         if (Thread.currentThread().isInterrupted()) {
             throw new IOException("Agent pipeline was cancelled.");
         }
-    }
-
-    private String environmentOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
     private static int contextLimit(String name, int defaultValue) {

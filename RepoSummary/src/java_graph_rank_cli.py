@@ -1,8 +1,10 @@
 import json
 import os
 import sys
+import threading
+from contextlib import contextmanager
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 try:
     from .focusgraph_cli import _score_graph_code_contexts, _score_texts_with_embedding
@@ -11,6 +13,7 @@ except ImportError:
 
 
 PROGRESS_PREFIX = "__FOCUSGRAPH_PROGRESS__"
+_PROGRESS_CONTEXT = threading.local()
 METHOD_CATEGORIES = {"Method", "Constructor", "Initializer"}
 CLASS_CATEGORIES = {"Class", "Interface"}
 TYPE_CATEGORIES = {"Enum", "Annotation"}
@@ -25,7 +28,20 @@ def _progress(stage: str, message: str, step: int, **details: Any) -> None:
         "total": 8,
         **details,
     }
+    callback = getattr(_PROGRESS_CONTEXT, "callback", None)
+    if callback is not None:
+        callback(payload)
     print(f"{PROGRESS_PREFIX}{json.dumps(payload, ensure_ascii=False)}", file=sys.stderr, flush=True)
+
+
+@contextmanager
+def progress_callback(callback: Callable[[dict[str, Any]], None] | None) -> Iterator[None]:
+    previous = getattr(_PROGRESS_CONTEXT, "callback", None)
+    _PROGRESS_CONTEXT.callback = callback
+    try:
+        yield
+    finally:
+        _PROGRESS_CONTEXT.callback = previous
 
 
 def _read_request() -> dict[str, Any]:
@@ -62,6 +78,9 @@ def retrieve_features(
             documents,
             env_name="FOCUSGRAPH_FEATURE_EMBEDDING_MODEL",
             default_model_name="all-MiniLM-L6-v2",
+            repo_id=request.get("repoId"),
+            entity_ids=[str(feature.get("featureId") or "") for feature in features],
+            entity_kind="feature",
         )
     scores = score_fn(query, _feature_documents(features)) if features else []
     ranked = sorted(
@@ -219,8 +238,15 @@ def rank_graph(
         expandedEdgeCount=len(edges),
     )
     if score_fn is None:
-        score_fn = _score_graph_code_contexts
-    similarities = score_fn(query, [str(node_by_id[node_id].get("text") or "") for node_id in node_ids])
+        similarities = _score_graph_code_contexts(
+            query,
+            [str(node_by_id[node_id].get("text") or "") for node_id in node_ids],
+            repo_id=request.get("repoId"),
+            entity_ids=node_ids,
+            source_paths=[str(node_by_id[node_id].get("funcFile") or "") for node_id in node_ids],
+        )
+    else:
+        similarities = score_fn(query, [str(node_by_id[node_id].get("text") or "") for node_id in node_ids])
     similarity_by_id = {
         node_id: max(0.0, float(score))
         for node_id, score in zip(node_ids, similarities)

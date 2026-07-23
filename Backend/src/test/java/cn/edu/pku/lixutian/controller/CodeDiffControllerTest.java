@@ -1,6 +1,7 @@
 package cn.edu.pku.lixutian.controller;
 
 import cn.edu.pku.lixutian.config.ProjectState;
+import cn.edu.pku.lixutian.dto.result.CodeFileDiffResult;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.RepositoryGitService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
@@ -14,9 +15,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -62,6 +66,29 @@ class CodeDiffControllerTest {
 
         mockMvc.perform(get("/code/repositoryDiff"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void candidateDiffAcceptsGraphNodeWithProjectSourcePrefix(@TempDir Path projectPath) throws Exception {
+        String candidatePath = "src/main/java/top/naccl/util/MailUtils.java";
+        Path sourceFile = projectPath.resolve(candidatePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package top.naccl.util; class MailUtils {}\n");
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+
+        CodeFileDiffResult candidate = new CodeFileDiffResult();
+        candidate.setKey(candidatePath);
+        candidate.setPath(candidatePath);
+        when(candidateCodeService.existingCandidate(candidatePath)).thenReturn(Optional.of(candidate));
+
+        mockMvc.perform(get("/code/candidateDiff")
+                        .param("classId", "src.main.java.top.naccl.util.MailUtils")
+                        .param("operation", "edit")
+                        .param("runId", "run-1"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(candidatePath)));
+
+        verify(candidateCodeService).existingCandidate(candidatePath);
     }
 
     private void runGit(Path workingDirectory, String... arguments) throws IOException, InterruptedException {

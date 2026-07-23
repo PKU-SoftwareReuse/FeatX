@@ -45,11 +45,23 @@ def extract_file(src_root: Path, relative_file: str) -> list[dict[str, str]]:
 
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            rows.append({"file": clean_relative, "signature": _signature(module, None, node)})
+            rows.append(
+                {
+                    "file": clean_relative,
+                    "signature": _signature(module, None, node),
+                    "text": ast.get_source_segment(source, node) or ast.unparse(node),
+                }
+            )
         elif isinstance(node, ast.ClassDef):
             for child in node.body:
                 if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    rows.append({"file": clean_relative, "signature": _signature(module, node.name, child)})
+                    rows.append(
+                        {
+                            "file": clean_relative,
+                            "signature": _signature(module, node.name, child),
+                            "text": ast.get_source_segment(source, child) or ast.unparse(child),
+                        }
+                    )
     return rows
 
 

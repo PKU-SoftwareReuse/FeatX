@@ -83,6 +83,29 @@ export const candidateNodeTypeForDraft = (candidateFile, draft) => {
     return (draft ?? "") === originalContent ? "Default" : "Modify";
 };
 
+export const candidateIdentifierForNode = (nodeId, candidatePaths = []) => {
+    const normalizedNodeId = String(nodeId || '').trim();
+    if (!normalizedNodeId) return normalizedNodeId;
+
+    const candidates = candidatePaths
+        .map((path) => String(path || '').trim().replace(/\\/g, '/'))
+        .filter(Boolean)
+        .map((path) => ({
+            path,
+            nodeId: path.endsWith('.java')
+                ? path.slice(0, -'.java'.length).replaceAll('/', '.')
+                : path,
+        }));
+    const exactMatch = candidates.find((candidate) => candidate.nodeId === normalizedNodeId);
+    if (exactMatch) return exactMatch.path;
+
+    const suffixMatches = candidates.filter((candidate) => (
+        candidate.nodeId.endsWith(`.${normalizedNodeId}`)
+        || normalizedNodeId.endsWith(`.${candidate.nodeId}`)
+    ));
+    return suffixMatches.length === 1 ? suffixMatches[0].path : normalizedNodeId;
+};
+
 export const candidateIdentifiersForConfirmAll = (graphData, unstagedCandidatePaths = []) => {
     const graphCandidateIds = Array.isArray(graphData?.nodes)
         ? graphData.nodes
@@ -1069,8 +1092,12 @@ const DebloatingPage = () => {
         const candidateReady = shouldShowCandidateDiff(confirmEnabled, selectedType, codeNode);
 
         if (candidateReady) {
+            const candidateIdentifier = candidateIdentifierForNode(
+                classNodeId,
+                gitStatus.candidatePaths
+            );
             const candidateRequest = codeNode?.type === "Modify" || codeNode?.type === "Staged"
-                ? API.getCandidateDiff(classNodeId, selectedType, activeRunId)
+                ? API.getCandidateDiff(candidateIdentifier, selectedType, activeRunId)
                 : API.getManualCandidate(classNodeId, selectedType, activeRunId);
             candidateRequest
                 .then((data) => {

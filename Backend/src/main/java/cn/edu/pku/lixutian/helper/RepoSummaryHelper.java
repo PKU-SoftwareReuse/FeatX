@@ -1,9 +1,11 @@
 package cn.edu.pku.lixutian.helper;
 
 import cn.edu.pku.lixutian.dto.result.RepoSummaryProgressResult;
+import cn.edu.pku.lixutian.service.RepoSummaryHttpClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.io.*;
-import java.nio.charset.Charset;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +15,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class RepoSummaryHelper {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final RepoSummaryHttpClient HTTP_CLIENT = new RepoSummaryHttpClient();
     private static final Map<Integer, ProgressState> PROGRESS_BY_REPO = new ConcurrentHashMap<>();
     private static final List<StepDefinition> STEP_DEFINITIONS = List.of(
             new StepDefinition("start", "Starting RepoSummary"),
@@ -31,59 +35,57 @@ public class RepoSummaryHelper {
     private static final Pattern JAVA_CLUSTER_FILES_PATTERN = Pattern.compile("Cluster ID: (\\d+), (\\d+) Files: \\[.*]");
 
     public static void runRepoSummary(Integer repoId) throws IOException {
-        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
-
-        String defaultPythonExec = isWindows ? "python" : "python3";
-        String pythonExec = getEnvOrDefault("REPOSUMMARY_PYTHON", defaultPythonExec);
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
-
-        ProcessBuilder processBuilder = new ProcessBuilder(
-                pythonExec,
-                "-m", "src.main",
-                repoId.toString()
-        );
-
-        processBuilder.directory(new File(repoSummaryDir));
-        applyProxy(processBuilder);
-
-        processBuilder.redirectErrorStream(true);
-
-        Process process = processBuilder.start();
         ProgressState progressState = startProgress(repoId);
+        JsonNode request = OBJECT_MAPPER.createObjectNode().put("repoId", repoId);
+        JsonNode started;
+        try {
+            started = HTTP_CLIENT.postJson("/v1/reposummary/jobs", request, 30);
+        } catch (IOException exception) {
+            progressState.fail("Failed to start RepoSummary HTTP job: " + exception.getMessage());
+            throw exception;
+        }
+        String jobId = started.path("jobId").asText();
+        if (jobId.isBlank()) {
+            progressState.fail("RepoSummary HTTP service returned no job id.");
+            throw new IOException("RepoSummary HTTP service returned no job id.");
+        }
 
-        Charset charset = isWindows ? Charset.forName("GBK") : Charset.forName("UTF-8");
-
-        new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), charset))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println("[RepoSummary] " + line);
-                    progressState.handleLogLine(line);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-                progressState.fail("Failed to read RepoSummary output: " + e.getMessage());
-            }
-        }).start();
-
-        new Thread(() -> {
+        Thread watcher = new Thread(() -> {
+            int cursor = 0;
             try {
-                int exitCode = process.waitFor();
-                if (exitCode == 0) {
-                    progressState.complete();
-                } else {
-                    progressState.fail("RepoSummary exited with code " + exitCode + ".");
+                while (!Thread.currentThread().isInterrupted()) {
+                    JsonNode snapshot = HTTP_CLIENT.getJson(
+                            "/v1/reposummary/jobs/" + jobId + "?cursor=" + cursor,
+                            30
+                    );
+                    for (JsonNode logLine : snapshot.path("logs")) {
+                        String line = logLine.asText();
+                        System.out.println("[RepoSummary] " + line);
+                        progressState.handleLogLine(line);
+                    }
+                    cursor = snapshot.path("nextCursor").asInt(cursor);
+                    String status = snapshot.path("status").asText();
+                    if ("complete".equals(status)) {
+                        progressState.complete();
+                        return;
+                    }
+                    if ("failed".equals(status)) {
+                        progressState.fail(snapshot.path("error").asText("RepoSummary job failed."));
+                        return;
+                    }
+                    Thread.sleep(500L);
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 progressState.fail("RepoSummary progress watcher was interrupted.");
+            } catch (IOException | RuntimeException exception) {
+                progressState.fail("Failed to watch RepoSummary HTTP job: " + exception.getMessage());
             }
-        }).start();
+        }, "reposummary-job-" + repoId);
+        watcher.setDaemon(true);
+        watcher.start();
 
-        System.out.println("RepoSummary started (pid=" + process.pid()
-                + ", python=" + pythonExec
-                + ", cwd=" + repoSummaryDir + ")");
+        System.out.println("RepoSummary HTTP job started (repoId=" + repoId + ", jobId=" + jobId + ")");
     }
 
     public static RepoSummaryProgressResult getProgress(Integer repoId) {
@@ -403,28 +405,4 @@ public class RepoSummaryHelper {
         }
     }
 
-    private static String getEnvOrDefault(String key, String defaultValue) {
-        String value = System.getenv(key);
-        return value == null || value.isBlank() ? defaultValue : value;
-    }
-
-    private static void applyProxy(ProcessBuilder processBuilder) {
-        String proxyPort = System.getenv("GIT_PROXY_PORT");
-        if (proxyPort == null || proxyPort.isBlank()) {
-            return;
-        }
-
-        String proxyHost = System.getenv("GIT_PROXY_HOST");
-        if (proxyHost == null || proxyHost.isBlank()) {
-            proxyHost = "10.0.2.2";
-        }
-
-        String proxyUrl = "http://" + proxyHost.trim() + ":" + proxyPort.trim();
-        Map<String, String> environment = processBuilder.environment();
-        environment.put("http_proxy", proxyUrl);
-        environment.put("https_proxy", proxyUrl);
-        environment.put("HTTP_PROXY", proxyUrl);
-        environment.put("HTTPS_PROXY", proxyUrl);
-        environment.put("ALL_PROXY", proxyUrl);
-    }
 }

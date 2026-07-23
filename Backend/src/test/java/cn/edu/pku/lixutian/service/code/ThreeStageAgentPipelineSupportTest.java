@@ -393,6 +393,451 @@ class ThreeStageAgentPipelineSupportTest {
     }
 
     @Test
+    void agent3CanSkipOneUnsafeFileAndContinueWithRemainingFiles(@TempDir Path sourceRoot)
+            throws Exception {
+        Path packageRoot = sourceRoot.resolve("demo");
+        Files.createDirectories(packageRoot);
+        Files.writeString(packageRoot.resolve("A.java"),
+                "package demo;\nclass A { void owned() {} }\n");
+        Files.writeString(packageRoot.resolve("B.java"),
+                "package demo;\nclass B { void shared() {} void owned() {} }\n");
+        Files.writeString(packageRoot.resolve("C.java"),
+                "package demo;\nclass C { void owned() {} }\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(98);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete-skip-unsafe-file",
+                "Delete the selected feature",
+                "Selected feature",
+                "PROTECTED_SYMBOL: demo.B.shared()\n",
+                "demo/A.java\ndemo/B.java\ndemo/C.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                12,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[
+                          {"filename":"demo/A.java","action":"rewrite","plan":"Remove owned().","note":""},
+                          {"filename":"demo/B.java","action":"rewrite","plan":"Remove feature code.","note":"Preserve shared()."},
+                          {"filename":"demo/C.java","action":"rewrite","plan":"Remove owned().","note":""}
+                        ]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                         void owned() {}
+                        =======
+
+                        >>>>>>> REPLACE
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                         void shared() {}
+                        =======
+
+                        >>>>>>> REPLACE
+                        """))
+                .thenReturn(generation("SKIP_FILE_SAFELY"))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                         void owned() {}
+                        =======
+
+                        >>>>>>> REPLACE
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertTrue(registry.modifications(context.runId()).containsKey("demo/A.java"));
+        assertFalse(registry.modifications(context.runId()).containsKey("demo/B.java"));
+        assertTrue(registry.modifications(context.runId()).containsKey("demo/C.java"));
+        assertEquals("package demo;\nclass B { void shared() {} void owned() {} }\n",
+                Files.readString(packageRoot.resolve("B.java")));
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(6)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        assertTrue(prompts.getAllValues().get(4).contains("return exactly SKIP_FILE_SAFELY"));
+        assertTrue(prompts.getAllValues().get(5).contains("Target file: demo/C.java"));
+    }
+
+    @Test
+    void javaDeleteAcceptsAgentDirectedWholeFileDeletionWithoutAllowlist(@TempDir Path sourceRoot)
+            throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/DedicatedFeature.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class DedicatedFeature {}\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(97);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete-java-file",
+                "Delete the selected feature",
+                "Selected feature",
+                "FEATURE_SYMBOL: demo.DedicatedFeature\n",
+                "demo/DedicatedFeature.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                12,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"demo/DedicatedFeature.java",
+                          "action":"delete",
+                          "plan":"Delete the dedicated feature file.",
+                          "note":"The file belongs only to the selected feature."
+                        }]}
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertEquals(
+                AgentService.DELETE_FILE_SENTINEL,
+                registry.modifications(context.runId()).get("demo/DedicatedFeature.java")
+        );
+        assertTrue(Files.isRegularFile(sourceFile));
+    }
+
+    @Test
+    void javaDeleteStillRejectsWholeFileDeletionContainingProtectedSymbol(@TempDir Path sourceRoot)
+            throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/SharedFeature.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, """
+                package demo;
+                public class SharedFeature {
+                    void keep() {}
+                }
+                """);
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(99);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete-java-protected-file",
+                "Delete the selected feature",
+                "Selected feature",
+                "PROTECTED_SYMBOL: demo.SharedFeature.keep()\n",
+                "demo/SharedFeature.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                14,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"demo/SharedFeature.java",
+                          "action":"delete",
+                          "plan":"Delete the whole file.",
+                          "note":"Unsafe output containing a protected symbol."
+                        }]}
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitFailed(registry, context.runId());
+
+        assertTrue(registry.snapshot(context.runId()).failureMessage().contains("protected shared symbol"));
+        assertTrue(Files.isRegularFile(sourceFile));
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
+    @Test
+    void pythonDeleteStillRejectsWholeFileDeletionWithoutDeterministicAllowlist(@TempDir Path sourceRoot)
+            throws Exception {
+        Path sourceFile = sourceRoot.resolve("feature.py");
+        Files.writeString(sourceFile, "def feature():\n    return True\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "PYTHON");
+        project.setRepoId(98);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete-python-file",
+                "Delete the selected feature",
+                "Selected feature",
+                "FEATURE_SYMBOL: feature.feature()\n",
+                "feature.py",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                13,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"feature.py",
+                          "action":"delete",
+                          "plan":"Delete the whole module.",
+                          "note":"Unsafe output without a deterministic allowlist."
+                        }]}
+                        """));
+
+        PythonModifyAgentService service = new PythonModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runDeletePipeline(context.runId(), "model");
+        awaitFailed(registry, context.runId());
+
+        assertTrue(registry.snapshot(context.runId()).failureMessage().contains("deterministic AST boundary"));
+        assertTrue(Files.isRegularFile(sourceFile));
+        assertTrue(ProjectState.getInstance().getModifications().isEmpty());
+    }
+
+    @Test
+    void agent2RepairAcceptsValidatedBareFileArray(@TempDir Path sourceRoot) throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/DedicatedFeature.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class DedicatedFeature {}\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(100);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete-agent2-array-repair",
+                "Delete the selected feature",
+                "Selected feature",
+                "FEATURE_SYMBOL: demo.DedicatedFeature\n",
+                "demo/DedicatedFeature.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                15,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{"filename":"demo/DedicatedFeature.java","
+                        action":"delete","plan":"Delete the "quoted" feature file."}]}
+                        """))
+                .thenReturn(generation("""
+                        [{
+                          "filename":"demo/DedicatedFeature.java",
+                          "action":"delete",
+                          "plan":"Delete the dedicated feature file.",
+                          "note":"The repair returned a bare but otherwise valid array."
+                        }]
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertEquals(
+                AgentService.DELETE_FILE_SENTINEL,
+                registry.modifications(context.runId()).get("demo/DedicatedFeature.java")
+        );
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(3)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        assertTrue(prompts.getAllValues().get(2).contains("Escape every double quote"));
+        assertTrue(Files.isRegularFile(sourceFile));
+    }
+
+    @Test
+    void agent1CanRecoverOnItsFifthRetry(@TempDir Path sourceRoot) throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/Agent1Retry.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class Agent1Retry {}\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(101);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "agent1-fifth-retry",
+                "Delete the selected feature",
+                "Selected feature",
+                "FEATURE_SYMBOL: demo.Agent1Retry\n",
+                "demo/Agent1Retry.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                16,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenThrow(new RuntimeException("provider unavailable"))
+                .thenReturn(
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{\"needAdditionalFile\":false,\"additionalFileList\":[]}"),
+                        generation("""
+                                {"modifiedFileList":[{
+                                  "filename":"demo/Agent1Retry.java",
+                                  "action":"delete",
+                                  "plan":"Delete the dedicated file.",
+                                  "note":"Agent1 recovered on retry five."
+                                }]}
+                                """)
+                );
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertEquals(
+                AgentService.DELETE_FILE_SENTINEL,
+                registry.modifications(context.runId()).get("demo/Agent1Retry.java")
+        );
+        verify(llmClient, times(7)).streamGenerateWithPromptResult(
+                anyString(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+    }
+
+    @Test
+    void agent2CanRecoverOnItsFifthRetry(@TempDir Path sourceRoot) throws Exception {
+        Path sourceFile = sourceRoot.resolve("demo/Agent2Retry.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class Agent2Retry {}\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(sourceRoot.toString(), "JAVA");
+        project.setRepoId(102);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "agent2-fifth-retry",
+                "Delete the selected feature",
+                "Selected feature",
+                "FEATURE_SYMBOL: demo.Agent2Retry\n",
+                "demo/Agent2Retry.java",
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                17,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(
+                        generation("{\"needAdditionalFile\":false,\"additionalFileList\":[]}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("{}"),
+                        generation("""
+                                {"modifiedFileList":[{
+                                  "filename":"demo/Agent2Retry.java",
+                                  "action":"delete",
+                                  "plan":"Delete the dedicated file.",
+                                  "note":"Agent2 recovered on retry five."
+                                }]}
+                                """)
+                );
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        assertEquals(
+                AgentService.DELETE_FILE_SENTINEL,
+                registry.modifications(context.runId()).get("demo/Agent2Retry.java")
+        );
+        verify(llmClient, times(7)).streamGenerateWithPromptResult(
+                anyString(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+    }
+
+    @Test
     void deleteReplansMissingFilesAndAcceptsAnExplicitNoChangeResult(@TempDir Path sourceRoot)
             throws Exception {
         Path api = sourceRoot.resolve("demo/Api.java");

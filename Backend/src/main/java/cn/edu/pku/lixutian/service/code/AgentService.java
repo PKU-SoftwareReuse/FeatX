@@ -3,6 +3,7 @@ package cn.edu.pku.lixutian.service.code;
 import cn.edu.pku.lixutian.dto.result.AgentTokenUsageResult;
 import cn.edu.pku.lixutian.service.llm.LlmClient;
 import cn.edu.pku.lixutian.service.llm.LlmGenerationResult;
+import cn.edu.pku.lixutian.service.RepoSummaryHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -33,6 +34,9 @@ public class AgentService {
     @Autowired
     @Qualifier("agentPipelineExecutor")
     protected ExecutorService agentPipelineExecutor;
+
+    @Autowired
+    protected RepoSummaryHttpClient repoSummaryHttpClient;
 
     protected void sendStatus(AgentEventSink eventSink, String content) throws IOException {
         sendEvent(eventSink, "status", content);

@@ -29,11 +29,13 @@ USAGE
 }
 
 HOST_MYSQL_CONTAINER=featx-merge-dev-mysql
+HOST_REPOSUMMARY_CONTAINER=featx-merge-dev-reposummary
 HOST_BACKEND_CONTAINER=featx-merge-dev-backend
 HOST_FRONTEND_CONTAINER=featx-merge-dev-frontend
 LEGACY_MYSQL_CONTAINER=featx_ae_current-mysql-1
 HOST_MYSQL_VOLUME=featx_ae_current_featx-mysql-data
 HOST_REPOS_VOLUME=featx_ae_current_featx-repos
+HOST_REPOSUMMARY_OUTPUT_VOLUME=featx_ae_current_featx-reposummary-output
 HOST_BASE_BACKEND_IMAGE=featx-backend-runtime:ase26
 HOST_MODEL_IMAGE=featx-models:ase26
 
@@ -441,7 +443,7 @@ force_stop_container() {
 
 remove_host_containers() {
   local container
-  for container in "$HOST_FRONTEND_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_MYSQL_CONTAINER"; do
+  for container in "$HOST_FRONTEND_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_MYSQL_CONTAINER"; do
     force_stop_container "$container"
     docker rm "$container" >/dev/null 2>&1 || true
   done
@@ -524,6 +526,7 @@ start_host_stack() {
   local llm_api_url llm_api_key
   local openai_base_url openai_api_key openai_api_model sentence_transformer_model
   local git_proxy_host git_proxy_port
+  local reposummary_port
 
   prepare_mysql_port
   mysql_root_password="$(read_env_value MYSQL_ROOT_PASSWORD featx_root)"
@@ -538,9 +541,11 @@ start_host_stack() {
   sentence_transformer_model="$(read_env_value SENTENCE_TRANSFORMER_MODEL sentence-transformers/all-mpnet-base-v2)"
   git_proxy_host="$(read_env_value GIT_PROXY_HOST 10.0.2.2)"
   git_proxy_port="$(read_env_value GIT_PROXY_PORT "")"
+  reposummary_port="$(read_env_value REPOSUMMARY_HTTP_PORT 8091)"
   git_proxy_host="$(prepare_git_proxy_host "$git_proxy_host" "$git_proxy_port")"
 
   docker volume create "$HOST_MYSQL_VOLUME" >/dev/null
+  docker volume create "$HOST_REPOSUMMARY_OUTPUT_VOLUME" >/dev/null
   seed_repos_volume
   remove_host_containers
   stop_legacy_mysql_if_needed
@@ -555,6 +560,25 @@ start_host_stack() {
     --port="$FEATX_MYSQL_PORT" >/dev/null
 
   wait_for_mysql "$mysql_user" "$mysql_password"
+
+  docker run -d --name "$HOST_REPOSUMMARY_CONTAINER" --network host \
+    --env-file .env \
+    -e REPOSUMMARY_HTTP_HOST=127.0.0.1 \
+    -e REPOSUMMARY_HTTP_PORT="$reposummary_port" \
+    -e LTM_REPO_PATH=/workspace/repos \
+    -e LOTM_REPO_PATH=/workspace/repos \
+    -e DB_HOST=127.0.0.1 \
+    -e DB_PORT="$FEATX_MYSQL_PORT" \
+    -e DB_NAME="$mysql_database" \
+    -e DB_USER="$mysql_user" \
+    -e DB_PASSWORD="$mysql_password" \
+    -v "$HOST_REPOS_VOLUME:/workspace/repos" \
+    -v "$HOST_REPOSUMMARY_OUTPUT_VOLUME:/app/RepoSummary/output" \
+    -w /app/RepoSummary \
+    --entrypoint /opt/reposummary-venv/bin/python \
+    featx-backend:ase26 -m src.http_service >/dev/null
+
+  wait_for_url "http://127.0.0.1:${reposummary_port}/health" "RepoSummary model service" 120
 
   docker run -d --name "$HOST_BACKEND_CONTAINER" --network host \
     --env-file .env \
@@ -579,8 +603,10 @@ start_host_stack() {
     -e DB_PASSWORD="$mysql_password" \
     -e REPOSUMMARY_PYTHON=/opt/reposummary-venv/bin/python \
     -e REPOSUMMARY_DIR=/app/RepoSummary \
+    -e REPOSUMMARY_HTTP_URL="http://127.0.0.1:${reposummary_port}" \
     -e LOMBOK_JAR=/app/Backend/tools/lombok-1.18.36.jar \
     -v "$HOST_REPOS_VOLUME:/workspace/repos" \
+    -v "$HOST_REPOSUMMARY_OUTPUT_VOLUME:/app/RepoSummary/output" \
     featx-backend:ase26 >/dev/null
 
   write_host_nginx_conf
@@ -590,7 +616,7 @@ start_host_stack() {
 }
 
 restart_host_stack() {
-  docker restart "$HOST_MYSQL_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER" >/dev/null
+  docker restart "$HOST_MYSQL_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER" >/dev/null
 }
 
 show_host_logs() {
@@ -598,7 +624,7 @@ show_host_logs() {
   local running_logs=0
 
   trap 'kill $(jobs -pr) 2>/dev/null || true' EXIT INT TERM
-  for container in "$HOST_MYSQL_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"; do
+  for container in "$HOST_MYSQL_CONTAINER" "$HOST_REPOSUMMARY_CONTAINER" "$HOST_BACKEND_CONTAINER" "$HOST_FRONTEND_CONTAINER"; do
     if docker inspect "$container" >/dev/null 2>&1; then
       docker logs --tail 100 -f "$container" 2>&1 \
         | sed -u "s/^/[$container] /" &

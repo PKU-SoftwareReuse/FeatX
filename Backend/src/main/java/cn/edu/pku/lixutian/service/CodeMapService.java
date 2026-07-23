@@ -3,7 +3,6 @@ package cn.edu.pku.lixutian.service;
 import cn.edu.pku.lixutian.service.code.AgentService;
 import cn.edu.pku.lixutian.service.code.AgentLanguage;
 import cn.edu.pku.lixutian.config.ClusterState;
-import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.controller.CodeDiffController;
 import cn.edu.pku.lixutian.dao.*;
@@ -41,14 +40,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -109,6 +105,9 @@ public class CodeMapService {
 
     @Autowired
     private CandidateCodeService candidateCodeService;
+
+    @Autowired
+    private RepoSummaryHttpClient repoSummaryHttpClient;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -933,7 +932,6 @@ public class CodeMapService {
     }
 
     private JsonNode runPythonDeletePlanner(List<String> featureMethods, Set<String> sharedMethods) throws IOException, InterruptedException {
-        String pythonExec = getEnvOrDefault("REPOSUMMARY_PYTHON", "python3");
         String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
         Integer repoId = ProjectState.getInstance().getRepoId();
         if (repoId == null) {
@@ -953,40 +951,7 @@ public class CodeMapService {
         ArrayNode sharedMethodsNode = request.putArray("sharedMethods");
         sharedMethods.forEach(sharedMethodsNode::add);
 
-        ProcessBuilder processBuilder = new ProcessBuilder(pythonExec, "src/python_delete_feature.py");
-        processBuilder.directory(new File(repoSummaryDir));
-        Process process = processBuilder.start();
-        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(() -> readProcessStream(process.getInputStream()));
-        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(() -> readProcessStream(process.getErrorStream()));
-
-        try (OutputStream stdin = process.getOutputStream()) {
-            objectMapper.writeValue(stdin, request);
-        }
-
-        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            process.waitFor(10, TimeUnit.SECONDS);
-        }
-        String stdout = stdoutFuture.join();
-        String stderr = stderrFuture.join();
-        if (!exited) {
-            throw new IOException("Python Delete planner timed out.\n" + stderr);
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException("Python Delete planner failed with exit code " + process.exitValue()
-                    + "\nSTDERR:\n" + stderr
-                    + "\nSTDOUT:\n" + stdout);
-        }
-        return objectMapper.readTree(stdout);
-    }
-
-    private String readProcessStream(java.io.InputStream inputStream) {
-        try {
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return repoSummaryHttpClient.postJson("/v1/python/delete-feature", request, 120);
     }
 
     private Map<String, String> currentPythonModifications() {
@@ -1059,37 +1024,11 @@ public class CodeMapService {
             return Collections.emptyList();
         }
 
-        String pythonExec = getEnvOrDefault("REPOSUMMARY_PYTHON", "python3");
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
-        ProcessBuilder processBuilder = new ProcessBuilder(pythonExec, "src/extract_python_methods.py");
-        processBuilder.directory(new File(repoSummaryDir));
-        processBuilder.environment().putIfAbsent("LOTM_REPO_PATH", LtmConfig.getRepoPath());
-
         ObjectNode request = objectMapper.createObjectNode();
         request.put("srcRoot", ProjectState.getInstance().getSrcPath());
         ArrayNode files = request.putArray("files");
         changedFiles.forEach(files::add);
-
-        Process process = processBuilder.start();
-        process.getOutputStream().write(objectMapper.writeValueAsBytes(request));
-        process.getOutputStream().close();
-        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            process.waitFor(10, TimeUnit.SECONDS);
-        }
-        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!exited) {
-            throw new IOException("Python method extraction timed out.\n" + stderr);
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException("Python method extraction failed with exit code " + process.exitValue()
-                    + "\nSTDERR:\n" + stderr
-                    + "\nSTDOUT:\n" + stdout);
-        }
-
-        JsonNode root = objectMapper.readTree(stdout);
+        JsonNode root = repoSummaryHttpClient.postJson("/v1/python/extract-methods", request, 120);
         List<String> signatures = new ArrayList<>();
         for (JsonNode method : root.path("methods")) {
             signatures.add(method.path("signature").asText());

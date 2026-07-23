@@ -7,6 +7,7 @@ import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.helper.JavaFilePath;
+import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -78,13 +79,14 @@ public class FeatureGraphController {
                 .collect(java.util.stream.Collectors.toSet());
         java.util.Set<String> affectedJavaFiles = affectedNodeIds.stream()
                 .map(JavaFilePath::fromClassName)
+                .map(path -> ProjectPathMapping.sourceRelativeToProject(ProjectState.getInstance(), path))
                 .collect(java.util.stream.Collectors.toSet());
         candidateCodeService.beginOperation(
                 "delete:" + ProjectState.getInstance().getRepoId() + ":" + featureId,
                 affectedJavaFiles
         );
         java.util.Set<String> pendingNodeIds = candidateCodeService.pendingModificationKeys().stream()
-                .map(JavaFilePath::toClassName)
+                .map(this::javaCandidateNodeId)
                 .collect(java.util.stream.Collectors.toSet());
         result.getNodes().stream()
                 .filter(node -> "Modify".equals(node.getType()))
@@ -94,7 +96,7 @@ public class FeatureGraphController {
                 .filter(node -> pendingNodeIds.contains(node.getId()))
                 .forEach(node -> node.setType("Modify"));
         java.util.Set<String> stagedNodeIds = candidateCodeService.stagedModificationKeys().stream()
-                .map(JavaFilePath::toClassName)
+                .map(this::javaCandidateNodeId)
                 .collect(java.util.stream.Collectors.toSet());
         result.getNodes().stream()
                 .filter(node -> stagedNodeIds.contains(node.getId()))
@@ -136,17 +138,28 @@ public class FeatureGraphController {
         }
         FeatureGraphResult maxGraph = codemapService.getMaxGraph();
         java.util.Set<String> classIds = candidateCodeService.pendingModificationKeys().stream()
-                .map(path -> path.endsWith(".java") ? JavaFilePath.toClassName(path) : path)
+                .map(this::javaCandidateNodeId)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         FeatureGraphResult newGraph = new FeatureGraphResult(classIds);
         FeatureGraphResult result = maxGraph.setNewType(newGraph);
         java.util.Set<String> stagedClassIds = candidateCodeService.stagedModificationKeys().stream()
-                .map(path -> path.endsWith(".java") ? JavaFilePath.toClassName(path) : path)
+                .map(this::javaCandidateNodeId)
                 .collect(java.util.stream.Collectors.toSet());
         result.getNodes().stream()
                 .filter(node -> stagedClassIds.contains(node.getId()))
                 .forEach(node -> node.setType("Staged"));
         return result;
+    }
+
+    private String javaCandidateNodeId(String candidatePath) {
+        if (!candidatePath.endsWith(".java")) {
+            return candidatePath;
+        }
+        String sourceRelativePath = ProjectPathMapping.projectRelativeToSource(
+                ProjectState.getInstance(),
+                candidatePath
+        ).orElse(candidatePath);
+        return JavaFilePath.toClassName(sourceRelativePath);
     }
 
     private String pythonNodeProjectPath(String nodeId, java.util.Set<String> candidatePaths) {

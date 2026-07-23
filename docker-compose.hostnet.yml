@@ -36,6 +36,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      reposummary:
+        condition: service_healthy
     environment:
       SERVER_PORT: ${BACKEND_PORT:-28001}
       LTM_REPO_PATH: /workspace/repos
@@ -84,12 +86,66 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
       REPOSUMMARY_PYTHON: /opt/reposummary-venv/bin/python
       REPOSUMMARY_DIR: /app/RepoSummary
+      REPOSUMMARY_HTTP_URL: http://127.0.0.1:${REPOSUMMARY_HTTP_PORT:-28002}
       LOMBOK_JAR: /app/Backend/tools/lombok-1.18.36.jar
     volumes:
       - featx-repos:/workspace/repos
       - ./agent-logs:/workspace/agent-logs
       - featx-reposummary-output:/app/RepoSummary/output
       - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
+    restart: unless-stopped
+
+  reposummary:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      network: host
+    image: featx-merge-dev-backend:hostnet
+    network_mode: host
+    command: ["/opt/reposummary-venv/bin/python", "-m", "src.http_service"]
+    working_dir: /app/RepoSummary
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      REPOSUMMARY_HTTP_HOST: 127.0.0.1
+      REPOSUMMARY_HTTP_PORT: ${REPOSUMMARY_HTTP_PORT:-28002}
+      LTM_REPO_PATH: /workspace/repos
+      LOTM_REPO_PATH: /workspace/repos
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_API_MODEL: ${OPENAI_API_MODEL:-deepseek-v4-pro}
+      SENTENCE_TRANSFORMER_MODEL: ${SENTENCE_TRANSFORMER_MODEL:-/app/models/sentence-transformers/all-mpnet-base-v2}
+      PYTHON_SENTENCE_TRANSFORMER_MODEL: ${PYTHON_SENTENCE_TRANSFORMER_MODEL:-/app/models/sentence-transformers/all-mpnet-base-v2}
+      CODET5_MODEL: ${CODET5_MODEL:-/app/models/transformers/Salesforce/codet5-base-multi-sum}
+      PYTHON_CODET5_MODEL: ${PYTHON_CODET5_MODEL:-/app/models/transformers/Salesforce/codet5-base-multi-sum}
+      FOCUSGRAPH_FEATURE_EMBEDDING_MODEL: ${FOCUSGRAPH_FEATURE_EMBEDDING_MODEL:-/app/models/sentence-transformers/all-MiniLM-L6-v2}
+      FOCUSGRAPH_GRAPH_EMBEDDING_BACKEND: ${FOCUSGRAPH_GRAPH_EMBEDDING_BACKEND:-bge-code}
+      FOCUSGRAPH_GRAPH_EMBEDDING_MODEL: ${FOCUSGRAPH_GRAPH_EMBEDDING_MODEL:-/app/models/sentence-transformers/BAAI/bge-code-v1}
+      FOCUSGRAPH_GRAPH_EMBEDDING_BATCH_SIZE: ${FOCUSGRAPH_GRAPH_EMBEDDING_BATCH_SIZE:-16}
+      FOCUSGRAPH_BGE_MAX_SEQ_LENGTH: ${FOCUSGRAPH_BGE_MAX_SEQ_LENGTH:-4096}
+      REPOSUMMARY_GENERATE_DESCRIPTION: ${REPOSUMMARY_GENERATE_DESCRIPTION:-true}
+      REPOSUMMARY_LLM_TIMEOUT_SECONDS: ${REPOSUMMARY_LLM_TIMEOUT_SECONDS:-20}
+      REPOSUMMARY_PYTHON_LLM_MAX_WORKERS: ${REPOSUMMARY_PYTHON_LLM_MAX_WORKERS:-4}
+      REPOSUMMARY_LLM_MAX_TOKENS: ${REPOSUMMARY_LLM_MAX_TOKENS:-}
+      REPOSUMMARY_LLM_RETRY_ATTEMPTS: ${REPOSUMMARY_LLM_RETRY_ATTEMPTS:-2}
+      REPOSUMMARY_DESCRIPTION_PROGRESS_INTERVAL_SECONDS: ${REPOSUMMARY_DESCRIPTION_PROGRESS_INTERVAL_SECONDS:-10}
+      REPOSUMMARY_EMBEDDING_ALLOW_DOWNLOAD: ${REPOSUMMARY_EMBEDDING_ALLOW_DOWNLOAD:-false}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3307
+      DB_NAME: ${MYSQL_DATABASE:-lotm}
+      DB_USER: ${MYSQL_USER:-featx}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-featx}
+    volumes:
+      - featx-repos:/workspace/repos
+      - featx-reposummary-output:/app/RepoSummary/output
+      - ${FEATX_MODELS_HOST:-../models}:/app/models:ro
+    healthcheck:
+      test: ["CMD", "/opt/reposummary-venv/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['REPOSUMMARY_HTTP_PORT'] + '/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
     restart: unless-stopped
 
   frontend:

@@ -5,13 +5,20 @@ import math
 import os
 import re
 import sys
+import threading
+from contextlib import contextmanager
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
+
+try:
+    from . import embedding_cache
+except ImportError:
+    import embedding_cache
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -19,6 +26,8 @@ OUTPUT_ROOT = (BASE_DIR / ".." / "output").resolve()
 
 load_dotenv(BASE_DIR.parent.parent / ".env")
 load_dotenv()
+
+_PROGRESS_CONTEXT = threading.local()
 
 
 def _log(message: str) -> None:
@@ -33,7 +42,20 @@ def _progress(stage: str, message: str, step: int, total: int = 8, **details: An
         "total": total,
         **details,
     }
+    callback = getattr(_PROGRESS_CONTEXT, "callback", None)
+    if callback is not None:
+        callback(payload)
     print(f"__FOCUSGRAPH_PROGRESS__{json.dumps(payload, ensure_ascii=False)}", file=sys.stderr, flush=True)
+
+
+@contextmanager
+def progress_callback(callback: Callable[[dict[str, Any]], None] | None) -> Iterator[None]:
+    previous = getattr(_PROGRESS_CONTEXT, "callback", None)
+    _PROGRESS_CONTEXT.callback = callback
+    try:
+        yield
+    finally:
+        _PROGRESS_CONTEXT.callback = previous
 
 
 def _normalize_symbol(value: Any) -> str:
@@ -78,6 +100,9 @@ def _score_texts_lexical(query: str, documents: list[str]) -> list[float]:
 
 
 _SENTENCE_MODEL_CACHE: dict[str, Any] = {}
+_MODEL_LOAD_LOCK = threading.RLock()
+_SENTENCE_INFERENCE_LOCK = threading.RLock()
+_BGE_INFERENCE_LOCK = threading.RLock()
 BGE_CODE_INSTRUCTION = "Given a requirement description in text, retrieve code snippets that are relevant to the requirement."
 
 
@@ -91,40 +116,44 @@ def _default_sentence_model_path(model_name: str) -> str:
 
 def _load_sentence_model(env_name: str, default_model_name: str) -> Any | None:
     model_name_or_path = os.getenv(env_name) or _default_sentence_model_path(default_model_name)
-    if model_name_or_path in _SENTENCE_MODEL_CACHE:
-        return _SENTENCE_MODEL_CACHE[model_name_or_path]
-    try:
-        from sentence_transformers import SentenceTransformer
+    with _MODEL_LOAD_LOCK:
+        if model_name_or_path in _SENTENCE_MODEL_CACHE:
+            return _SENTENCE_MODEL_CACHE[model_name_or_path]
+        try:
+            from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer(model_name_or_path)
-        _SENTENCE_MODEL_CACHE[model_name_or_path] = model
-        _log(f"{env_name} loaded: {model_name_or_path}")
-        return model
-    except Exception as exc:
-        _log(f"{env_name} embedding unavailable ({model_name_or_path}): {exc}")
-        return None
+            model = SentenceTransformer(model_name_or_path)
+            model.eval()
+            _SENTENCE_MODEL_CACHE[model_name_or_path] = model
+            _log(f"{env_name} loaded: {model_name_or_path}")
+            return model
+        except Exception as exc:
+            _log(f"{env_name} embedding unavailable ({model_name_or_path}): {exc}")
+            return None
 
 
 def _load_bge_code_model() -> Any | None:
     model_name_or_path = os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_MODEL") or _default_sentence_model_path("BAAI/bge-code-v1")
     cache_key = f"bge-code::{model_name_or_path}"
-    if cache_key in _SENTENCE_MODEL_CACHE:
-        return _SENTENCE_MODEL_CACHE[cache_key]
-    try:
-        from sentence_transformers import SentenceTransformer
-
+    with _MODEL_LOAD_LOCK:
+        if cache_key in _SENTENCE_MODEL_CACHE:
+            return _SENTENCE_MODEL_CACHE[cache_key]
         try:
-            model = SentenceTransformer(model_name_or_path, trust_remote_code=True)
-        except TypeError:
-            model = SentenceTransformer(model_name_or_path)
-        max_seq_length = int(os.getenv("FOCUSGRAPH_BGE_MAX_SEQ_LENGTH", "4096"))
-        model.max_seq_length = max_seq_length
-        _SENTENCE_MODEL_CACHE[cache_key] = model
-        _log(f"FOCUSGRAPH_GRAPH_EMBEDDING_MODEL loaded as bge-code: {model_name_or_path}")
-        return model
-    except Exception as exc:
-        _log(f"bge-code graph embedding unavailable ({model_name_or_path}): {exc}")
-        return None
+            from sentence_transformers import SentenceTransformer
+
+            try:
+                model = SentenceTransformer(model_name_or_path, trust_remote_code=True)
+            except TypeError:
+                model = SentenceTransformer(model_name_or_path)
+            max_seq_length = int(os.getenv("FOCUSGRAPH_BGE_MAX_SEQ_LENGTH", "4096"))
+            model.max_seq_length = max_seq_length
+            model.eval()
+            _SENTENCE_MODEL_CACHE[cache_key] = model
+            _log(f"FOCUSGRAPH_GRAPH_EMBEDDING_MODEL loaded as bge-code: {model_name_or_path}")
+            return model
+        except Exception as exc:
+            _log(f"bge-code graph embedding unavailable ({model_name_or_path}): {exc}")
+            return None
 
 
 def _truncate_for_bge_code(text: str, max_seq_length: int) -> str:
@@ -134,7 +163,15 @@ def _truncate_for_bge_code(text: str, max_seq_length: int) -> str:
     return text[:max_chars] if len(text) > max_chars else text
 
 
-def _score_texts_with_bge_code(query: str, documents: list[str]) -> list[float]:
+def _score_texts_with_bge_code(
+    query: str,
+    documents: list[str],
+    *,
+    repo_id: str | int | None = None,
+    entity_ids: list[str] | None = None,
+    source_paths: list[str] | None = None,
+    entity_kind: str = "graph-node",
+) -> list[float]:
     if not documents:
         return []
     model = _load_bge_code_model()
@@ -150,18 +187,36 @@ def _score_texts_with_bge_code(query: str, documents: list[str]) -> list[float]:
         max_seq_length = int(getattr(model, "max_seq_length", 4096) or 4096)
         query_text = f"<instruct>{BGE_CODE_INSTRUCTION}\n<query>{query}"
         code_texts = [_truncate_for_bge_code(str(document or ""), max_seq_length) for document in documents]
-        query_embedding = model.encode(
-            [query_text],
-            batch_size=1,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
+        model_name_or_path = os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_MODEL") or _default_sentence_model_path("BAAI/bge-code-v1")
+        cache_key = embedding_cache.model_key(
+            "bge-code",
+            model_name_or_path,
+            max_seq_length=max_seq_length,
+            instruction=BGE_CODE_INSTRUCTION,
         )
-        code_embeddings = model.encode(
-            code_texts,
-            batch_size=batch_size,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        )
+        ids = entity_ids if entity_ids is not None and len(entity_ids) == len(code_texts) else [str(index) for index in range(len(code_texts))]
+        with _BGE_INFERENCE_LOCK:
+            query_embedding = model.encode(
+                [query_text],
+                batch_size=1,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
+            code_embeddings, stats = embedding_cache.load_or_encode(
+                repo_id=repo_id,
+                model_cache_key=cache_key,
+                entity_kind=entity_kind,
+                entity_ids=ids,
+                texts=code_texts,
+                source_paths=source_paths,
+                encode=lambda missing: model.encode(
+                    missing,
+                    batch_size=batch_size,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                ),
+            )
+        _log(f"bge-code cache hits={stats['hits']} misses={stats['misses']} repo={repo_id}")
         similarities = np.matmul(code_embeddings, query_embedding[0])
         return [float(x) for x in similarities]
     except Exception as exc:
@@ -174,19 +229,151 @@ def _score_texts_with_bge_code(query: str, documents: list[str]) -> list[float]:
         )
 
 
-def _score_graph_code_contexts(query: str, documents: list[str]) -> list[float]:
+def sync_bge_code_cache(request: dict[str, Any]) -> dict[str, Any]:
+    repo_id = request.get("repoId")
+    if repo_id is None:
+        raise RuntimeError("repoId is required for embedding cache synchronization")
+    nodes = list(request.get("nodes") or [])
+    changed_paths = [str(path or "").replace("\\", "/") for path in request.get("changedPaths") or []]
+    entity_kind = str(request.get("entityKind") or "graph-node")
+    model = _load_bge_code_model()
+    if model is None:
+        raise RuntimeError("BGE-code model is unavailable")
+
+    batch_size = int(os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_BATCH_SIZE", "16"))
+    max_seq_length = int(getattr(model, "max_seq_length", 4096) or 4096)
+    model_name_or_path = os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_MODEL") or _default_sentence_model_path("BAAI/bge-code-v1")
+    cache_key = embedding_cache.model_key(
+        "bge-code",
+        model_name_or_path,
+        max_seq_length=max_seq_length,
+        instruction=BGE_CODE_INSTRUCTION,
+    )
+    entity_ids = [str(node.get("id") or "") for node in nodes]
+    source_paths = [str(node.get("sourcePath") or "").replace("\\", "/") for node in nodes]
+    documents = [_truncate_for_bge_code(str(node.get("text") or ""), max_seq_length) for node in nodes]
+
+    if documents:
+        with _BGE_INFERENCE_LOCK:
+            _, stats = embedding_cache.load_or_encode(
+                repo_id=repo_id,
+                model_cache_key=cache_key,
+                entity_kind=entity_kind,
+                entity_ids=entity_ids,
+                texts=documents,
+                source_paths=source_paths,
+                encode=lambda missing: model.encode(
+                    missing,
+                    batch_size=batch_size,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                ),
+            )
+    else:
+        stats = {"hits": 0, "misses": 0}
+
+    deleted = embedding_cache.prune_changed_paths(
+        repo_id=repo_id,
+        model_cache_key=cache_key,
+        entity_kind=entity_kind,
+        changed_paths=changed_paths,
+        active_entity_ids=entity_ids,
+    )
+    return {
+        "repoId": str(repo_id),
+        "entityKind": entity_kind,
+        "nodeCount": len(nodes),
+        "cacheHits": stats["hits"],
+        "cacheMisses": stats["misses"],
+        "deletedEntries": deleted,
+        "cache": embedding_cache.cache_stats(repo_id),
+    }
+
+
+def sync_feature_embedding_cache(request: dict[str, Any]) -> dict[str, Any]:
+    repo_id = request.get("repoId")
+    if repo_id is None:
+        raise RuntimeError("repoId is required for feature embedding cache synchronization")
+    features = list(request.get("features") or [])
+    model = _load_sentence_model("FOCUSGRAPH_FEATURE_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    if model is None:
+        raise RuntimeError("Feature embedding model is unavailable")
+
+    model_name_or_path = os.getenv("FOCUSGRAPH_FEATURE_EMBEDDING_MODEL") or _default_sentence_model_path("all-MiniLM-L6-v2")
+    cache_key = embedding_cache.model_key("sentence-transformer", model_name_or_path)
+    entity_ids = [str(feature.get("featureId") or "") for feature in features]
+    documents = [
+        f"{feature.get('moduleDesc') or ''}\n{feature.get('description') or ''}"
+        for feature in features
+    ]
+    if documents:
+        with _SENTENCE_INFERENCE_LOCK:
+            _, stats = embedding_cache.load_or_encode(
+                repo_id=repo_id,
+                model_cache_key=cache_key,
+                entity_kind="feature",
+                entity_ids=entity_ids,
+                texts=documents,
+                source_paths=None,
+                encode=lambda missing: model.encode(
+                    missing,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                ),
+            )
+    else:
+        stats = {"hits": 0, "misses": 0}
+    deleted = embedding_cache.prune_missing_entities(
+        repo_id=repo_id,
+        model_cache_key=cache_key,
+        entity_kind="feature",
+        active_entity_ids=entity_ids,
+    )
+    return {
+        "repoId": str(repo_id),
+        "featureCount": len(features),
+        "cacheHits": stats["hits"],
+        "cacheMisses": stats["misses"],
+        "deletedEntries": deleted,
+    }
+
+
+def _score_graph_code_contexts(
+    query: str,
+    documents: list[str],
+    *,
+    repo_id: str | int | None = None,
+    entity_ids: list[str] | None = None,
+    source_paths: list[str] | None = None,
+) -> list[float]:
     backend = os.getenv("FOCUSGRAPH_GRAPH_EMBEDDING_BACKEND", "bge-code").strip().lower()
     if backend in {"bge", "bge-code", "bge_code"}:
-        return _score_texts_with_bge_code(query, documents)
+        return _score_texts_with_bge_code(
+            query,
+            documents,
+            repo_id=repo_id,
+            entity_ids=entity_ids,
+            source_paths=source_paths,
+        )
     if backend in {"sentence-transformer", "sentence_transformer", "sentence", "st"}:
         return _score_texts_with_embedding(
             query,
             documents,
             env_name="FOCUSGRAPH_GRAPH_EMBEDDING_MODEL",
             default_model_name="all-MiniLM-L6-v2",
+            repo_id=repo_id,
+            entity_ids=entity_ids,
+            source_paths=source_paths,
+            entity_kind="graph-node",
         )
     _log(f"Unknown FOCUSGRAPH_GRAPH_EMBEDDING_BACKEND={backend}; falling back to bge-code.")
-    return _score_texts_with_bge_code(query, documents)
+    return _score_texts_with_bge_code(
+        query,
+        documents,
+        repo_id=repo_id,
+        entity_ids=entity_ids,
+        source_paths=source_paths,
+    )
 
 
 def _score_texts_with_embedding(
@@ -195,6 +382,10 @@ def _score_texts_with_embedding(
     *,
     env_name: str,
     default_model_name: str = "all-MiniLM-L6-v2",
+    repo_id: str | int | None = None,
+    entity_ids: list[str] | None = None,
+    source_paths: list[str] | None = None,
+    entity_kind: str = "text",
 ) -> list[float]:
     if not documents:
         return []
@@ -202,8 +393,25 @@ def _score_texts_with_embedding(
     if model is None:
         return _score_texts_lexical(query, documents)
     try:
-        query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
-        doc_embeddings = model.encode(documents, convert_to_numpy=True, normalize_embeddings=True)
+        model_name_or_path = os.getenv(env_name) or _default_sentence_model_path(default_model_name)
+        cache_key = embedding_cache.model_key("sentence-transformer", model_name_or_path)
+        ids = entity_ids if entity_ids is not None and len(entity_ids) == len(documents) else [str(index) for index in range(len(documents))]
+        with _SENTENCE_INFERENCE_LOCK:
+            query_embedding = model.encode([query], convert_to_numpy=True, normalize_embeddings=True)
+            doc_embeddings, stats = embedding_cache.load_or_encode(
+                repo_id=repo_id,
+                model_cache_key=cache_key,
+                entity_kind=entity_kind,
+                entity_ids=ids,
+                texts=documents,
+                source_paths=source_paths,
+                encode=lambda missing: model.encode(
+                    missing,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                ),
+            )
+        _log(f"{env_name} cache hits={stats['hits']} misses={stats['misses']} repo={repo_id}")
         similarities = np.matmul(doc_embeddings, query_embedding[0])
         return [float(x) for x in similarities]
     except Exception as exc:
@@ -362,6 +570,9 @@ def _select_features(query: str, features: list[dict[str, Any]], request: dict[s
         docs,
         env_name="FOCUSGRAPH_FEATURE_EMBEDDING_MODEL",
         default_model_name="all-MiniLM-L6-v2",
+        repo_id=request.get("repoId"),
+        entity_ids=[str(item["featureId"]) for item in features],
+        entity_kind="feature",
     )
     ranked = sorted(
         [
@@ -465,6 +676,7 @@ def _build_reasoning_graph(
     enre_data: tuple[dict[int, dict[str, Any]], dict[str, int], dict[int, str], dict[int, list[tuple[int, str]]], dict[int, list[tuple[int, str]]]],
     top_k_nodes: int,
     project_root: Path,
+    repo_id: str | int | None = None,
 ) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, Any]]]:
     _progress(
         "graph-expansion",
@@ -680,7 +892,13 @@ def _build_reasoning_graph(
     sim_scores = dict(
         zip(
             node_ids,
-            _score_graph_code_contexts(query, documents),
+            _score_graph_code_contexts(
+                query,
+                documents,
+                repo_id=repo_id,
+                entity_ids=node_ids,
+                source_paths=[str(nodes[node_id].get("funcFile") or "") for node_id in node_ids],
+            ),
         )
     )
     base_scores = {node_id: max(0.0, float(sim_scores.get(node_id, 0.0))) for node_id in node_ids}
@@ -1256,6 +1474,7 @@ def build_context(request: dict[str, Any]) -> dict[str, Any]:
         enre_data=enre_data,
         top_k_nodes=top_k_nodes,
         project_root=project_root,
+        repo_id=request.get("repoId"),
     )
     context_prompt = _context_prompt(
         reasoning_graph,

@@ -9,6 +9,7 @@ import com.github.javaparser.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -31,6 +32,9 @@ public class FeatureGitWorkflowService {
     private final AgentRunRegistry agentRunRegistry;
     private final FeatureOperationJournalService journalService;
     private final Map<Integer, Object> commitLocks = new ConcurrentHashMap<>();
+
+    @Autowired(required = false)
+    private RepoSummaryIndexService repoSummaryIndexService;
 
     public FeatureGitWorkflowService(
             RepositoryGitService repositoryGitService,
@@ -149,6 +153,18 @@ public class FeatureGitWorkflowService {
             journalService.markGitCommitted(runId, commitHash);
             featureId = confirmFeatureOperation(operation, agentRun, metadataOnly);
             codeMapService.verifyFeatureOperation(operation, agentRun.featureId(), featureId);
+            if (repoSummaryIndexService != null) {
+                try {
+                    repoSummaryIndexService.refreshConfirmedChanges(agentRun, candidatePaths);
+                } catch (IOException | RuntimeException refreshFailure) {
+                    logger.warn(
+                            "Feature commit {} succeeded, but RepoSummary indexes could not be refreshed for {}",
+                            commitHash,
+                            candidatePaths,
+                            refreshFailure
+                    );
+                }
+            }
             if (!commitHash.equals(repositoryGitService.headCommit())) {
                 throw new IllegalStateException("Repository HEAD changed while feature metadata was being updated.");
             }

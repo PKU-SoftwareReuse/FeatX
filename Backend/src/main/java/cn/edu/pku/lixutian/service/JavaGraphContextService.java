@@ -30,14 +30,8 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -50,23 +44,23 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 @Service
 public class JavaGraphContextService {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final String PROGRESS_PREFIX = "__FOCUSGRAPH_PROGRESS__";
-
     private final CodeMapService codeMapService;
     private final OperationProgressService progressService;
+    private final RepoSummaryHttpClient repoSummaryHttpClient;
 
-    public JavaGraphContextService(CodeMapService codeMapService, OperationProgressService progressService) {
+    public JavaGraphContextService(
+            CodeMapService codeMapService,
+            OperationProgressService progressService,
+            RepoSummaryHttpClient repoSummaryHttpClient
+    ) {
         this.codeMapService = codeMapService;
         this.progressService = progressService;
+        this.repoSummaryHttpClient = repoSummaryHttpClient;
     }
 
     public FocusGraphContextResult buildModifyContext(
@@ -264,6 +258,7 @@ public class JavaGraphContextService {
     ) throws IOException, InterruptedException {
         ObjectNode request = objectMapper.createObjectNode();
         request.put("mode", "retrieve");
+        request.put("repoId", ProjectState.getInstance().getRepoId());
         request.put("operation", operation);
         request.put("query", valueOrEmpty(query));
         request.put("featureId", currentFeature == null ? "" : String.valueOf(currentFeature.getFeatureId()));
@@ -281,7 +276,7 @@ public class JavaGraphContextService {
             candidate.clusterIds.stream().sorted().forEach(clusterIds::add);
         }
 
-        JsonNode response = runCli(request);
+        JsonNode response = runCli("/v1/java-graph/retrieve", request);
         RetrievalResult result = new RetrievalResult();
         result.selectedFeatures = objectMapper.convertValue(
                 response.path("selectedFeatures"),
@@ -409,6 +404,7 @@ public class JavaGraphContextService {
     private RankResult rankGraph(String query, GraphData graphData) throws IOException, InterruptedException {
         ObjectNode request = objectMapper.createObjectNode();
         request.put("mode", "rank");
+        request.put("repoId", ProjectState.getInstance().getRepoId());
         request.put("query", valueOrEmpty(query));
         request.put("topKNodes", positiveIntEnv("FOCUSGRAPH_TOP_K_NODES", 15));
         ArrayNode nodes = request.putArray("nodes");
@@ -417,6 +413,7 @@ public class JavaGraphContextService {
             item.put("id", node.id);
             item.put("category", node.category);
             item.put("text", node.text);
+            item.put("funcFile", node.funcFile);
             item.put("selectedFeatureScore", node.selectedFeatureScore);
             item.put("seed", node.seed);
             item.put("currentFeature", node.currentFeature);
@@ -429,7 +426,7 @@ public class JavaGraphContextService {
             item.put("type", edge.type);
         });
 
-        JsonNode response = runCli(request);
+        JsonNode response = runCli("/v1/java-graph/rank", request);
         RankResult result = new RankResult();
         response.path("selectedNodeIds").forEach(node -> result.selectedNodeIds.add(node.asText()));
         response.path("rankScores").fields().forEachRemaining(entry -> result.rankScores.put(entry.getKey(), entry.getValue().asDouble()));
@@ -750,70 +747,13 @@ public class JavaGraphContextService {
         return new ArrayList<>(methods);
     }
 
-    private JsonNode runCli(JsonNode request) throws IOException, InterruptedException {
-        String pythonExec = envOrDefault("REPOSUMMARY_PYTHON", "python3");
-        String repoSummaryDir = envOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
-        ProcessBuilder processBuilder = new ProcessBuilder(pythonExec, "src/java_graph_rank_cli.py");
-        processBuilder.directory(new File(repoSummaryDir));
-        Process process = processBuilder.start();
-        ProjectState.CapturedContext projectContext = ProjectState.capture();
-        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
-                () -> projectContext.call(() -> readStream(process.getInputStream()))
-        );
-        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
-                () -> projectContext.call(() -> readProgressStream(process.getErrorStream()))
-        );
-        try (OutputStream stdin = process.getOutputStream()) {
-            objectMapper.writeValue(stdin, request);
-        }
-
+    private JsonNode runCli(String endpoint, JsonNode request) throws IOException, InterruptedException {
         int timeout = positiveIntEnv("JAVA_GRAPH_CONTEXT_TIMEOUT_SECONDS", 900);
-        boolean exited = process.waitFor(timeout, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            process.waitFor(10, TimeUnit.SECONDS);
-        }
-        String stdout = readCompleted(stdoutFuture);
-        String stderr = readCompleted(stderrFuture);
-        if (!exited) {
-            throw new IOException("Java graph context CLI timed out.\n" + stderr);
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException("Java graph context CLI failed with exit code " + process.exitValue()
-                    + "\nSTDERR:\n" + stderr + "\nSTDOUT:\n" + stdout);
-        }
-        return objectMapper.readTree(stdout);
+        return repoSummaryHttpClient.postStreaming(endpoint, request, this::updateProgress, timeout);
     }
 
-    private String readStream(InputStream inputStream) {
+    private void updateProgress(JsonNode root) {
         try {
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
-    }
-
-    private String readProgressStream(InputStream inputStream) {
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append('\n');
-                if (line.startsWith(PROGRESS_PREFIX)) {
-                    updateProgress(line.substring(PROGRESS_PREFIX.length()));
-                } else if (!line.isBlank()) {
-                    System.out.println("[JavaGraphCLI] " + line);
-                }
-            }
-            return output.toString();
-        } catch (IOException exception) {
-            throw new UncheckedIOException(exception);
-        }
-    }
-
-    private void updateProgress(String payload) {
-        try {
-            JsonNode root = objectMapper.readTree(payload);
             Map<String, Object> details = new LinkedHashMap<>();
             root.fields().forEachRemaining(entry -> {
                 String key = entry.getKey();
@@ -832,20 +772,6 @@ public class JavaGraphContextService {
         }
     }
 
-    private String readCompleted(CompletableFuture<String> future) throws IOException, InterruptedException {
-        try {
-            return future.get(30, TimeUnit.SECONDS);
-        } catch (ExecutionException exception) {
-            Throwable cause = exception.getCause();
-            if (cause instanceof UncheckedIOException uncheckedIOException) {
-                throw uncheckedIOException.getCause();
-            }
-            throw new IOException("Failed to read Java graph context CLI output.", cause);
-        } catch (TimeoutException exception) {
-            throw new IOException("Timed out while reading Java graph context CLI output.", exception);
-        }
-    }
-
     private int positiveIntEnv(String name, int defaultValue) {
         try {
             int value = Integer.parseInt(System.getenv().getOrDefault(name, String.valueOf(defaultValue)).trim());
@@ -853,11 +779,6 @@ public class JavaGraphContextService {
         } catch (Exception ignored) {
             return defaultValue;
         }
-    }
-
-    private String envOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
     private String localized(String english, String chinese, AgentLanguage language) {

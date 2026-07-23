@@ -308,9 +308,17 @@ public class CodeDiffController {
                     JavaFilePath.normalize(classOrFileId)
             );
         }
+        String javaPath = JavaFilePath.fromClassName(classOrFileId);
+        if (modifications.containsKey(javaPath)) {
+            return ProjectFilePath.normalize(javaPath);
+        }
+        Path projectRoot = ProjectPathMapping.projectRoot(ProjectState.getInstance());
+        if (Files.isRegularFile(ProjectFilePath.resolve(projectRoot, javaPath))) {
+            return ProjectFilePath.normalize(javaPath);
+        }
         return ProjectPathMapping.sourceRelativeToProject(
                 ProjectState.getInstance(),
-                JavaFilePath.fromClassName(classOrFileId)
+                javaPath
         );
     }
 

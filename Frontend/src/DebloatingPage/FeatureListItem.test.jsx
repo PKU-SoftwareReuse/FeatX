@@ -7,6 +7,7 @@ jest.mock("./FocusGraphStageModal/FocusGraphStageModal", () => () => null);
 
 import {
     activeRunStorageKey,
+    candidateIdentifierForNode,
     candidateIdentifiersForConfirmAll,
     candidateNodeTypeForDraft,
     FeatureListItem,
@@ -42,6 +43,23 @@ describe("FeatureListItem", () => {
         expect(candidateNodeTypeForDraft(candidate, "class Demo { int value; }\n")).toBe("Modify");
         expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int value; }\n")).toBe("Staged");
         expect(candidateNodeTypeForDraft(stagedCandidate, "class Demo { int changedAgain; }\n")).toBe("Modify");
+    });
+
+    test("maps source-prefixed graph ids back to their project candidate path", () => {
+        const candidatePaths = [
+            "src/main/java/top/naccl/util/MailUtils.java",
+            "src/main/resources/application.yml",
+        ];
+
+        expect(candidateIdentifierForNode(
+            "src.main.java.top.naccl.util.MailUtils",
+            candidatePaths
+        )).toBe("src/main/java/top/naccl/util/MailUtils.java");
+        expect(candidateIdentifierForNode(
+            "top.naccl.util.MailUtils",
+            candidatePaths
+        )).toBe("src/main/java/top/naccl/util/MailUtils.java");
+        expect(candidateIdentifierForNode("top.naccl.Other", candidatePaths)).toBe("top.naccl.Other");
     });
 
     test("collects modified graph nodes before path fallbacks for confirm-all", () => {

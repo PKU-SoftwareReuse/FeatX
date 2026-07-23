@@ -1,6 +1,5 @@
 package cn.edu.pku.lixutian.service;
 
-import cn.edu.pku.lixutian.config.LtmConfig;
 import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.dto.result.FocusGraphContextResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -9,31 +8,23 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.UncheckedIOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 @Service
 public class FocusGraphContextService {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final String PROGRESS_PREFIX = "__FOCUSGRAPH_PROGRESS__";
-
     private final OperationProgressService progressService;
+    private final RepoSummaryHttpClient repoSummaryHttpClient;
 
-    public FocusGraphContextService(OperationProgressService progressService) {
+    public FocusGraphContextService(
+            OperationProgressService progressService,
+            RepoSummaryHttpClient repoSummaryHttpClient
+    ) {
         this.progressService = progressService;
+        this.repoSummaryHttpClient = repoSummaryHttpClient;
     }
 
     public FocusGraphContextResult buildModifyContext(
@@ -119,75 +110,17 @@ public class FocusGraphContextService {
     }
 
     private FocusGraphContextResult runCli(JsonNode requestJson) throws IOException, InterruptedException {
-        String pythonExec = getEnvOrDefault("REPOSUMMARY_PYTHON", "python3");
-        String repoSummaryDir = getEnvOrDefault("REPOSUMMARY_DIR", "./RepoSummary");
-
-        ProcessBuilder processBuilder = new ProcessBuilder(pythonExec, "src/focusgraph_cli.py");
-        processBuilder.directory(new File(repoSummaryDir));
-        Map<String, String> environment = processBuilder.environment();
-        environment.putIfAbsent("LOTM_REPO_PATH", LtmConfig.getRepoPath());
-
-        Process process = processBuilder.start();
-        ProjectState.CapturedContext projectContext = ProjectState.capture();
-        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
-                () -> projectContext.call(() -> readStream(process.getInputStream()))
+        JsonNode result = repoSummaryHttpClient.postStreaming(
+                "/v1/focusgraph/context",
+                requestJson,
+                this::updateProgress,
+                600
         );
-        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
-                () -> projectContext.call(() -> readProgressStream(process.getErrorStream()))
-        );
-
-        try (OutputStream stdin = process.getOutputStream()) {
-            objectMapper.writeValue(stdin, requestJson);
-        }
-
-        boolean exited = process.waitFor(600, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            process.waitFor(10, TimeUnit.SECONDS);
-        }
-
-        String stdout = readCompleted(stdoutFuture);
-        String stderr = readCompleted(stderrFuture);
-        if (!exited) {
-            throw new IOException("FocusGraph CLI timed out.\n" + stderr);
-        }
-        if (process.exitValue() != 0) {
-            throw new IOException("FocusGraph CLI failed with exit code " + process.exitValue()
-                    + "\nSTDERR:\n" + stderr
-                    + "\nSTDOUT:\n" + stdout);
-        }
-        return objectMapper.readValue(stdout, FocusGraphContextResult.class);
+        return objectMapper.convertValue(result, FocusGraphContextResult.class);
     }
 
-    private String readStream(InputStream inputStream) {
+    private void updateProgress(JsonNode root) {
         try {
-            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private String readProgressStream(InputStream inputStream) {
-        StringBuilder all = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                all.append(line).append('\n');
-                if (line.startsWith(PROGRESS_PREFIX)) {
-                    updateProgressFromCli(line.substring(PROGRESS_PREFIX.length()));
-                } else if (!line.isBlank()) {
-                    System.out.println("[FocusGraphCLI] " + line);
-                }
-            }
-            return all.toString();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    private void updateProgressFromCli(String payload) {
-        try {
-            JsonNode root = objectMapper.readTree(payload);
             String stage = root.path("stage").asText("focusgraph");
             String message = root.path("message").asText(stage);
             int step = root.path("step").asInt(2);
@@ -211,20 +144,6 @@ public class FocusGraphContextService {
         }
     }
 
-    private String readCompleted(CompletableFuture<String> future) throws IOException, InterruptedException {
-        try {
-            return future.get(30, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof UncheckedIOException uncheckedIOException) {
-                throw uncheckedIOException.getCause();
-            }
-            throw new IOException("Failed to read FocusGraph CLI output.", cause);
-        } catch (TimeoutException e) {
-            throw new IOException("Timed out while reading FocusGraph CLI output.", e);
-        }
-    }
-
     private int getPositiveIntEnv(String name, int defaultValue) {
         String raw = System.getenv(name);
         if (raw == null || raw.isBlank()) {
@@ -236,10 +155,5 @@ public class FocusGraphContextService {
         } catch (NumberFormatException ignored) {
             return defaultValue;
         }
-    }
-
-    private String getEnvOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 }

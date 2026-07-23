@@ -56,6 +56,13 @@ public enum AgentLanguage {
                 : "\n> `" + filename + "` already matches the target state; no changes are required.\n";
     }
 
+    public String fileSkippedForSafetyDescription(String filename) {
+        return this == CN
+                ? "\n> `" + filename + "` 无法在安全边界内完成修改，已保留原文件并继续处理后续文件。\n"
+                : "\n> `" + filename + "` could not be changed within the safety boundary; the original file "
+                        + "was preserved and processing continued with the remaining files.\n";
+    }
+
     public String pipelineCompleteDescription() {
         return this == CN
                 ? "\n> 流程已完成。\n"
