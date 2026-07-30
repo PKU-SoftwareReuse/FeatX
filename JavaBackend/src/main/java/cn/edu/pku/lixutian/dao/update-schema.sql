@@ -36,8 +36,8 @@ CREATE TABLE modules
     id             INT AUTO_INCREMENT NOT NULL,
     repo           INT                NULL,
     cluster_id     INT                NULL,
-    module_desc    VARCHAR(255)       NULL,
-    module_desc_cn VARCHAR(255)       NULL,
+    module_desc    TEXT               NULL,
+    module_desc_cn TEXT               NULL,
     CONSTRAINT pk_modules PRIMARY KEY (id)
 );
 
@@ -53,6 +53,7 @@ CREATE TABLE project_info
     nom           INT                NULL,
     nof           INT                NULL,
     summary_flag  BIT(1)             NULL,
+    archived      BIT(1)             NOT NULL DEFAULT 0,
     CONSTRAINT pk_project_info PRIMARY KEY (id)
 );
 

@@ -26,6 +26,7 @@ public class RepoSummaryHelper {
             new StepDefinition("feature-description", "Generating feature descriptions"),
             new StepDefinition("module-description", "Generating module descriptions"),
             new StepDefinition("database", "Writing summary to database"),
+            new StepDefinition("embedding-cache", "Building embedding cache"),
             new StepDefinition("complete", "Summary complete")
     );
     private static final Pattern PYTHON_CODET5_PATTERN = Pattern.compile("CodeT5 function descriptions .* (\\d+)/(\\d+) \\(([0-9.]+)%\\)");
@@ -35,6 +36,10 @@ public class RepoSummaryHelper {
     private static final Pattern JAVA_CLUSTER_FILES_PATTERN = Pattern.compile("Cluster ID: (\\d+), (\\d+) Files: \\[.*]");
 
     public static void runRepoSummary(Integer repoId) throws IOException {
+        runRepoSummary(repoId, null);
+    }
+
+    public static void runRepoSummary(Integer repoId, CompletionAction completionAction) throws IOException {
         ProgressState progressState = startProgress(repoId);
         JsonNode request = OBJECT_MAPPER.createObjectNode().put("repoId", repoId);
         JsonNode started;
@@ -66,6 +71,14 @@ public class RepoSummaryHelper {
                     cursor = snapshot.path("nextCursor").asInt(cursor);
                     String status = snapshot.path("status").asText();
                     if ("complete".equals(status)) {
+                        if (completionAction != null) {
+                            progressState.activateStep(
+                                    "embedding-cache",
+                                    "Building static graph and persistent embedding cache."
+                            );
+                            completionAction.run();
+                            progressState.finishStep("embedding-cache");
+                        }
                         progressState.complete();
                         return;
                     }
@@ -78,7 +91,7 @@ public class RepoSummaryHelper {
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 progressState.fail("RepoSummary progress watcher was interrupted.");
-            } catch (IOException | RuntimeException exception) {
+            } catch (Exception exception) {
                 progressState.fail("Failed to watch RepoSummary HTTP job: " + exception.getMessage());
             }
         }, "reposummary-job-" + repoId);
@@ -86,6 +99,11 @@ public class RepoSummaryHelper {
         watcher.start();
 
         System.out.println("RepoSummary HTTP job started (repoId=" + repoId + ", jobId=" + jobId + ")");
+    }
+
+    @FunctionalInterface
+    public interface CompletionAction {
+        void run() throws Exception;
     }
 
     public static RepoSummaryProgressResult getProgress(Integer repoId) {
@@ -240,7 +258,7 @@ public class RepoSummaryHelper {
             }
             if (line.contains("Database write complete")) {
                 finishStep("database");
-                activateStep("complete", "Summary data has been written to database.");
+                activateStep("embedding-cache", "Summary data is ready; preparing persistent embedding cache.");
                 return;
             }
             if (line.startsWith("Feature ID:") || line.startsWith("Feature ID ")) {

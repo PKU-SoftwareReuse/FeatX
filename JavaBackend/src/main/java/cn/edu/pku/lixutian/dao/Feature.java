@@ -24,10 +24,10 @@ public class Feature {
     @Column(name = "feature_id")
     private Integer featureId;
 
-    @Column(name = "feature_desc")
+    @Column(name = "feature_desc", columnDefinition = "TEXT")
     private String featureDesc;
 
-    @Column(name = "feature_desc_CN")
+    @Column(name = "feature_desc_CN", columnDefinition = "TEXT")
     private String featureDescCN;
 
     @OneToMany(mappedBy = "feature", cascade = CascadeType.ALL)

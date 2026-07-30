@@ -38,6 +38,18 @@ public class RepoSummaryIndexService {
         this.codeMapService = codeMapService;
     }
 
+    public void warmRepositoryIndexes(ProjectState project, Integer repositoryId) throws IOException {
+        if (project == null || repositoryId == null) {
+            return;
+        }
+        syncFeatureIndex(repositoryId);
+        if (project.isJava()) {
+            syncJavaIndex(project, repositoryId, Set.of(), true);
+        } else if (project.isPython()) {
+            warmPythonIndex(project, repositoryId);
+        }
+    }
+
     public void refreshConfirmedChanges(AgentRunContext run, List<String> changedProjectPaths) throws IOException {
         if (run == null || run.repositoryId() == null) {
             return;
@@ -58,7 +70,7 @@ public class RepoSummaryIndexService {
         if (project.isPython() && changedPaths.stream().anyMatch(path -> path.endsWith(".py"))) {
             syncPythonIndex(project, run.repositoryId(), changedPaths);
         } else if (project.isJava() && changedPaths.stream().anyMatch(path -> path.endsWith(".java"))) {
-            syncJavaIndex(project, run.repositoryId(), changedPaths);
+            syncJavaIndex(project, run.repositoryId(), changedPaths, false);
         }
     }
 
@@ -94,33 +106,44 @@ public class RepoSummaryIndexService {
         httpClient.postJson("/v1/cache/sync-python", request, 900);
     }
 
+    private void warmPythonIndex(ProjectState project, Integer repositoryId) throws IOException {
+        ObjectNode request = OBJECT_MAPPER.createObjectNode();
+        request.put("repoId", repositoryId);
+        request.put("projectRoot", project.getProjectPath());
+        request.put("sourceRoot", project.getSrcPath());
+        httpClient.postJson("/v1/cache/warm-python", request, 900);
+    }
+
     private void syncJavaIndex(
             ProjectState project,
             Integer repositoryId,
-            Set<String> changedPaths
+            Set<String> changedPaths,
+            boolean fullSync
     ) throws IOException {
         ObjectNode request = OBJECT_MAPPER.createObjectNode();
         request.put("repoId", repositoryId);
         request.put("entityKind", "graph-node");
+        request.put("fullSync", fullSync);
         ArrayNode paths = request.putArray("changedPaths");
         changedPaths.forEach(paths::add);
         ArrayNode nodes = request.putArray("nodes");
 
         SKG.findInstance().ifPresent(graph -> graph.vertexSet().stream()
                 .sorted(java.util.Comparator.comparing(Vertex::getId))
-                .forEach(vertex -> addChangedJavaNode(nodes, project, changedPaths, vertex)));
+                .forEach(vertex -> addJavaNode(nodes, project, changedPaths, fullSync, vertex)));
         httpClient.postJson("/v1/cache/sync", request, 900);
     }
 
-    private void addChangedJavaNode(
+    private void addJavaNode(
             ArrayNode nodes,
             ProjectState project,
             Set<String> changedPaths,
+            boolean fullSync,
             Vertex<?> vertex
     ) {
         BodyDeclaration<?> declaration = vertex.getDeclaration();
         String sourcePath = sourceFile(project, declaration);
-        if (sourcePath.isBlank() || !changedPaths.contains(sourcePath)) {
+        if (sourcePath.isBlank() || (!fullSync && !changedPaths.contains(sourcePath))) {
             return;
         }
         ObjectNode item = nodes.addObject();

@@ -27,7 +27,7 @@ public class Module {
     @Column(name = "module_desc", columnDefinition = "TEXT")
     private String moduleDesc;
 
-    @Column(name = "module_desc_CN")
+    @Column(name = "module_desc_CN", columnDefinition = "TEXT")
     private String moduleDescCN;
 
     @OneToMany(mappedBy = "module", cascade = CascadeType.ALL)

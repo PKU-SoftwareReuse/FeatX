@@ -568,6 +568,7 @@ start_host_stack() {
     --env-file .env \
     -e REPOSUMMARY_HTTP_HOST=127.0.0.1 \
     -e REPOSUMMARY_HTTP_PORT="$reposummary_port" \
+    -e FEATX_BACKEND_URL="http://127.0.0.1:${BACKEND_PORT}" \
     -e LTM_REPO_PATH=/workspace/repos \
     -e LOTM_REPO_PATH=/workspace/repos \
     -e DB_HOST=127.0.0.1 \

@@ -44,4 +44,7 @@ public class ProjectInfo {
     @Column(name = "summary_flag")
     private Boolean summaryFlag;
 
+    @Column(name = "archived", nullable = false)
+    private Boolean archived = false;
+
 }

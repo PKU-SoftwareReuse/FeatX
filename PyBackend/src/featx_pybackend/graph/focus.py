@@ -229,6 +229,7 @@ def sync_bge_code_cache(request: dict[str, Any]) -> dict[str, Any]:
     if repo_id is None:
         raise RuntimeError("repoId is required for embedding cache synchronization")
     nodes = list(request.get("nodes") or [])
+    full_sync = bool(request.get("fullSync"))
     changed_paths = [str(path or "").replace("\\", "/") for path in request.get("changedPaths") or []]
     entity_kind = str(request.get("entityKind") or "graph-node")
     model = _load_bge_code_model()
@@ -267,16 +268,25 @@ def sync_bge_code_cache(request: dict[str, Any]) -> dict[str, Any]:
     else:
         stats = {"hits": 0, "misses": 0}
 
-    deleted = embedding_cache.prune_changed_paths(
-        repo_id=repo_id,
-        model_cache_key=cache_key,
-        entity_kind=entity_kind,
-        changed_paths=changed_paths,
-        active_entity_ids=entity_ids,
-    )
+    if full_sync:
+        deleted = embedding_cache.prune_missing_entities(
+            repo_id=repo_id,
+            model_cache_key=cache_key,
+            entity_kind=entity_kind,
+            active_entity_ids=entity_ids,
+        )
+    else:
+        deleted = embedding_cache.prune_changed_paths(
+            repo_id=repo_id,
+            model_cache_key=cache_key,
+            entity_kind=entity_kind,
+            changed_paths=changed_paths,
+            active_entity_ids=entity_ids,
+        )
     return {
         "repoId": str(repo_id),
         "entityKind": entity_kind,
+        "fullSync": full_sync,
         "nodeCount": len(nodes),
         "cacheHits": stats["hits"],
         "cacheMisses": stats["misses"],

@@ -100,6 +100,9 @@ class RepoSummaryHandler(BaseHTTPRequestHandler):
             if parsed.path == "/v1/cache/sync-python":
                 self._json_response(HTTPStatus.OK, _sync_python_cache(request))
                 return
+            if parsed.path == "/v1/cache/warm-python":
+                self._json_response(HTTPStatus.OK, _warm_python_cache(request))
+                return
             if parsed.path == "/v1/index/sync-features":
                 self._json_response(HTTPStatus.OK, _sync_feature_index(request))
                 return
@@ -250,6 +253,72 @@ def _sync_python_cache(request: dict[str, Any]) -> dict[str, Any]:
     result["index"] = {
         "methodCount": int(len(methods_df)),
         "changedPathCount": len(source_relative_paths),
+        "outputDir": str(output_dir),
+    }
+    return result
+
+
+def _warm_python_cache(request: dict[str, Any]) -> dict[str, Any]:
+    repo_id = request.get("repoId")
+    if repo_id is None:
+        raise RuntimeError("repoId is required")
+    source_root = Path(str(request["sourceRoot"])).resolve()
+    output_dir = embedding_cache.cache_path(repo_id).parent
+    methods_path = output_dir / "methods.csv"
+    if not methods_path.exists():
+        raise RuntimeError(f"RepoSummary methods.csv not found: {methods_path}")
+
+    methods_df = python_repository.pd.read_csv(methods_path, dtype=str, keep_default_na=False)
+    methods_df = python_repository._normalize_methods_df(methods_df, source_root)
+    info_by_norm, _ = focus._method_maps(methods_df)
+    nodes_by_id: dict[str, dict[str, str]] = {}
+    for row in methods_df.to_dict("records"):
+        signature = str(row.get("method_signature") or "")
+        entity_id = focus._normalize_symbol(signature)
+        if not entity_id:
+            continue
+        nodes_by_id[entity_id] = {
+            "id": entity_id,
+            "sourcePath": str(row.get("func_file") or "").replace("\\", "/"),
+            "text": f"{entity_id}\n{row.get('method_code') or ''}",
+        }
+
+    valid_nodes, _, id_to_qname, _, _ = focus._load_enre(output_dir)
+    for node_id, node in valid_nodes.items():
+        category = str(node.get("category") or "")
+        qualified_name = focus._normalize_symbol(id_to_qname.get(node_id, ""))
+        if not qualified_name or category not in {"Function", "Class"}:
+            continue
+        if category == "Function":
+            entity_id = qualified_name
+            if entity_id not in info_by_norm:
+                stripped = focus._without_first_segment(entity_id)
+                if stripped in info_by_norm:
+                    entity_id = stripped
+            info = info_by_norm.get(entity_id, {})
+            source_path = str(info.get("func_file") or "").replace("\\", "/")
+            code = str(info.get("method_code") or "")
+        else:
+            entity_id = qualified_name
+            source_path = str(node.get("File") or "").replace("\\", "/")
+            code = focus._class_skeleton(source_root, source_path, entity_id)
+        nodes_by_id[entity_id] = {
+            "id": entity_id,
+            "sourcePath": source_path,
+            "text": f"{entity_id}\n{code}",
+        }
+
+    nodes = list(nodes_by_id.values())
+    result = focus.sync_bge_code_cache(
+        {
+            "repoId": repo_id,
+            "entityKind": "graph-node",
+            "fullSync": True,
+            "nodes": nodes,
+        }
+    )
+    result["index"] = {
+        "methodCount": int(len(methods_df)),
         "outputDir": str(output_dir),
     }
     return result

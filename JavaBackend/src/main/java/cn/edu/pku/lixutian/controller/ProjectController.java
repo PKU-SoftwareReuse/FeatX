@@ -19,6 +19,7 @@ import cn.edu.pku.lixutian.service.ProcessService;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.OperationProgressService;
+import cn.edu.pku.lixutian.service.RepoSummaryIndexService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.helper.StatisticHelper;
 import com.github.javaparser.ParseException;
@@ -71,9 +72,12 @@ public class ProjectController {
     @Autowired
     OperationProgressService progressService;
 
+    @Autowired
+    RepoSummaryIndexService repoSummaryIndexService;
+
     @GetMapping("/getList")
     public List<ProjectInfoResult> getProjectList() {
-        return projectInfoRepository.findAll()
+        return projectInfoRepository.findAllByArchivedFalseOrderByIdAsc()
                 .stream()
                 .map(ProjectInfoResult::new)
                 .toList();
@@ -130,6 +134,9 @@ public class ProjectController {
         try (ProjectState.Scope ignored = ProjectState.bindProject(workspaceId, state)) {
             if (type == ProjectType.JAVA) {
                 processService.process();
+            }
+            if (Boolean.TRUE.equals(projectInfo.getSummaryFlag())) {
+                repoSummaryIndexService.warmRepositoryIndexes(state, request.getRepoId());
             }
             codeMapService.invalidateRepository(request.getRepoId());
         }
@@ -300,7 +307,7 @@ public class ProjectController {
         projectInfo.setSummaryFlag(false);
         projectInfoRepository.save(projectInfo);
 
-        RepoSummaryHelper.runRepoSummary(projectInfo.getId());
+        startRepoSummaryPipeline(projectInfo, extractProjectType(projectInfo), repoPath(projectInfo.getId()));
     }
 
     private ProjectInfo createProjectInfo(
@@ -444,7 +451,20 @@ public class ProjectController {
         projectInfo.setNof(statisticInfo.get("nof"));
         projectInfoRepository.save(projectInfo);
 
-        RepoSummaryHelper.runRepoSummary(projectInfo.getId());
+        startRepoSummaryPipeline(projectInfo, type, repoPath);
+    }
+
+    private void startRepoSummaryPipeline(ProjectInfo projectInfo, ProjectType type, Path repoPath) throws IOException {
+        Integer repositoryId = projectInfo.getId();
+        RepoSummaryHelper.runRepoSummary(repositoryId, () -> {
+            ProjectState state = ProjectState.loadRepository(repositoryId, repoPath.toString(), type.name());
+            try (ProjectState.Scope ignored = ProjectState.bindProject("reposummary-index-" + repositoryId, state)) {
+                if (type == ProjectType.JAVA) {
+                    processService.process();
+                }
+                repoSummaryIndexService.warmRepositoryIndexes(state, repositoryId);
+            }
+        });
     }
 
     private ProjectType extractProjectType(ProjectInfo projectInfo) {

@@ -9,6 +9,7 @@ import cn.edu.pku.lixutian.config.ProjectState;
 import cn.edu.pku.lixutian.service.CodeMapService;
 import cn.edu.pku.lixutian.service.CandidateCodeService;
 import cn.edu.pku.lixutian.service.OperationProgressService;
+import cn.edu.pku.lixutian.service.RepoSummaryIndexService;
 import cn.edu.pku.lixutian.service.code.AgentRunRegistry;
 import cn.edu.pku.lixutian.service.ProcessService;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,17 +26,20 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -67,6 +71,9 @@ class ProjectControllerTest {
 
     @MockitoBean
     private OperationProgressService operationProgressService;
+
+    @MockitoBean
+    private RepoSummaryIndexService repoSummaryIndexService;
 
     @Autowired
     private ProjectController projectController;
@@ -132,6 +139,19 @@ class ProjectControllerTest {
     }
 
     @Test
+    void projectListOnlyUsesUnarchivedRepositoryQuery() throws Exception {
+        when(projectInfoRepository.findAllByArchivedFalseOrderByIdAsc()).thenReturn(List.of(project));
+
+        mockMvc.perform(get("/project/getList"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(12))
+                .andExpect(jsonPath("$[0].projectName").value("Old Name"));
+
+        verify(projectInfoRepository).findAllByArchivedFalseOrderByIdAsc();
+        verify(projectInfoRepository, never()).findAll();
+    }
+
+    @Test
     void selectProjectUsesStoredPythonTypeInsteadOfDescription() throws Exception {
         project.setDescription("Uploaded repository.");
         project.setProjectType("PYTHON");
@@ -142,6 +162,17 @@ class ProjectControllerTest {
                 .andExpect(status().isOk());
 
         verify(processService, never()).process();
+    }
+
+    @Test
+    void selectingSummarizedJavaProjectBuildsGraphAndWarmsIndexes() throws Exception {
+        mockMvc.perform(post("/project/select")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"repoId\":12}"))
+                .andExpect(status().isOk());
+
+        verify(processService).process();
+        verify(repoSummaryIndexService).warmRepositoryIndexes(any(ProjectState.class), eq(12));
     }
 
     @Test

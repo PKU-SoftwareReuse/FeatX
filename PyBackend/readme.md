@@ -23,6 +23,15 @@ featx_pybackend/
 The service entry point is `featx_pybackend.api.server`. RepoSummary remains
 the algorithm name; it is no longer used as a catch-all source directory.
 
+## Embedding Lifecycle
+
+The embedding models are loaded once when PyBackend starts. After RepoSummary
+writes a repository to the database, JavaBackend builds the static graph and
+performs a full BGE cache synchronization before the summary pipeline is marked
+complete. Confirmed file additions, modifications, and deletions then update
+only the affected graph-node vectors and remove stale entries. The persistent
+cache is stored in `output/<repo-id>/embedding-cache.sqlite`.
+
 For ASE artifact evaluation, reviewers should normally run RepoSummary through
 the top-level Docker Compose deployment. The backend container installs the
 Python dependencies and invokes RepoSummary as part of FeatX workflows. A
