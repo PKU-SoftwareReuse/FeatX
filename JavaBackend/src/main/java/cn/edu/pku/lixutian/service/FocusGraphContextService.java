@@ -122,25 +122,38 @@ public class FocusGraphContextService {
     private void updateProgress(JsonNode root) {
         try {
             String stage = root.path("stage").asText("focusgraph");
-            String message = root.path("message").asText(stage);
             int step = root.path("step").asInt(2);
             int total = root.path("total").asInt(8);
-            Map<String, Object> details = new LinkedHashMap<>();
-            root.fields().forEachRemaining(entry -> {
-                String key = entry.getKey();
-                if (!"stage".equals(key) && !"message".equals(key) && !"step".equals(key) && !"total".equals(key)) {
-                    JsonNode value = entry.getValue();
-                    if (value.isNumber()) {
-                        details.put(key, value.numberValue());
-                    } else if (value.isBoolean()) {
-                        details.put(key, value.booleanValue());
-                    } else {
-                        details.put(key, value.asText());
-                    }
-                }
-            });
-            progressService.update(stage, message, step, total, details);
+            progressService.update(stage, step, total, progressMessageArgs(root));
         } catch (Exception ignored) {
+        }
+    }
+
+    private Map<String, Object> progressMessageArgs(JsonNode root) {
+        Map<String, Object> messageArgs = new LinkedHashMap<>();
+        JsonNode argsNode = root.path("messageArgs");
+        if (argsNode.isObject()) {
+            argsNode.fields().forEachRemaining(entry -> putProgressArg(messageArgs, entry.getKey(), entry.getValue()));
+            return messageArgs;
+        }
+        root.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            if ("stage".equals(key) || "message".equals(key) || "messageKey".equals(key)
+                    || "step".equals(key) || "total".equals(key)) {
+                return;
+            }
+            putProgressArg(messageArgs, key, entry.getValue());
+        });
+        return messageArgs;
+    }
+
+    private void putProgressArg(Map<String, Object> target, String key, JsonNode value) {
+        if (value.isNumber()) {
+            target.put(key, value.numberValue());
+        } else if (value.isBoolean()) {
+            target.put(key, value.booleanValue());
+        } else {
+            target.put(key, value.asText());
         }
     }
 

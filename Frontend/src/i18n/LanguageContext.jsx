@@ -49,7 +49,7 @@ export const LanguageProvider = ({children}) => {
             "content",
             isChinese
                 ? "FeatX：通过编辑功能特征来编辑软件"
-                : "Web site created using create-react-app"
+                : "FeatX: Edit software by editing features"
         );
     }, [language]);
 

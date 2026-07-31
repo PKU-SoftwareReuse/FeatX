@@ -17,13 +17,13 @@ TYPE_CATEGORIES = {"Enum", "Annotation"}
 FIELD_CATEGORIES = {"Field", "AnnotationMember"}
 
 
-def _progress(stage: str, message: str, step: int, **details: Any) -> None:
+def _progress(stage: str, step: int, **message_args: Any) -> None:
     payload = {
         "stage": stage,
-        "message": message,
+        "messageKey": f"progress.operation.{stage}",
+        "messageArgs": message_args,
         "step": step,
         "total": 8,
-        **details,
     }
     callback = getattr(_PROGRESS_CONTEXT, "callback", None)
     if callback is not None:
@@ -64,7 +64,6 @@ def retrieve_features(
 
     _progress(
         "feature-retrieval",
-        "Retrieving top-k Java features with all-MiniLM-L6-v2 embedding search.",
         3,
         featureCount=len(features),
         queryLength=len(query),
@@ -137,7 +136,6 @@ def retrieve_features(
 
     _progress(
         "seed-methods",
-        "Collecting Java seed methods from the selected features.",
         4,
         selectedFeatureCount=len(selected_features),
         seedMethodCount=len(seed_methods),
@@ -229,7 +227,6 @@ def rank_graph(
 
     _progress(
         "graph-ranking",
-        "Ranking Java maxGraph nodes with BGE-code similarity and personalized PageRank.",
         6,
         expandedNodeCount=len(nodes),
         expandedEdgeCount=len(edges),
@@ -305,7 +302,6 @@ def rank_graph(
     ]
     _progress(
         "top-k-subgraph",
-        "Selecting the top-k induced Java reasoning subgraph.",
         6,
         selectedNodeCount=len(selected_ids),
     )

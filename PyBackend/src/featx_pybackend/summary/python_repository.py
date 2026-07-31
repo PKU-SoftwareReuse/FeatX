@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from ..analysis.python.enre.__main__ import main as enre_main
 from ..config.llm import openai_base_url
-from ..paths import MODELS_ROOT, WORKSPACE_ENV_FILE
+from ..paths import WORKSPACE_ENV_FILE
 from . import repository as repository_summary
 
 
@@ -874,58 +874,7 @@ def _attach_functions_to_files(files: list[repository_summary.File], functions: 
 
 
 def _load_sentence_model():
-    default_model_path = MODELS_ROOT / "sentence-transformers" / "all-mpnet-base-v2"
-    model_path = (
-        os.getenv("PYTHON_SENTENCE_TRANSFORMER_MODEL")
-        or os.getenv("SENTENCE_TRANSFORMER_MODEL")
-        or os.getenv("FOCUSGRAPH_EMBEDDING_MODEL")
-        or (str(default_model_path) if default_model_path.exists() else "sentence-transformers/all-mpnet-base-v2")
-    )
-    allow_download = _truthy_env("REPOSUMMARY_EMBEDDING_ALLOW_DOWNLOAD", False)
-    try:
-        from sentence_transformers import SentenceTransformer
-
-        return SentenceTransformer(model_path, local_files_only=not allow_download)
-    except Exception as exc:
-        print(
-            f"[python-reposummary] SentenceTransformer model unavailable ({model_path}): {exc}. "
-            "Using local hashing embeddings for this run.",
-            file=sys.stderr,
-        )
-        return _HashingTextEncoder()
-
-
-class _HashingTextEncoder:
-    def __init__(self, n_features: int = 384):
-        self.n_features = n_features
-        try:
-            from sklearn.feature_extraction.text import HashingVectorizer
-
-            self.vectorizer = HashingVectorizer(
-                n_features=n_features,
-                alternate_sign=False,
-                norm="l2",
-                analyzer="word",
-                ngram_range=(1, 2),
-            )
-        except Exception:
-            self.vectorizer = None
-
-    def encode(self, texts: Any):
-        single_input = isinstance(texts, str)
-        items = [texts] if single_input else list(texts)
-        items = [str(item or "") for item in items]
-        if self.vectorizer is not None:
-            vectors = self.vectorizer.transform(items).toarray()
-        else:
-            vectors = np.zeros((len(items), self.n_features), dtype=float)
-            for row_index, text in enumerate(items):
-                for token in set(text.lower().replace("/", " ").replace(".", " ").split()):
-                    vectors[row_index, hash(token) % self.n_features] += 1.0
-            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-            norms[norms == 0] = 1.0
-            vectors = vectors / norms
-        return vectors[0] if single_input else vectors
+    return repository_summary.load_summary_embedding_model()
 
 
 def _encode_to_lists(model: Any, texts: list[str]) -> list[list[float]]:

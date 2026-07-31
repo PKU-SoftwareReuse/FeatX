@@ -25,6 +25,7 @@ import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
 import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
 import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
+import {localizeOperationProgressMessage} from "../i18n/progressLocalization";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
@@ -1707,9 +1708,8 @@ const DebloatingPage = () => {
         setOperationProgress({
             operation: progressOperation,
             stage: "agent-stream",
-            message: restoring
-                ? copy.restoringAgentRun
-                : isPythonProject ? copy.streamingPythonAgent : copy.streamingAgent,
+            messageKey: "progress.operation.agent-stream",
+            messageArgs: {restoring},
             currentStep: 8,
             totalSteps: 8,
             running: true,
@@ -1742,8 +1742,9 @@ const DebloatingPage = () => {
             stopProgressPolling()
             setOperationProgress({
                 operation: progressOperation,
-                stage: "complete",
-                message: copy.codeGenerationFinished,
+                stage: "generation-complete",
+                messageKey: "progress.operation.generation-complete",
+                messageArgs: {},
                 currentStep: 8,
                 totalSteps: 8,
                 running: false,
@@ -1781,10 +1782,10 @@ const DebloatingPage = () => {
             setOperationProgress((current) => ({
                 ...(current || {}),
                 stage: "failed",
-                message: detail || copy.codeGenerationFailed,
+                messageKey: "progress.operation.failed",
+                messageArgs: {},
                 running: false,
                 failed: true,
-                error: detail || copy.codeGenerationFailed,
             }))
             message.error(detail || copy.codeGenerationFailed)
         }
@@ -2049,7 +2050,7 @@ const DebloatingPage = () => {
         return (
             <div className={styles.featureListProgress}>
                 <div className={styles.featureListProgressMessage}>
-                    {operationProgress?.message || copy.preparingModification}
+                    {localizeOperationProgressMessage(operationProgress, language)}
                 </div>
                 <Progress
                     percent={progressPercent()}
@@ -2133,7 +2134,8 @@ const DebloatingPage = () => {
         setOperationProgress({
             operation: expectedOperation,
             stage: "submit",
-            message: copy.submittingFeatureDeletion,
+            messageKey: "progress.operation.submit",
+            messageArgs: {},
             currentStep: 0,
             totalSteps: 8,
             running: true,
@@ -2164,12 +2166,12 @@ const DebloatingPage = () => {
                 setOperationProgress({
                     operation: expectedOperation,
                     stage: "failed",
-                    message: msg,
+                    messageKey: "progress.operation.failed",
+                    messageArgs: {},
                     currentStep: operationProgress?.currentStep || 0,
                     totalSteps: operationProgress?.totalSteps || 8,
                     running: false,
                     failed: true,
-                    error: msg
                 })
                 message.error(msg)
             })
@@ -2187,7 +2189,8 @@ const DebloatingPage = () => {
         setOperationProgress({
             operation: expectedOperation,
             stage: "submit",
-            message: selectedType === 'add' ? copy.submittingFeatureAddition : copy.submittingFeatureModification,
+            messageKey: "progress.operation.submit",
+            messageArgs: {},
             currentStep: 0,
             totalSteps: 8,
             running: true,
@@ -2214,12 +2217,12 @@ const DebloatingPage = () => {
                     setOperationProgress({
                         operation: expectedOperation,
                         stage: "failed",
-                        message: msg,
+                        messageKey: "progress.operation.failed",
+                        messageArgs: {},
                         currentStep: operationProgress?.currentStep || 0,
                         totalSteps: operationProgress?.totalSteps || 8,
                         running: false,
                         failed: true,
-                        error: msg
                     })
                     message.error(msg)
                     setLoadingFeatureList(false)
@@ -2250,12 +2253,12 @@ const DebloatingPage = () => {
                     setOperationProgress({
                         operation: expectedOperation,
                         stage: "failed",
-                        message: msg,
+                        messageKey: "progress.operation.failed",
+                        messageArgs: {},
                         currentStep: operationProgress?.currentStep || 0,
                         totalSteps: operationProgress?.totalSteps || 8,
                         running: false,
                         failed: true,
-                        error: msg
                     })
                     message.error(msg)
                     setLoadingFeatureList(false)

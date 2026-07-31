@@ -8,6 +8,13 @@ import API from "../API";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
 import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
+import {
+    formatLocalizedDuration,
+    localizeSummaryProgressMessage,
+    localizeSummaryStageLabel,
+    localizeSummaryStatus,
+    localizeSummaryStepDetail,
+} from "../i18n/progressLocalization";
 
 const WELCOME_COPY = {
     zh: {
@@ -135,7 +142,7 @@ const WELCOME_COPY = {
         javaClasses: "Number of Classes",
         intro: "FeatX provides an integrated environment that supports editing software by editing features. Its workflow can be described as follows:",
         steps: [
-            ["Feature Summarization.", "Constructs a hierarchical feature list to organize repository code into features and epics."],
+            ["Feature Summarization.", "Constructs a hierarchical feature list that organizes repository code into Epics and their features."],
             ["CodeMap Construction.", "Builds a comprehensive CodeMap that captures the full implementation context of each feature."],
             ["CodeAgent Generation.", "A three-stage CodeAgent pipeline generates consistent file-level modifications following established software engineering workflows."],
             ["Diff Confirmation.", "The user reviews the code modifications and applies the confirmed changes back to the repository."],
@@ -146,23 +153,6 @@ const WELCOME_COPY = {
 const formatMetric = (value, language) => value === null || value === undefined
     ? "-"
     : value.toLocaleString(language === "zh" ? "zh-CN" : "en-US");
-
-const formatDuration = (milliseconds) => {
-    if (!milliseconds || milliseconds < 0) {
-        return "0s";
-    }
-    const totalSeconds = Math.floor(milliseconds / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-    if (hours > 0) {
-        return `${hours}h ${minutes}m ${seconds}s`;
-    }
-    if (minutes > 0) {
-        return `${minutes}m ${seconds}s`;
-    }
-    return `${seconds}s`;
-};
 
 const statusColor = (status) => {
     if (status === "done" || status === "complete") return "success";
@@ -429,8 +419,8 @@ const WelcomePage = () => {
         }
         return (
             <div>
-                <div>{progress.message || copy.summaryProgressFallback}</div>
-                <div>{copy.elapsed}: {formatDuration(progress.elapsedMs)}</div>
+                <div>{localizeSummaryProgressMessage(progress, language)}</div>
+                <div>{copy.elapsed}: {formatLocalizedDuration(progress.elapsedMs, language)}</div>
                 <div>{copy.step}: {progress.currentStep}/{progress.totalSteps}</div>
             </div>
         );
@@ -453,12 +443,16 @@ const WelcomePage = () => {
             <div className={styles.summaryProgressPanel}>
                 <div className={styles.summaryProgressHeader}>
                     <div>
-                        <div className={styles.summaryProgressTitle}>{progress.message || copy.summaryProgressFallback}</div>
+                        <div className={styles.summaryProgressTitle}>
+                            {localizeSummaryProgressMessage(progress, language)}
+                        </div>
                         <div className={styles.summaryProgressMuted}>
-                            {copy.elapsed} {formatDuration(progress.elapsedMs)} · {copy.step} {progress.currentStep}/{progress.totalSteps}
+                            {copy.elapsed} {formatLocalizedDuration(progress.elapsedMs, language)} · {copy.step} {progress.currentStep}/{progress.totalSteps}
                         </div>
                     </div>
-                    <Tag color={statusColor(progress.status)}>{progress.status}</Tag>
+                    <Tag color={statusColor(progress.status)}>
+                        {localizeSummaryStatus(progress.status, language)}
+                    </Tag>
                 </div>
                 <Progress
                     percent={Math.round(progressPercent(progress))}
@@ -470,13 +464,15 @@ const WelcomePage = () => {
                     {(progress.steps || []).map(step => (
                         <div key={step.id} className={styles.summaryStepItem}>
                             <Tag color={statusColor(step.status)} className={styles.summaryStepTag}>
-                                {step.status}
+                                {localizeSummaryStatus(step.status, language)}
                             </Tag>
                             <div className={styles.summaryStepBody}>
-                                <div className={styles.summaryStepLabel}>{step.label}</div>
+                                <div className={styles.summaryStepLabel}>
+                                    {localizeSummaryStageLabel(step, language)}
+                                </div>
                                 <div className={styles.summaryProgressMuted}>
-                                    {step.detail || copy.waiting}
-                                    {step.elapsedMs ? ` · ${formatDuration(step.elapsedMs)}` : ""}
+                                    {localizeSummaryStepDetail(step, language)}
+                                    {step.elapsedMs ? ` · ${formatLocalizedDuration(step.elapsedMs, language)}` : ""}
                                     {typeof step.percent === "number" ? ` · ${Math.round(step.percent)}%` : ""}
                                 </div>
                             </div>

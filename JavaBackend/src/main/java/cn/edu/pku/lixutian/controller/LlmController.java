@@ -89,8 +89,7 @@ public class LlmController {
             progressService.start(
                     "java-modify",
                     8,
-                    "start",
-                    "Preparing Java Modify Feature request."
+                    "start"
             );
             AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
             ClusterState state = ClusterState.getInstance();
@@ -108,7 +107,6 @@ public class LlmController {
             );
             progressService.update(
                     "delta-query",
-                    "Extracting the Java feature delta query with LLM.",
                     2,
                     8
             );
@@ -135,10 +133,10 @@ public class LlmController {
                     null,
                     graphContext.getGraphStages()
             );
-            progressService.complete("Java reasoning graph context is ready. Starting Java Agent code generation.");
+            progressService.complete();
             return new AgentRunStartResult(context.runId());
         } catch (IOException | InterruptedException | RuntimeException exception) {
-            progressService.fail(exception.getMessage());
+            progressService.fail();
             agentRunRegistry.fail(runId, exception);
             throw exception;
         }
@@ -153,15 +151,14 @@ public class LlmController {
         progressService.start(
                 "python-modify",
                 8,
-                "start",
-                "Preparing Python Modify Feature request."
+                "start"
         );
         String newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
 
         FeatureResult candidateFeature = ClusterState.getInstance().getCandidateFeature();
         if (candidateFeature == null) {
-            progressService.fail("Please select a Python feature before modifying it.");
+            progressService.fail();
             throw new UnsupportedOperationException("Please select a Python feature before modifying it.");
         }
 
@@ -169,7 +166,6 @@ public class LlmController {
 
         progressService.update(
                 "collect-code-map",
-                "Collecting current feature CodeMap methods.",
                 1,
                 8
         );
@@ -192,7 +188,6 @@ public class LlmController {
 
         progressService.update(
                 "delta-query",
-                "Extracting the feature delta query with LLM.",
                 2,
                 8
         );
@@ -209,12 +204,11 @@ public class LlmController {
 
         progressService.update(
                 "prepare-agent",
-                "Preparing Python Agent inputs from the reasoning graph context.",
                 7,
                 8
         );
         String allFiles = projectFileList(project);
-        progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+        progressService.complete();
         AgentRunContext run = agentRunRegistry.prepare(
                 runId,
                 "modify-python",
@@ -247,8 +241,7 @@ public class LlmController {
             progressService.start(
                     "java-add",
                     8,
-                    "start",
-                    "Preparing Java Add Feature request."
+                    "start"
             );
             AgentLanguage requestLanguage = AgentLanguage.orDefault(request.getLanguage());
             String newRequest = request.getFeatureDescription();
@@ -274,10 +267,10 @@ public class LlmController {
                     request.getModuleId(),
                     graphContext.getGraphStages()
             );
-            progressService.complete("Java reasoning graph context is ready. Starting Java Agent code generation.");
+            progressService.complete();
             return new AgentRunStartResult(context.runId());
         } catch (IOException | InterruptedException | RuntimeException exception) {
-            progressService.fail(exception.getMessage());
+            progressService.fail();
             agentRunRegistry.fail(runId, exception);
             throw exception;
         }
@@ -292,8 +285,7 @@ public class LlmController {
         progressService.start(
                 "python-add",
                 8,
-                "start",
-                "Preparing Python Add Feature request."
+                "start"
         );
         String newRequest = request.getFeatureDescription();
         ClusterState.getInstance().setNewFeatureDescription(newRequest);
@@ -302,7 +294,6 @@ public class LlmController {
 
         progressService.update(
                 "focusgraph-context",
-                "Building FocusGraph context from similar features.",
                 1,
                 8
         );
@@ -314,12 +305,11 @@ public class LlmController {
 
         progressService.update(
                 "prepare-agent",
-                "Preparing Python Agent inputs from the Add Feature reasoning graph context.",
                 7,
                 8
         );
         String allFiles = projectFileList(project);
-        progressService.complete("FocusGraph context is ready. Starting Python Agent code generation.");
+        progressService.complete();
         AgentRunContext run = agentRunRegistry.prepare(
                 runId,
                 "add-python",
@@ -364,12 +354,10 @@ public class LlmController {
             progressService.start(
                     progressOperation,
                     8,
-                    "start",
-                    "Preparing Delete Feature reasoning and safety context."
+                    "start"
             );
             progressService.update(
                     "collect-code-map",
-                    "Collecting current feature CodeMap methods.",
                     1,
                     8
             );
@@ -380,7 +368,6 @@ public class LlmController {
             );
             progressService.update(
                     "ownership-check",
-                    "Protecting CodeMap methods shared with other features.",
                     2,
                     8,
                     Map.of("protectedSharedMethods", sharedMethods.size())
@@ -390,7 +377,6 @@ public class LlmController {
             if (project.isPython()) {
                 progressService.update(
                         "ast-delete-boundary",
-                        "Building the deterministic Python AST deletion boundary.",
                         3,
                         8
                 );
@@ -435,10 +421,10 @@ public class LlmController {
                     null,
                     graphContext.getGraphStages()
             );
-            progressService.complete("Delete reasoning and safety context are ready. Starting Delete Agent.");
+            progressService.complete();
             return new AgentRunStartResult(run.runId());
         } catch (IOException | InterruptedException | RuntimeException e) {
-            progressService.fail(e.getMessage());
+            progressService.fail();
             agentRunRegistry.fail(runId, e);
             throw e;
         }
@@ -476,7 +462,6 @@ public class LlmController {
         } else if (context.mode().equals("modify-python")) {
             progressService.update(
                     "agent-stream",
-                    "Streaming Python Agent code generation.",
                     8,
                     8
             );
@@ -484,7 +469,6 @@ public class LlmController {
         } else if (context.mode().equals("add-python")) {
             progressService.update(
                     "agent-stream",
-                    "Streaming Python Agent code generation.",
                     8,
                     8
             );
@@ -494,7 +478,6 @@ public class LlmController {
         } else if (context.mode().equals("delete")) {
             progressService.update(
                     "agent-stream",
-                    "Streaming Delete Agent code generation.",
                     8,
                     8
             );

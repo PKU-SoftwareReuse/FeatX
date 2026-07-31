@@ -124,3 +124,42 @@ test("keeps the current operation when the switch confirmation is cancelled", as
     expect(API.postProjectPath).toHaveBeenCalledTimes(1);
     expect(mockNavigate).not.toHaveBeenCalled();
 });
+
+test("localizes feature-summary progress and presents modules as Topics in Chinese", async () => {
+    window.localStorage.setItem("featx-language", "zh");
+    API.getProjectsInfo.mockResolvedValue([{...projects[0], summaryFlag: false}]);
+    API.getSummaryProgressAll.mockResolvedValue({
+        12: {
+            status: "running",
+            currentStage: "module-description",
+            messageKey: "progress.summary.module-description",
+            messageArgs: {},
+            elapsedMs: 62_000,
+            currentStep: 6,
+            totalSteps: 9,
+            percent: 50,
+            steps: [{
+                id: "module-description",
+                status: "running",
+                messageKey: "progress.summary.module-description",
+                messageArgs: {},
+                elapsedMs: 2_000,
+                percent: 50,
+            }],
+        },
+    });
+
+    render(
+        <LanguageProvider>
+            <WelcomePage/>
+        </LanguageProvider>
+    );
+
+    await waitFor(() => expect(API.getSummaryProgressAll).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", {name: /详情/}));
+
+    expect((await screen.findAllByText("正在生成主题描述。")).length).toBeGreaterThan(0);
+    expect(screen.getByText("生成主题描述")).not.toBeNull();
+    expect(screen.getAllByText("进行中").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/module descriptions/i)).toBeNull();
+});

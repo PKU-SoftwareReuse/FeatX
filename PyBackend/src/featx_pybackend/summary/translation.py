@@ -161,7 +161,7 @@ def translate_targets(
         return {}
     translate = translator or request_translation
     worker_count = min(
-        max_workers or _positive_int_env("REPOSUMMARY_TRANSLATION_MAX_WORKERS", 8),
+        max_workers or _positive_int_env("REPOSUMMARY_TRANSLATION_MAX_WORKERS", 50),
         len(targets),
     )
     translations: dict[tuple[str, str], str] = {}

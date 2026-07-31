@@ -19,15 +19,15 @@ public class RepoSummaryHelper {
     private static final RepoSummaryHttpClient HTTP_CLIENT = new RepoSummaryHttpClient();
     private static final Map<Integer, ProgressState> PROGRESS_BY_REPO = new ConcurrentHashMap<>();
     private static final List<StepDefinition> STEP_DEFINITIONS = List.of(
-            new StepDefinition("start", "Starting RepoSummary"),
-            new StepDefinition("structure", "Analyzing files and dependencies"),
-            new StepDefinition("function-summary", "Generating function summaries"),
-            new StepDefinition("clustering", "Clustering code into features"),
-            new StepDefinition("feature-description", "Generating feature descriptions"),
-            new StepDefinition("module-description", "Generating module descriptions"),
-            new StepDefinition("database", "Writing summary to database"),
-            new StepDefinition("embedding-cache", "Building embedding cache"),
-            new StepDefinition("complete", "Summary complete")
+            new StepDefinition("start", "progress.summary.start"),
+            new StepDefinition("structure", "progress.summary.structure"),
+            new StepDefinition("function-summary", "progress.summary.function-summary"),
+            new StepDefinition("clustering", "progress.summary.clustering"),
+            new StepDefinition("feature-description", "progress.summary.feature-description"),
+            new StepDefinition("module-description", "progress.summary.module-description"),
+            new StepDefinition("database", "progress.summary.database"),
+            new StepDefinition("embedding-cache", "progress.summary.embedding-cache"),
+            new StepDefinition("complete", "progress.summary.complete")
     );
     private static final Pattern PYTHON_CODET5_PATTERN = Pattern.compile("CodeT5 function descriptions .* (\\d+)/(\\d+) \\(([0-9.]+)%\\)");
     private static final Pattern PYTHON_FEATURE_DESC_PATTERN = Pattern.compile("Feature descriptions running .* (\\d+)/(\\d+) \\(([0-9.]+)%\\)");
@@ -46,12 +46,12 @@ public class RepoSummaryHelper {
         try {
             started = HTTP_CLIENT.postJson("/v1/reposummary/jobs", request, 30);
         } catch (IOException exception) {
-            progressState.fail("Failed to start RepoSummary HTTP job: " + exception.getMessage());
+            progressState.fail();
             throw exception;
         }
         String jobId = started.path("jobId").asText();
         if (jobId.isBlank()) {
-            progressState.fail("RepoSummary HTTP service returned no job id.");
+            progressState.fail();
             throw new IOException("RepoSummary HTTP service returned no job id.");
         }
 
@@ -74,7 +74,7 @@ public class RepoSummaryHelper {
                         if (completionAction != null) {
                             progressState.activateStep(
                                     "embedding-cache",
-                                    "Building static graph and persistent embedding cache."
+                                    Map.of()
                             );
                             completionAction.run();
                             progressState.finishStep("embedding-cache");
@@ -83,16 +83,16 @@ public class RepoSummaryHelper {
                         return;
                     }
                     if ("failed".equals(status)) {
-                        progressState.fail(snapshot.path("error").asText("RepoSummary job failed."));
+                        progressState.fail();
                         return;
                     }
                     Thread.sleep(500L);
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                progressState.fail("RepoSummary progress watcher was interrupted.");
+                progressState.fail();
             } catch (Exception exception) {
-                progressState.fail("Failed to watch RepoSummary HTTP job: " + exception.getMessage());
+                progressState.fail();
             }
         }, "reposummary-job-" + repoId);
         watcher.setDaemon(true);
@@ -122,33 +122,33 @@ public class RepoSummaryHelper {
     private static ProgressState startProgress(Integer repoId) {
         ProgressState state = new ProgressState(repoId);
         PROGRESS_BY_REPO.put(repoId, state);
-        state.activateStep("start", "RepoSummary process started.");
+        state.activateStep("start", Map.of());
         return state;
     }
 
-    private record StepDefinition(String id, String label) {
+    private record StepDefinition(String id, String messageKey) {
     }
 
     private static class ProgressStep {
         private final String id;
-        private final String label;
+        private final String messageKey;
         private String status = "pending";
-        private String detail = "";
+        private Map<String, Object> messageArgs = new LinkedHashMap<>();
         private long startedAtEpochMs = 0L;
         private Long finishedAtEpochMs = null;
         private Double percent = null;
 
         private ProgressStep(StepDefinition definition) {
             this.id = definition.id();
-            this.label = definition.label();
+            this.messageKey = definition.messageKey();
         }
 
         private RepoSummaryProgressResult.StepResult toResult(long now) {
             RepoSummaryProgressResult.StepResult result = new RepoSummaryProgressResult.StepResult();
             result.setId(id);
-            result.setLabel(label);
             result.setStatus(status);
-            result.setDetail(detail);
+            result.setMessageKey(messageKey);
+            result.setMessageArgs(new LinkedHashMap<>(messageArgs));
             result.setStartedAtEpochMs(startedAtEpochMs);
             result.setFinishedAtEpochMs(finishedAtEpochMs);
             result.setElapsedMs(startedAtEpochMs == 0L ? 0L : ((finishedAtEpochMs == null ? now : finishedAtEpochMs) - startedAtEpochMs));
@@ -163,7 +163,8 @@ public class RepoSummaryHelper {
         private final Map<String, ProgressStep> steps = new LinkedHashMap<>();
         private String status = "running";
         private String currentStage = "start";
-        private String message = "RepoSummary process started.";
+        private String messageKey = "progress.summary.start";
+        private Map<String, Object> messageArgs = new LinkedHashMap<>();
         private long updatedAtEpochMs = startedAtEpochMs;
         private Long finishedAtEpochMs = null;
         private Double currentPercent = null;
@@ -186,7 +187,7 @@ public class RepoSummaryHelper {
                 int done = parseInt(codeT5Matcher.group(1));
                 int total = parseInt(codeT5Matcher.group(2));
                 double percent = parseDouble(codeT5Matcher.group(3));
-                activateStep("function-summary", "CodeT5 function descriptions: " + done + "/" + total + ".");
+                activateStep("function-summary", Map.of("done", done, "total", total));
                 setStepPercent("function-summary", percent);
                 currentPercent = percent;
                 if (done >= total) {
@@ -200,7 +201,7 @@ public class RepoSummaryHelper {
                 int done = parseInt(featureDescMatcher.group(1));
                 int total = parseInt(featureDescMatcher.group(2));
                 double percent = parseDouble(featureDescMatcher.group(3));
-                activateStep("feature-description", "Feature descriptions: " + done + "/" + total + ".");
+                activateStep("feature-description", Map.of("done", done, "total", total));
                 setStepPercent("feature-description", percent);
                 currentPercent = percent;
                 if (done >= total) {
@@ -212,80 +213,85 @@ public class RepoSummaryHelper {
             Matcher totalFeaturesMatcher = PYTHON_TOTAL_FEATURES_PATTERN.matcher(line);
             if (totalFeaturesMatcher.find()) {
                 finishStep("clustering");
-                activateStep("feature-description", "Preparing descriptions for "
-                        + totalFeaturesMatcher.group(1) + " clustered features.");
+                activateStep("feature-description", Map.of(
+                        "featureCount", parseInt(totalFeaturesMatcher.group(1))
+                ));
                 return;
             }
 
             Matcher javaClusterFilesMatcher = JAVA_CLUSTER_FILES_PATTERN.matcher(line);
             if (javaClusterFilesMatcher.find()) {
                 finishStep("structure");
-                activateStep("clustering", "Clustering Java files: cluster "
-                        + javaClusterFilesMatcher.group(1) + " has "
-                        + javaClusterFilesMatcher.group(2) + " files.");
+                activateStep("clustering", Map.of(
+                        "clusterId", parseInt(javaClusterFilesMatcher.group(1)),
+                        "fileCount", parseInt(javaClusterFilesMatcher.group(2))
+                ));
                 return;
             }
 
             Matcher javaClusterFunctionsMatcher = JAVA_CLUSTER_FUNCTIONS_PATTERN.matcher(line);
             if (javaClusterFunctionsMatcher.find()) {
                 finishStep("structure");
-                activateStep("clustering", "Clustering Java methods: cluster "
-                        + javaClusterFunctionsMatcher.group(1) + " has "
-                        + countListItems(javaClusterFunctionsMatcher.group(2)) + " functions.");
+                activateStep("clustering", Map.of(
+                        "clusterId", parseInt(javaClusterFunctionsMatcher.group(1)),
+                        "functionCount", countListItems(javaClusterFunctionsMatcher.group(2))
+                ));
                 return;
             }
 
             if (line.contains("Attached ") && line.contains("Python functions to files")) {
                 finishStep("function-summary");
-                activateStep("clustering", "Attaching functions to files and preparing clustering.");
+                activateStep("clustering", Map.of());
                 return;
             }
             if (line.contains("File clustering gamma")) {
                 finishStep("function-summary");
-                activateStep("clustering", line);
+                activateStep("clustering", Map.of());
                 return;
             }
             if (line.contains("Generating descriptions for") && line.contains("clustered features")) {
                 finishStep("clustering");
-                activateStep("feature-description", line);
+                activateStep("feature-description", Map.of());
                 return;
             }
             if (line.contains("Writing summary to database")) {
                 finishStep("module-description");
                 finishStep("feature-description");
-                activateStep("database", "Writing modules, features, CodeMap, and graph edges to database.");
+                activateStep("database", Map.of());
                 return;
             }
             if (line.contains("Database write complete")) {
                 finishStep("database");
-                activateStep("embedding-cache", "Summary data is ready; preparing persistent embedding cache.");
+                activateStep("embedding-cache", Map.of());
                 return;
             }
             if (line.startsWith("Feature ID:") || line.startsWith("Feature ID ")) {
                 finishStep("structure");
-                activateStep("feature-description", "Generating feature descriptions.");
+                activateStep("feature-description", Map.of());
                 return;
             }
             if (line.startsWith("Module ID:")) {
                 finishStep("feature-description");
-                activateStep("module-description", "Generating module descriptions.");
+                activateStep("module-description", Map.of());
                 return;
             }
             if (line.contains("method_adj_matrix.csv") || line.contains("file_adj_matrix.csv")) {
                 finishStep("start");
-                activateStep("structure", "Building dependency matrices.");
+                activateStep("structure", Map.of());
                 return;
             }
             if (line.contains("LLM call failed; retrying")) {
-                message = line;
+                messageKey = "progress.summary.llm-retry";
+                messageArgs = new LinkedHashMap<>();
                 return;
             }
             if (line.toLowerCase().contains("error") || line.toLowerCase().contains("exception")) {
-                message = line;
+                messageKey = "progress.summary.warning";
+                messageArgs = new LinkedHashMap<>();
             }
         }
 
-        private synchronized void activateStep(String stepId, String detail) {
+        private synchronized void activateStep(String stepId, Map<String, Object> args) {
             int targetIndex = indexOf(stepId);
             long now = System.currentTimeMillis();
             for (int i = 0; i < targetIndex; i++) {
@@ -305,9 +311,10 @@ public class RepoSummaryHelper {
                 step.status = "running";
                 step.startedAtEpochMs = now;
             }
-            step.detail = detail;
+            step.messageArgs = args == null ? new LinkedHashMap<>() : new LinkedHashMap<>(args);
             currentStage = stepId;
-            message = detail;
+            messageKey = step.messageKey;
+            messageArgs = new LinkedHashMap<>(step.messageArgs);
             currentPercent = step.percent;
             updatedAtEpochMs = now;
         }
@@ -343,22 +350,24 @@ public class RepoSummaryHelper {
             }
             status = "complete";
             currentStage = "complete";
-            message = "RepoSummary completed.";
+            messageKey = "progress.summary.complete";
+            messageArgs = new LinkedHashMap<>();
             currentPercent = 100.0;
             updatedAtEpochMs = now;
             finishedAtEpochMs = now;
         }
 
-        private synchronized void fail(String reason) {
+        private synchronized void fail() {
             long now = System.currentTimeMillis();
             ProgressStep step = steps.get(currentStage);
             if (step != null) {
                 step.status = "failed";
-                step.detail = reason;
+                step.messageArgs = new LinkedHashMap<>();
                 step.finishedAtEpochMs = now;
             }
             status = "failed";
-            message = reason;
+            messageKey = "progress.summary.failed";
+            messageArgs = new LinkedHashMap<>();
             updatedAtEpochMs = now;
             finishedAtEpochMs = now;
         }
@@ -369,7 +378,8 @@ public class RepoSummaryHelper {
             result.setRepoId(repoId);
             result.setStatus(status);
             result.setCurrentStage(currentStage);
-            result.setMessage(message);
+            result.setMessageKey(messageKey);
+            result.setMessageArgs(new LinkedHashMap<>(messageArgs));
             result.setStartedAtEpochMs(startedAtEpochMs);
             result.setUpdatedAtEpochMs(updatedAtEpochMs);
             result.setFinishedAtEpochMs(finishedAtEpochMs);

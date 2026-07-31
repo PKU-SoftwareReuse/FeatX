@@ -84,25 +84,43 @@ class JavaMethodAnalyzer:
                     import_map[imp.path.rstrip('.*')] = imp.path
             self.import_mapping[file_path] = import_map
             
-            # 处理继承/实现关系
-            for _, node in tree.filter(javalang.tree.ClassDeclaration):
-                self._process_class_declaration(file_path, node, package_name)
-            for _, node in tree.filter(javalang.tree.InterfaceDeclaration):
-                self._process_interface_declaration(file_path, node, package_name)
-            
-            # 处理方法
-            for _, node in tree.filter(javalang.tree.ClassDeclaration):
-                full_class_name = f"{package_name}.{node.name}" if package_name else node.name
+            class_declarations = list(tree.filter(javalang.tree.ClassDeclaration))
+            interface_declarations = list(tree.filter(javalang.tree.InterfaceDeclaration))
+
+            # Process every named type independently. Using node.filter() on an
+            # outer class also returns nested and anonymous-class methods, which
+            # assigns those methods to the wrong declaring type.
+            for path, node in class_declarations:
+                full_class_name = self._qualified_type_name(package_name, path, node)
+                self._process_class_declaration(file_path, node, package_name, full_class_name)
                 self._parse_class_methods(file_path, full_class_name, node)
-            for _, node in tree.filter(javalang.tree.InterfaceDeclaration):
-                full_class_name = f"{package_name}.{node.name}" if package_name else node.name
+            for path, node in interface_declarations:
+                full_class_name = self._qualified_type_name(package_name, path, node)
+                self._process_interface_declaration(file_path, node, package_name, full_class_name)
                 self._parse_class_methods(file_path, full_class_name, node)
                 
         except (javalang.parser.JavaSyntaxError, UnicodeDecodeError) as e:
             print(f"解析文件 {file_path} 时出错: {str(e)}")
     
-    def _process_class_declaration(self, file_path: str, node, package_name: str):
-        full_class_name = f"{package_name}.{node.name}" if package_name else node.name
+    @staticmethod
+    def _qualified_type_name(package_name: str, path, node) -> str:
+        declaration_types = (
+            javalang.tree.ClassDeclaration,
+            javalang.tree.InterfaceDeclaration,
+            javalang.tree.EnumDeclaration,
+            javalang.tree.AnnotationDeclaration,
+        )
+        enclosing_names = [item.name for item in path if isinstance(item, declaration_types)]
+        type_name = ".".join([*enclosing_names, node.name])
+        return f"{package_name}.{type_name}" if package_name else type_name
+
+    def _process_class_declaration(
+            self,
+            file_path: str,
+            node,
+            package_name: str,
+            full_class_name: str,
+    ):
         import_map = self.import_mapping.get(file_path, {})
 
         # 处理继承
@@ -118,8 +136,13 @@ class JavaMethodAnalyzer:
                 if interface_name:
                     self.class_hierarchy[full_class_name].append(interface_name)
     
-    def _process_interface_declaration(self, file_path: str, node, package_name: str):
-        full_interface_name = f"{package_name}.{node.name}" if package_name else node.name
+    def _process_interface_declaration(
+            self,
+            file_path: str,
+            node,
+            package_name: str,
+            full_interface_name: str,
+    ):
         import_map = self.import_mapping.get(file_path, {})
         
         # 处理接口继承
@@ -130,11 +153,12 @@ class JavaMethodAnalyzer:
                     self.class_hierarchy[full_interface_name].append(base_interface)
     
     def _parse_class_methods(self, file_path: str, class_name: str, class_node):
-        # 处理类/接口中的所有方法
-        for _, node in class_node.filter(javalang.tree.MethodDeclaration):
+        # Only direct members belong to this named type. Nested named types are
+        # processed separately and anonymous-class methods are intentionally
+        # omitted because the Java SKG does not create vertices for them.
+        for node in getattr(class_node, "methods", None) or []:
             self._record_method(file_path, class_name, node)
-        # 处理构造函数
-        for _, node in class_node.filter(javalang.tree.ConstructorDeclaration):
+        for node in getattr(class_node, "constructors", None) or []:
             self._record_method(file_path, class_name, node)
     
     def _record_method(self, file_path: str, class_name: str, method_node):
@@ -147,6 +171,8 @@ class JavaMethodAnalyzer:
         params = []
         for param in method_node.parameters:
             param_type = self._get_type_name(param.type)
+            if getattr(param, "varargs", False):
+                param_type = f"{param_type}..."
             param_name = getattr(param, 'name', '')
             # 统一格式：Type name；若缺失名称则仅保留类型
             if param_name:
@@ -707,21 +733,39 @@ class JavaMethodAnalyzer:
         return True
     
     def _get_type_name(self, type_node) -> str:
-        """获取类型名称，处理泛型（仅保留主类型名与泛型参数的主类型名）"""
-        if isinstance(type_node, javalang.tree.ReferenceType):
-            base_name = '.'.join(type_node.name) if isinstance(type_node.name, list) else type_node.name
-            if type_node.arguments:
-                arg_names = []
-                for arg in type_node.arguments:
-                    if hasattr(arg, 'type') and arg.type is not None:
-                        arg_names.append(self._get_type_name(arg.type))
-                    else:
-                        arg_names.append("?")
-                return f"{base_name}<{', '.join(arg_names)}>"
-            return base_name
-        elif hasattr(type_node, 'name'):
-            return type_node.name
-        return ""
+        """Return the declared Java type without dropping qualification or arrays."""
+        if type_node is None:
+            return ""
+
+        type_parts = []
+        current = type_node
+        dimensions = 0
+        while current is not None:
+            raw_name = getattr(current, "name", "")
+            if isinstance(raw_name, list):
+                raw_name = ".".join(raw_name)
+
+            arguments = getattr(current, "arguments", None) or []
+            if arguments:
+                argument_names = []
+                for argument in arguments:
+                    argument_type = getattr(argument, "type", None)
+                    if argument_type is None:
+                        argument_names.append("?")
+                        continue
+                    rendered = self._get_type_name(argument_type)
+                    pattern_type = getattr(argument, "pattern_type", None)
+                    argument_names.append(
+                        f"? {pattern_type} {rendered}" if pattern_type else rendered
+                    )
+                raw_name = f"{raw_name}<{', '.join(argument_names)}>"
+
+            if raw_name:
+                type_parts.append(str(raw_name))
+            dimensions += len(getattr(current, "dimensions", None) or [])
+            current = getattr(current, "sub_type", None)
+
+        return ".".join(type_parts) + "[]" * dimensions
     
     def _write_method_csv(self, output_file: str):
         """写入方法信息到 CSV"""

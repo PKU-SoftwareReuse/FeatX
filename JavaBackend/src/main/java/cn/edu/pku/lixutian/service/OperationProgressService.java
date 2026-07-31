@@ -12,72 +12,69 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OperationProgressService {
     private final ConcurrentHashMap<Integer, ProgressSnapshot> snapshots = new ConcurrentHashMap<>();
 
-    public void start(String operation, int totalSteps, String stage, String message) {
+    public void start(String operation, int totalSteps, String stage) {
+        start(operation, totalSteps, stage, null);
+    }
+
+    public void start(String operation, int totalSteps, String stage, Map<String, Object> messageArgs) {
         snapshots.put(
                 ProjectState.currentRepositoryKey(),
                 new ProgressSnapshot(
                     operation,
                     stage,
-                    message,
+                    messageKey(stage),
+                    messageArgs,
                     0,
                     Math.max(totalSteps, 1),
                     true,
                     false,
-                    null,
-                    Instant.now().toString(),
-                    new LinkedHashMap<>()
+                    Instant.now().toString()
                 )
         );
     }
 
-    public void update(String stage, String message, int step, int totalSteps) {
-        update(stage, message, step, totalSteps, null);
+    public void update(String stage, int step, int totalSteps) {
+        update(stage, step, totalSteps, null);
     }
 
-    public void update(String stage, String message, int step, int totalSteps, Map<String, Object> details) {
+    public void update(String stage, int step, int totalSteps, Map<String, Object> messageArgs) {
         snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
             ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
             return snapshot.withUpdate(
                     stage,
-                    message,
                     Math.max(step, 0),
                     Math.max(totalSteps, 1),
                     true,
                     false,
-                    null,
-                    details
+                    messageArgs
             );
         });
     }
 
-    public void complete(String message) {
+    public void complete() {
         snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
             ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
             return snapshot.withUpdate(
                     "complete",
-                    message,
                     snapshot.totalSteps,
                     snapshot.totalSteps,
                     false,
                     false,
-                    null,
-                    snapshot.details
+                    null
             );
         });
     }
 
-    public void fail(String message) {
+    public void fail() {
         snapshots.compute(ProjectState.currentRepositoryKey(), (ignored, current) -> {
             ProgressSnapshot snapshot = current == null ? ProgressSnapshot.idle() : current;
             return snapshot.withUpdate(
                     "failed",
-                    message,
                     snapshot.currentStep,
                     snapshot.totalSteps,
                     false,
                     true,
-                    message,
-                    snapshot.details
+                    null
             );
         });
     }
@@ -92,78 +89,76 @@ public class OperationProgressService {
         }
     }
 
+    private static String messageKey(String stage) {
+        String normalizedStage = stage == null || stage.isBlank() ? "idle" : stage.trim();
+        return "progress.operation." + normalizedStage;
+    }
+
     public static class ProgressSnapshot {
         private final String operation;
         private final String stage;
-        private final String message;
+        private final String messageKey;
+        private final Map<String, Object> messageArgs;
         private final int currentStep;
         private final int totalSteps;
         private final boolean running;
         private final boolean failed;
-        private final String error;
         private final String updatedAt;
-        private final Map<String, Object> details;
 
         private ProgressSnapshot(
                 String operation,
                 String stage,
-                String message,
+                String messageKey,
+                Map<String, Object> messageArgs,
                 int currentStep,
                 int totalSteps,
                 boolean running,
                 boolean failed,
-                String error,
-                String updatedAt,
-                Map<String, Object> details
+                String updatedAt
         ) {
             this.operation = operation;
             this.stage = stage;
-            this.message = message;
+            this.messageKey = messageKey;
+            this.messageArgs = messageArgs == null ? new LinkedHashMap<>() : new LinkedHashMap<>(messageArgs);
             this.currentStep = currentStep;
             this.totalSteps = totalSteps;
             this.running = running;
             this.failed = failed;
-            this.error = error;
             this.updatedAt = updatedAt;
-            this.details = details == null ? new LinkedHashMap<>() : new LinkedHashMap<>(details);
         }
 
         private static ProgressSnapshot idle() {
             return new ProgressSnapshot(
                     "idle",
                     "idle",
-                    "No operation is running.",
+                    messageKey("idle"),
+                    null,
                     0,
                     1,
                     false,
                     false,
-                    null,
-                    Instant.now().toString(),
-                    new LinkedHashMap<>()
+                    Instant.now().toString()
             );
         }
 
         private ProgressSnapshot withUpdate(
                 String stage,
-                String message,
                 int currentStep,
                 int totalSteps,
                 boolean running,
                 boolean failed,
-                String error,
-                Map<String, Object> details
+                Map<String, Object> messageArgs
         ) {
             return new ProgressSnapshot(
                     operation,
                     stage,
-                    message,
+                    messageKey(stage),
+                    messageArgs,
                     currentStep,
                     totalSteps,
                     running,
                     failed,
-                    error,
-                    Instant.now().toString(),
-                    details
+                    Instant.now().toString()
             );
         }
 
@@ -175,8 +170,12 @@ public class OperationProgressService {
             return stage;
         }
 
-        public String getMessage() {
-            return message;
+        public String getMessageKey() {
+            return messageKey;
+        }
+
+        public Map<String, Object> getMessageArgs() {
+            return new LinkedHashMap<>(messageArgs);
         }
 
         public int getCurrentStep() {
@@ -195,16 +194,8 @@ public class OperationProgressService {
             return failed;
         }
 
-        public String getError() {
-            return error;
-        }
-
         public String getUpdatedAt() {
             return updatedAt;
-        }
-
-        public Map<String, Object> getDetails() {
-            return details;
         }
     }
 }

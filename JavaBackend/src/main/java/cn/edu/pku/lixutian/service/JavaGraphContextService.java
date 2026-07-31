@@ -131,7 +131,6 @@ public class JavaGraphContextService {
 
         progressService.update(
                 "max-graph",
-                "Building the Java Expanded Graph directly from SKG.getMaxGraph(selectedClusterIds).",
                 5,
                 8,
                 Map.of("selectedClusterCount", selectedClusterIds.size())
@@ -210,7 +209,6 @@ public class JavaGraphContextService {
 
         progressService.update(
                 "context-prompt",
-                "Assembling Java request, complete CodeMap, class skeletons, code, and graph relations.",
                 7,
                 8
         );
@@ -754,21 +752,39 @@ public class JavaGraphContextService {
 
     private void updateProgress(JsonNode root) {
         try {
-            Map<String, Object> details = new LinkedHashMap<>();
-            root.fields().forEachRemaining(entry -> {
-                String key = entry.getKey();
-                if (Set.of("stage", "message", "step", "total").contains(key)) return;
-                JsonNode value = entry.getValue();
-                details.put(key, value.isNumber() ? value.numberValue() : value.asText());
-            });
+            Map<String, Object> messageArgs = progressMessageArgs(root);
             progressService.update(
                     root.path("stage").asText("java-graph"),
-                    root.path("message").asText("Building Java reasoning graph."),
                     root.path("step").asInt(3),
                     root.path("total").asInt(8),
-                    details
+                    messageArgs
             );
         } catch (Exception ignored) {
+        }
+    }
+
+    private Map<String, Object> progressMessageArgs(JsonNode root) {
+        Map<String, Object> messageArgs = new LinkedHashMap<>();
+        JsonNode argsNode = root.path("messageArgs");
+        if (argsNode.isObject()) {
+            argsNode.fields().forEachRemaining(entry -> putProgressArg(messageArgs, entry.getKey(), entry.getValue()));
+            return messageArgs;
+        }
+        root.fields().forEachRemaining(entry -> {
+            String key = entry.getKey();
+            if (Set.of("stage", "message", "messageKey", "step", "total").contains(key)) return;
+            putProgressArg(messageArgs, key, entry.getValue());
+        });
+        return messageArgs;
+    }
+
+    private void putProgressArg(Map<String, Object> target, String key, JsonNode value) {
+        if (value.isNumber()) {
+            target.put(key, value.numberValue());
+        } else if (value.isBoolean()) {
+            target.put(key, value.booleanValue());
+        } else {
+            target.put(key, value.asText());
         }
     }
 

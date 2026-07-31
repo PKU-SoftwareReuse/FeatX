@@ -10,8 +10,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.*;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Getter
 @Setter
@@ -49,14 +47,10 @@ public class FeatureResult {
 
         for (CodeMap codeMap : feature.getMethodNameList()) {
             CandidateMethod candidateMethod = new CandidateMethod(codeMap.getMethodName());
-            String shortSignature = candidateMethod.getZyfShortSignature();
-            // 构建正则：例如 Result.setCode -> .*\.Result\.setCode\(
-            String normalizedShortSignature = normalizeShortSignature(shortSignature);
-            String regex = ".*\\b" + Pattern.quote(normalizedShortSignature) + ".*";
-
-            List<String> matchedFullSignatures = fullMethodSignatureList.stream()
-                    .filter(fullSignature -> fullSignature.matches(regex))
-                    .collect(Collectors.toList());
+            List<String> matchedFullSignatures = matchingFullSignatures(
+                    candidateMethod.getZyfShortSignature(),
+                    fullMethodSignatureList
+            );
 
             for (String matchedFullSignature : matchedFullSignatures) {
                 candidateMethod.addFullCandidateMethod(matchedFullSignature);
@@ -66,28 +60,130 @@ public class FeatureResult {
     }
 
     public static String normalizeShortSignature(String fullSignature) {
-        int leftParen = fullSignature.indexOf('(');
-        int rightParen = fullSignature.lastIndexOf(')');
-        if (leftParen == -1 || rightParen == -1 || rightParen <= leftParen) return fullSignature;
+        MethodSignature signature = parseSignature(fullSignature);
+        if (signature == null) {
+            return fullSignature;
+        }
+        return signature.declaringType + "." + signature.methodName
+                + "(" + String.join(", ", signature.parameterTypes) + ")";
+    }
 
-        String beforeArgs = fullSignature.substring(0, leftParen).trim();
-        String args = fullSignature.substring(leftParen + 1, rightParen).trim();
-
-        if (args.isEmpty()) return beforeArgs + "()";
-
-        List<String> paramTokens = safeSplitParams(args);
-        List<String> typesOnly = new ArrayList<>();
-
-        for (String param : paramTokens) {
-            param = param.trim();
-            // 如果是泛型或数组，变量名在最后，我们只保留类型
-            // 思路：从后往前找第一个非泛型/非中括号标识符
-            String typePart = extractType(param);
-            String erasedGeneric = removeGenericTypeInfo(typePart);
-            typesOnly.add(erasedGeneric.trim());
+    static List<String> matchingFullSignatures(
+            String codeMapSignature,
+            Collection<String> fullMethodSignatures
+    ) {
+        MethodSignature requested = parseSignature(codeMapSignature);
+        if (requested == null || fullMethodSignatures == null || fullMethodSignatures.isEmpty()) {
+            return Collections.emptyList();
         }
 
-        return beforeArgs + "(" + String.join(", ", typesOnly) + ")";
+        List<String> exactMatches = new ArrayList<>();
+        List<String> legacyArrayMatches = new ArrayList<>();
+        for (String fullSignature : fullMethodSignatures) {
+            MethodSignature available = parseSignature(fullSignature);
+            if (!sameCallable(requested, available)) {
+                continue;
+            }
+            if (requested.parameterTypes.equals(available.parameterTypes)) {
+                exactMatches.add(fullSignature);
+            } else if (sameParametersIgnoringArrayDimensions(requested, available)) {
+                legacyArrayMatches.add(fullSignature);
+            }
+        }
+
+        if (!exactMatches.isEmpty()) {
+            return exactMatches;
+        }
+        // Older RepoSummary output omitted [] from array parameters. Only use
+        // that relaxed match when it identifies one unambiguous declaration.
+        return legacyArrayMatches.size() == 1
+                ? legacyArrayMatches
+                : Collections.emptyList();
+    }
+
+    private static boolean sameCallable(MethodSignature requested, MethodSignature available) {
+        if (available == null || requested.parameterTypes.size() != available.parameterTypes.size()) {
+            return false;
+        }
+        if (!sameDeclaringType(requested.declaringType, available.declaringType)) {
+            return false;
+        }
+        String requestedMethod = requested.methodName;
+        if ("<init>".equals(requestedMethod)) {
+            requestedMethod = simpleTypeName(requested.declaringType);
+        }
+        return requestedMethod.equals(available.methodName);
+    }
+
+    private static boolean sameDeclaringType(String left, String right) {
+        String normalizedLeft = left.replace('$', '.');
+        String normalizedRight = right.replace('$', '.');
+        return normalizedLeft.equals(normalizedRight)
+                || normalizedLeft.endsWith("." + normalizedRight)
+                || normalizedRight.endsWith("." + normalizedLeft);
+    }
+
+    private static boolean sameParametersIgnoringArrayDimensions(
+            MethodSignature requested,
+            MethodSignature available
+    ) {
+        for (int index = 0; index < requested.parameterTypes.size(); index++) {
+            String requestedType = requested.parameterTypes.get(index).replace("[]", "");
+            String availableType = available.parameterTypes.get(index).replace("[]", "");
+            if (!requestedType.equals(availableType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static MethodSignature parseSignature(String signature) {
+        if (signature == null) {
+            return null;
+        }
+        int leftParen = signature.indexOf('(');
+        int rightParen = signature.lastIndexOf(')');
+        if (leftParen < 0 || rightParen <= leftParen) {
+            return null;
+        }
+
+        String callable = signature.substring(0, leftParen).trim();
+        int methodSeparator = callable.lastIndexOf('.');
+        if (methodSeparator <= 0 || methodSeparator == callable.length() - 1) {
+            return null;
+        }
+
+        String declaringType = callable.substring(0, methodSeparator).trim();
+        String methodName = callable.substring(methodSeparator + 1).trim();
+        String arguments = signature.substring(leftParen + 1, rightParen).trim();
+        List<String> parameterTypes = new ArrayList<>();
+        if (!arguments.isEmpty()) {
+            for (String parameter : safeSplitParams(arguments)) {
+                parameterTypes.add(canonicalType(extractType(parameter)));
+            }
+        }
+        return new MethodSignature(declaringType, methodName, parameterTypes);
+    }
+
+    private static String canonicalType(String declaredType) {
+        String type = declaredType == null ? "" : declaredType.trim();
+        type = type.replaceAll("^final\\s+", "")
+                .replaceAll("^@[\\w.$]+(?:\\([^)]*\\))?\\s*", "")
+                .replace("...", "[]");
+        type = removeGenericTypeInfo(type).replaceAll("\\s+", "");
+
+        int dimensions = 0;
+        while (type.endsWith("[]")) {
+            dimensions++;
+            type = type.substring(0, type.length() - 2);
+        }
+        return simpleTypeName(type) + "[]".repeat(dimensions);
+    }
+
+    private static String simpleTypeName(String type) {
+        String normalized = type == null ? "" : type.trim().replace('$', '.');
+        int separator = normalized.lastIndexOf('.');
+        return separator < 0 ? normalized : normalized.substring(separator + 1);
     }
 
     // 提取类型部分，去掉变量名，保留泛型、数组
@@ -157,6 +253,12 @@ public class FeatureResult {
 
         return result.toString();
     }
+
+    private record MethodSignature(
+            String declaringType,
+            String methodName,
+            List<String> parameterTypes
+    ) {}
 
     @Getter
     @Setter

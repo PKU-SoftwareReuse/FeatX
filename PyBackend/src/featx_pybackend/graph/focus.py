@@ -29,13 +29,13 @@ def _log(message: str) -> None:
     print(f"[focusgraph] {message}", file=sys.stderr)
 
 
-def _progress(stage: str, message: str, step: int, total: int = 8, **details: Any) -> None:
+def _progress(stage: str, step: int, total: int = 8, **message_args: Any) -> None:
     payload = {
         "stage": stage,
-        "message": message,
+        "messageKey": f"progress.operation.{stage}",
+        "messageArgs": message_args,
         "step": step,
         "total": total,
-        **details,
     }
     callback = getattr(_PROGRESS_CONTEXT, "callback", None)
     if callback is not None:
@@ -538,7 +538,6 @@ def _select_features(query: str, features: list[dict[str, Any]], request: dict[s
     if operation == "delete":
         _progress(
             "delete-seeds",
-            "Using the current feature CodeMap as Delete Feature seed methods.",
             3,
             featureId=current_feature_id,
             seedMethodCount=len(current_methods),
@@ -563,7 +562,6 @@ def _select_features(query: str, features: list[dict[str, Any]], request: dict[s
 
     _progress(
         "feature-retrieval",
-        "Retrieving top-k similar features with embedding search.",
         3,
         queryLength=len(query),
         featureCount=len(features),
@@ -639,7 +637,6 @@ def _select_features(query: str, features: list[dict[str, Any]], request: dict[s
     deduped_methods = _dedupe_methods(seed_methods)
     _progress(
         "seed-methods",
-        "Collecting seed methods from selected features.",
         4,
         selectedFeatureCount=len(selected),
         seedMethodCount=len(deduped_methods),
@@ -685,7 +682,6 @@ def _build_reasoning_graph(
 ) -> tuple[dict[str, Any], list[str], list[str], list[dict[str, Any]]]:
     _progress(
         "graph-expansion",
-        "Building the initial graph and running one-hop FocusGraph expansion.",
         5,
         seedMethodCount=len(seed_methods),
     )
@@ -889,7 +885,6 @@ def _build_reasoning_graph(
         documents.append(f"{node.get('label', '')}\n{code}")
     _progress(
         "graph-ranking",
-        "Ranking expanded graph nodes with query-code similarity and personalized PageRank.",
         6,
         expandedNodeCount=len(node_ids),
         expandedEdgeCount=len(edges),
@@ -977,7 +972,6 @@ def _build_reasoning_graph(
     localized_methods = [nodes[node_id].get("methodSignature", node_id) for node_id in selected_ids if nodes[node_id].get("category") == "Function"]
     _progress(
         "top-k-subgraph",
-        "Selecting the top-k induced reasoning subgraph.",
         6,
         selectedNodeCount=len(graph_nodes),
         selectedEdgeCount=len(graph_edges),
@@ -1369,7 +1363,6 @@ def _context_prompt(
 ) -> str:
     _progress(
         "context-prompt",
-        "Building the file-organized context prompt for the Python Agent.",
         7,
         reasoningNodeCount=len(reasoning_graph.get("nodes", [])),
         reasoningEdgeCount=len(reasoning_graph.get("edges", [])),
@@ -1448,7 +1441,6 @@ def build_context(request: dict[str, Any]) -> dict[str, Any]:
     project_root, output_dir = _repo_paths(request)
     _progress(
         "load-summary",
-        "Loading RepoSummary features, methods, and ENRE graph files.",
         2,
         repoId=str(request.get("repoId", "")),
     )
@@ -1466,7 +1458,6 @@ def build_context(request: dict[str, Any]) -> dict[str, Any]:
     selected_features, seed_methods = _select_features(query, features, request)
     _progress(
         "load-enre",
-        "Loading ENRE dependency graph for graph expansion.",
         4,
         methodCount=len(methods_df),
     )

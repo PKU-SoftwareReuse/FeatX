@@ -1,12 +1,16 @@
+import concurrent.futures
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
 from featx_pybackend.summary.translation import (
     build_translation_prompt,
     parse_translation_response,
+    translate_targets,
     translate_features_file,
 )
 
@@ -64,6 +68,28 @@ class TranslateSummaryTest(unittest.TestCase):
             self.assertEqual(["系统管理评论", "系统管理评论"], result["module_desc_cn"].tolist())
             self.assertEqual(["管理员审核评论", "管理员审核评论"], result["desc_cn"].tolist())
             self.assertEqual(["a.A.review()", "a.A.save()"], result["method_name"].tolist())
+
+    def test_defaults_to_50_translation_workers(self):
+        real_executor = concurrent.futures.ThreadPoolExecutor
+        worker_counts = []
+
+        def recording_executor(*args, **kwargs):
+            worker_counts.append(kwargs.get("max_workers", args[0] if args else None))
+            return real_executor(*args, **kwargs)
+
+        targets = [("feature", f"Description {index}") for index in range(51)]
+        with patch.dict(os.environ, {"REPOSUMMARY_TRANSLATION_MAX_WORKERS": ""}):
+            with patch(
+                "featx_pybackend.summary.translation.concurrent.futures.ThreadPoolExecutor",
+                side_effect=recording_executor,
+            ):
+                translations = translate_targets(
+                    targets,
+                    translator=lambda _kind, description: f"CN {description}",
+                )
+
+        self.assertEqual([50], worker_counts)
+        self.assertEqual(51, len(translations))
 
     def test_translation_failure_does_not_modify_csv(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -493,6 +493,25 @@ wait_for_mysql() {
   exit 1
 }
 
+wait_for_pybackend() {
+  printf "Waiting for PyBackend model service"
+  for _ in $(seq 1 120); do
+    if docker exec "$HOST_PYBACKEND_CONTAINER" /opt/reposummary-venv/bin/python -c \
+        "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['REPOSUMMARY_HTTP_PORT'] + '/health', timeout=2)" \
+        >/dev/null 2>&1; then
+      echo " OK"
+      return
+    fi
+    printf "."
+    sleep 2
+  done
+
+  echo
+  echo "Timed out waiting for PyBackend model service" >&2
+  docker logs "$HOST_PYBACKEND_CONTAINER" >&2 || true
+  exit 1
+}
+
 write_host_nginx_conf() {
   local upload_max_size
   upload_max_size="$(read_env_value FEATX_UPLOAD_MAX_SIZE 100m)"
@@ -582,7 +601,7 @@ start_host_stack() {
     --entrypoint /opt/reposummary-venv/bin/python \
     featx-backend:ase26 -m featx_pybackend.api.server >/dev/null
 
-  wait_for_url "http://127.0.0.1:${reposummary_port}/health" "PyBackend model service" 120
+  wait_for_pybackend
 
   docker run -d --name "$HOST_JAVABACKEND_CONTAINER" --network host \
     --env-file .env \
