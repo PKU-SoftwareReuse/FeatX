@@ -1,15 +1,19 @@
 import concurrent.futures
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
 from featx_pybackend.summary.translation import (
+    _request_translation_once,
     build_translation_prompt,
     parse_translation_response,
+    request_translation,
     translate_targets,
     translate_features_file,
 )
@@ -22,12 +26,49 @@ class TranslateSummaryTest(unittest.TestCase):
             parse_translation_response('```json\n{"translation":"管理员审核评论"}\n```'),
         )
 
-    def test_prompt_requests_concise_subject_verb_object_chinese(self):
+    def test_feature_prompt_uses_five_generic_subject_verb_object_examples(self):
         prompt = build_translation_prompt("feature", "As an admin, I want to review comments.")
-        self.assertIn("中文表述精简，只保留主谓宾结构", prompt)
-        self.assertIn("不再按照原有格式表述", prompt)
-        self.assertIn("准确保留原文的核心功能语义", prompt)
-        self.assertNotIn("30", prompt)
+        self.assertIn("主体 + 动作 + 对象 + 必要限定", prompt)
+        self.assertIn("管理员按ID停用账户", prompt)
+        self.assertIn("API网关校验JWT并拒绝过期凭证", prompt)
+        self.assertIn("结尾不添加句号", prompt)
+        self.assertEqual(5, prompt.count("示例 "))
+        self.assertNotIn("NBlog", prompt)
+
+    def test_module_prompt_uses_five_generic_noun_phrase_examples(self):
+        prompt = build_translation_prompt("module", "Comment management and moderation")
+        self.assertIn("功能对象 + 核心能力", prompt)
+        self.assertIn("用户认证与会话管理", prompt)
+        self.assertIn("搜索索引与结果排序", prompt)
+        self.assertEqual(5, prompt.count("示例 "))
+        self.assertNotIn("NBlog", prompt)
+
+    def test_prompt_rejects_unknown_summary_kind(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported translation kind"):
+            build_translation_prompt("unknown", "Description")
+
+    def test_translation_request_disables_sampling(self):
+        create = MagicMock(
+            return_value=SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"translation":"管理员停用账户"}'))]
+            )
+        )
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        openai_module = SimpleNamespace(OpenAI=MagicMock(return_value=client))
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_API_MODEL": "test-model",
+                "OPENAI_BASE_URL": "https://example.invalid",
+            },
+        ):
+            with patch.dict(sys.modules, {"openai": openai_module}):
+                result = _request_translation_once("feature", "Administrators deactivate accounts")
+
+        self.assertEqual("管理员停用账户", result)
+        self.assertEqual(0, create.call_args.kwargs["temperature"])
 
     def test_parser_only_validates_the_response_shape(self):
         translation = "作为管理员，我想审核评论，以便维护社区秩序"
@@ -109,6 +150,45 @@ class TranslateSummaryTest(unittest.TestCase):
                 translate_features_file(path, translator=translator, max_workers=1)
 
             self.assertEqual(original, path.read_text(encoding="utf-8"))
+
+    def test_translation_uses_ten_total_calls(self):
+        calls = []
+
+        def timeout(_kind, _description):
+            calls.append(1)
+            raise TimeoutError("provider timed out")
+
+        with patch.dict(os.environ, {"REPOSUMMARY_LLM_MAX_ATTEMPTS": "10"}):
+            with patch(
+                "featx_pybackend.summary.translation._request_translation_once",
+                side_effect=timeout,
+            ):
+                with patch("featx_pybackend.summary.translation.time.sleep"):
+                    with self.assertRaises(TimeoutError):
+                        request_translation("feature", "Manage jobs")
+
+        self.assertEqual(10, len(calls))
+
+    def test_translation_retry_delay_is_capped_after_jitter(self):
+        delays = []
+        with patch.dict(
+            os.environ,
+            {
+                "REPOSUMMARY_LLM_MAX_ATTEMPTS": "2",
+                "REPOSUMMARY_LLM_RETRY_BASE_DELAY": "100",
+                "REPOSUMMARY_LLM_RETRY_MAX_DELAY": "60",
+            },
+        ):
+            with patch(
+                "featx_pybackend.summary.translation._request_translation_once",
+                side_effect=TimeoutError("provider timed out"),
+            ):
+                with patch("featx_pybackend.summary.translation.random.random", return_value=1.0):
+                    with patch("featx_pybackend.summary.translation.time.sleep", side_effect=delays.append):
+                        with self.assertRaises(TimeoutError):
+                            request_translation("feature", "Manage jobs")
+
+        self.assertEqual([60.0], delays)
 
 
 if __name__ == "__main__":

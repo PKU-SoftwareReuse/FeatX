@@ -50,4 +50,31 @@ class RepoSummaryProgressProtocolTest {
         assertEquals("module-description", progress.getCurrentStage());
         assertEquals("progress.summary.module-description", progress.getMessageKey());
     }
+
+    @Test
+    void summaryFailureRetainsTheActionableErrorDetail() throws Exception {
+        int repoId = 99103;
+        Method startProgress = RepoSummaryHelper.class.getDeclaredMethod("startProgress", Integer.class);
+        startProgress.setAccessible(true);
+        Object state = startProgress.invoke(null, repoId);
+
+        Method activateStep = state.getClass().getDeclaredMethod("activateStep", String.class, java.util.Map.class);
+        activateStep.setAccessible(true);
+        activateStep.invoke(state, "embedding-cache", java.util.Map.of());
+        Method fail = state.getClass().getDeclaredMethod("fail", String.class);
+        fail.setAccessible(true);
+        fail.invoke(state, "LazyInitializationException: could not initialize proxy");
+
+        RepoSummaryProgressResult progress = RepoSummaryHelper.getProgress(repoId);
+        assertEquals("failed", progress.getStatus());
+        assertEquals("embedding-cache", progress.getCurrentStage());
+        assertEquals(
+                "LazyInitializationException: could not initialize proxy",
+                progress.getMessageArgs().get("error")
+        );
+        assertEquals(
+                "LazyInitializationException: could not initialize proxy",
+                progress.getSteps().get(7).getMessageArgs().get("error")
+        );
+    }
 }

@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import call, patch
 
-from featx_pybackend.summary import python_repository, repository
+from featx_pybackend.summary import embedding, python_repository
 
 
 class SummaryEmbeddingModelTest(unittest.TestCase):
@@ -16,16 +16,16 @@ class SummaryEmbeddingModelTest(unittest.TestCase):
             },
         ):
             with patch.object(
-                repository,
+                embedding,
                 "SentenceTransformer",
                 return_value=shared_model,
             ) as sentence_transformer:
-                repository._load_summary_embedding_model.cache_clear()
+                embedding._load_summary_embedding_model.cache_clear()
                 try:
-                    java_model = repository.load_summary_embedding_model()
+                    java_model = embedding.load_summary_embedding_model()
                     python_model = python_repository._load_sentence_model()
                 finally:
-                    repository._load_summary_embedding_model.cache_clear()
+                    embedding._load_summary_embedding_model.cache_clear()
 
         self.assertIs(shared_model, java_model)
         self.assertIs(shared_model, python_model)

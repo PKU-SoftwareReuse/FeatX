@@ -4,6 +4,8 @@ import cn.edu.pku.lixutian.dto.result.RepoSummaryProgressResult;
 import cn.edu.pku.lixutian.service.RepoSummaryHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -15,6 +17,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class RepoSummaryHelper {
+    private static final Logger LOGGER = LoggerFactory.getLogger(RepoSummaryHelper.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final RepoSummaryHttpClient HTTP_CLIENT = new RepoSummaryHttpClient();
     private static final Map<Integer, ProgressState> PROGRESS_BY_REPO = new ConcurrentHashMap<>();
@@ -46,12 +49,13 @@ public class RepoSummaryHelper {
         try {
             started = HTTP_CLIENT.postJson("/v1/reposummary/jobs", request, 30);
         } catch (IOException exception) {
-            progressState.fail();
+            LOGGER.error("Could not start RepoSummary job for repository {}", repoId, exception);
+            progressState.fail(failureDetail(exception));
             throw exception;
         }
         String jobId = started.path("jobId").asText();
         if (jobId.isBlank()) {
-            progressState.fail();
+            progressState.fail("RepoSummary HTTP service returned no job id.");
             throw new IOException("RepoSummary HTTP service returned no job id.");
         }
 
@@ -76,29 +80,58 @@ public class RepoSummaryHelper {
                                     "embedding-cache",
                                     Map.of()
                             );
-                            completionAction.run();
-                            progressState.finishStep("embedding-cache");
+                            try {
+                                completionAction.run();
+                                progressState.finishStep("embedding-cache");
+                            } catch (Exception exception) {
+                                LOGGER.error(
+                                        "RepoSummary embedding-cache build failed for repository {}",
+                                        repoId,
+                                        exception
+                                );
+                                progressState.fail(failureDetail(exception));
+                                return;
+                            }
                         }
                         progressState.complete();
                         return;
                     }
                     if ("failed".equals(status)) {
-                        progressState.fail();
+                        String error = snapshot.path("error").asText();
+                        if (error.isBlank()) {
+                            error = "RepoSummary worker reported a failed job.";
+                        }
+                        LOGGER.error("RepoSummary job failed for repository {}: {}", repoId, error);
+                        progressState.fail(error);
                         return;
                     }
                     Thread.sleep(500L);
                 }
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
-                progressState.fail();
+                LOGGER.warn("RepoSummary watcher interrupted for repository {}", repoId, exception);
+                progressState.fail("RepoSummary watcher was interrupted.");
             } catch (Exception exception) {
-                progressState.fail();
+                LOGGER.error("RepoSummary watcher failed for repository {}", repoId, exception);
+                progressState.fail(failureDetail(exception));
             }
         }, "reposummary-job-" + repoId);
         watcher.setDaemon(true);
         watcher.start();
 
         System.out.println("RepoSummary HTTP job started (repoId=" + repoId + ", jobId=" + jobId + ")");
+    }
+
+    private static String failureDetail(Throwable throwable) {
+        Throwable cause = throwable;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        String message = cause.getMessage();
+        String detail = message == null || message.isBlank()
+                ? cause.getClass().getSimpleName()
+                : cause.getClass().getSimpleName() + ": " + message;
+        return detail.length() <= 500 ? detail : detail.substring(0, 497) + "...";
     }
 
     @FunctionalInterface
@@ -357,17 +390,20 @@ public class RepoSummaryHelper {
             finishedAtEpochMs = now;
         }
 
-        private synchronized void fail() {
+        private synchronized void fail(String error) {
             long now = System.currentTimeMillis();
+            Map<String, Object> failureArgs = error == null || error.isBlank()
+                    ? new LinkedHashMap<>()
+                    : new LinkedHashMap<>(Map.of("error", error));
             ProgressStep step = steps.get(currentStage);
             if (step != null) {
                 step.status = "failed";
-                step.messageArgs = new LinkedHashMap<>();
+                step.messageArgs = new LinkedHashMap<>(failureArgs);
                 step.finishedAtEpochMs = now;
             }
             status = "failed";
             messageKey = "progress.summary.failed";
-            messageArgs = new LinkedHashMap<>();
+            messageArgs = new LinkedHashMap<>(failureArgs);
             updatedAtEpochMs = now;
             finishedAtEpochMs = now;
         }

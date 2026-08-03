@@ -1,6 +1,5 @@
 import ast
 import csv
-import concurrent.futures
 import json
 import os
 import shutil
@@ -15,9 +14,11 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from ..analysis.python.enre.__main__ import main as enre_main
-from ..config.llm import openai_base_url
 from ..paths import WORKSPACE_ENV_FILE
-from . import repository as repository_summary
+from . import clustering as summary_clustering
+from .description_generation import generate_epic_descriptions, generate_feature_descriptions
+from .embedding import load_summary_embedding_model
+from .models import Feature, File, Function, method_Cluster
 
 
 IGNORED_ANALYSIS_DIRECTORIES = {
@@ -47,39 +48,6 @@ def _positive_int_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
-def _non_negative_int_env(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value >= 0 else default
-
-
-def _positive_float_env(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _optional_positive_int_env(name: str) -> int | None:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
 def _normalize_rel_file(value: Any) -> str:
     path = "" if value is None else str(value).strip()
     path = path.replace("\\", "/")
@@ -91,176 +59,6 @@ def _normalize_rel_file(value: Any) -> str:
 def _short_signature(signature: str) -> str:
     base = str(signature).split("(", 1)[0]
     return base.split(".")[-1] if base else str(signature)
-
-
-def _fallback_description(file_path: str, signatures: list[str]) -> str:
-    names = ", ".join(_short_signature(sig) for sig in signatures[:6])
-    if names:
-        return f"Maintain Python behavior implemented in {file_path}, including {names}."
-    return f"Maintain Python behavior implemented in {file_path}."
-
-
-def _llm_description(file_path: str, rows: list[dict[str, str]]) -> tuple[str | None, str]:
-    if not _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        return None, "fallback:description_disabled"
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None, "fallback:missing_openai_api_key"
-
-    try:
-        from openai import OpenAI
-    except Exception:
-        return None, "fallback:missing_openai_package"
-
-    model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
-    timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
-
-    snippets = []
-    for row in rows[:5]:
-        code = str(row.get("method_code", "") or "")
-        if len(code) > 1200:
-            code = code[:1200] + "\n..."
-        snippets.append(
-            f"Function: {row.get('method_signature', '')}\nCode:\n{code}"
-        )
-
-    prompt = (
-        "Summarize the user-visible feature implemented by the following Python "
-        "functions. Return one concise user story sentence only. Do not invent "
-        "behavior not visible in the code.\n\n"
-        f"File: {file_path}\n\n" + "\n\n".join(snippets)
-    )
-    try:
-        request = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-        }
-        max_tokens = _optional_positive_int_env("REPOSUMMARY_LLM_MAX_TOKENS")
-        if max_tokens is not None:
-            request["max_tokens"] = max_tokens
-        response = client.chat.completions.create(**request)
-        choice = response.choices[0]
-        text = choice.message.content or ""
-        if text.strip():
-            return text.strip(), "llm"
-        finish_reason = getattr(choice, "finish_reason", None) or "unknown"
-        return None, f"fallback:empty_response:{finish_reason}"
-    except Exception as exc:
-        print(f"[python-reposummary] LLM description fallback for {file_path}: {exc}", file=sys.stderr)
-        return None, f"fallback:exception:{type(exc).__name__}"
-
-
-def _llm_description_with_retry(file_path: str, records: list[dict[str, str]]) -> tuple[str | None, str, int]:
-    retry_attempts = _non_negative_int_env("REPOSUMMARY_LLM_RETRY_ATTEMPTS", 2)
-    max_attempts = retry_attempts + 1
-    last_source = "fallback:not_attempted"
-    for attempt in range(1, max_attempts + 1):
-        desc, source = _llm_description(file_path, records)
-        if desc:
-            return desc, source if attempt == 1 else f"{source}:attempt_{attempt}", attempt
-        last_source = source
-        if attempt < max_attempts:
-            print(
-                f"[python-reposummary] Retrying LLM description for {file_path} "
-                f"(attempt {attempt + 1}/{max_attempts}) after {source}",
-                file=sys.stderr,
-            )
-    return None, f"{last_source}:after_{max_attempts}_attempts", max_attempts
-
-
-def _describe_feature_file(file_path: str, records: list[dict[str, str]]) -> dict[str, Any]:
-    started_at = time.perf_counter()
-    signatures = [str(row.get("method_signature", "")) for row in records]
-    source = "fallback:description_disabled"
-    desc = None
-    attempts = 0
-    if _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        if os.getenv("OPENAI_API_KEY"):
-            desc, source, attempts = _llm_description_with_retry(file_path, records)
-        else:
-            source = "fallback:missing_openai_api_key"
-    if not desc:
-        desc = _fallback_description(file_path, signatures)
-    elapsed_seconds = time.perf_counter() - started_at
-    return {
-        "file_path": file_path,
-        "description": desc,
-        "signatures": signatures,
-        "method_count": len([signature for signature in signatures if signature]),
-        "source": source,
-        "attempts": attempts,
-        "elapsed_seconds": elapsed_seconds,
-    }
-
-
-def _write_description_timing(
-    output_dir: Path,
-    description_results: list[dict[str, Any]] | dict[str, dict[str, Any]],
-    wall_seconds: float,
-    max_workers: int,
-) -> None:
-    if isinstance(description_results, dict):
-        rows = [description_results[file_path] for file_path in sorted(description_results.keys())]
-    else:
-        rows = sorted(
-            description_results,
-            key=lambda row: (int(row.get("feature_id", 0) or 0), str(row.get("file_path", ""))),
-        )
-    timing_path = output_dir / "feature_description_timing.csv"
-    with timing_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "feature_index",
-                "feature_id",
-                "cluster_id",
-                "file_path",
-                "method_count",
-                "source",
-                "attempts",
-                "elapsed_seconds",
-                "description",
-            ],
-        )
-        writer.writeheader()
-        for index, row in enumerate(rows, start=1):
-            writer.writerow(
-                {
-                    "feature_index": index,
-                    "feature_id": row.get("feature_id", index),
-                    "cluster_id": row.get("cluster_id", ""),
-                    "file_path": row["file_path"],
-                    "method_count": row["method_count"],
-                    "source": row["source"],
-                    "attempts": row.get("attempts", 0),
-                    "elapsed_seconds": f"{row['elapsed_seconds']:.6f}",
-                    "description": row["description"],
-                }
-            )
-
-    elapsed_values = [float(row["elapsed_seconds"]) for row in rows]
-    average_seconds = sum(elapsed_values) / len(elapsed_values) if elapsed_values else 0.0
-    sorted_elapsed = sorted(elapsed_values)
-    p50_seconds = sorted_elapsed[len(sorted_elapsed) // 2] if sorted_elapsed else 0.0
-    summary = {
-        "feature_count": len(rows),
-        "max_workers": max_workers,
-        "wall_seconds": wall_seconds,
-        "average_seconds_per_feature": average_seconds,
-        "p50_seconds_per_feature": p50_seconds,
-        "max_seconds_per_feature": max(elapsed_values) if elapsed_values else 0.0,
-        "llm_count": sum(1 for row in rows if str(row["source"]).startswith("llm")),
-        "fallback_count": sum(1 for row in rows if not str(row["source"]).startswith("llm")),
-        "retry_attempts": _non_negative_int_env("REPOSUMMARY_LLM_RETRY_ATTEMPTS", 2),
-        "retried_feature_count": sum(1 for row in rows if int(row.get("attempts", 0) or 0) > 1),
-    }
-    (output_dir / "feature_description_timing_summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def _format_duration(seconds: float | None) -> str:
@@ -721,7 +519,7 @@ def _load_codet5_model():
         return None
 
 
-def _apply_codet5_descriptions(functions: list[repository_summary.Function]) -> None:
+def _apply_codet5_descriptions(functions: list[Function]) -> None:
     if not _truthy_env("REPOSUMMARY_PYTHON_USE_CODET5", True):
         return
     loaded = _load_codet5_model()
@@ -801,15 +599,15 @@ def _apply_codet5_descriptions(functions: list[repository_summary.Function]) -> 
             )
 
 
-def _load_python_functions(methods_df: pd.DataFrame) -> list[repository_summary.Function]:
-    functions: list[repository_summary.Function] = []
+def _load_python_functions(methods_df: pd.DataFrame) -> list[Function]:
+    functions: list[Function] = []
     for index, row in methods_df.fillna("").iterrows():
         signature = str(row.get("method_signature", "")).strip()
         if not signature:
             continue
         file_path = _normalize_rel_file(row.get("func_file", "")) or "unknown.py"
         code = str(row.get("method_code", "") or "")
-        function = repository_summary.Function(
+        function = Function(
             func_id=len(functions),
             func_name=_short_signature(signature),
             func_desc=_function_description(signature, file_path, code),
@@ -834,8 +632,8 @@ def _python_file_name(rel_path: str) -> str:
     return Path(rel_path).stem or rel_path.replace("/", ".")
 
 
-def _create_python_files(project_path: Path) -> list[repository_summary.File]:
-    files: list[repository_summary.File] = []
+def _create_python_files(project_path: Path) -> list[File]:
+    files: list[File] = []
     for path in sorted(project_path.rglob("*.py")):
         if any(part in IGNORED_ANALYSIS_DIRECTORIES for part in path.relative_to(project_path).parts):
             continue
@@ -846,7 +644,7 @@ def _create_python_files(project_path: Path) -> list[repository_summary.File]:
             file_code = ""
         file_desc = rel_path[:-3].replace("/", ".") if rel_path.endswith(".py") else rel_path.replace("/", ".")
         files.append(
-            repository_summary.File(
+            File(
                 file_id=len(files),
                 file_name=_python_file_name(rel_path),
                 file_path=rel_path,
@@ -860,7 +658,7 @@ def _create_python_files(project_path: Path) -> list[repository_summary.File]:
     return files
 
 
-def _attach_functions_to_files(files: list[repository_summary.File], functions: list[repository_summary.Function]) -> int:
+def _attach_functions_to_files(files: list[File], functions: list[Function]) -> int:
     files_by_path = {_normalize_rel_file(file.file_path): file for file in files}
     attached = 0
     for function in functions:
@@ -874,7 +672,7 @@ def _attach_functions_to_files(files: list[repository_summary.File], functions: 
 
 
 def _load_sentence_model():
-    return repository_summary.load_summary_embedding_model()
+    return load_summary_embedding_model()
 
 
 def _encode_to_lists(model: Any, texts: list[str]) -> list[list[float]]:
@@ -884,435 +682,9 @@ def _encode_to_lists(model: Any, texts: list[str]) -> list[list[float]]:
     return [np.asarray(vector, dtype=float).tolist() for vector in vectors]
 
 
-def _feature_records(feature: repository_summary.Feature) -> list[dict[str, str]]:
-    records: list[dict[str, str]] = []
-    for function in feature.feature_func_list:
-        records.append(
-            {
-                "method_signature": function.func_fullName,
-                "method_code": function.func_code,
-                "func_file": function.func_file,
-            }
-        )
-    return records
-
-
-def _feature_prompt(feature: repository_summary.Feature) -> str:
-    code_content = ""
-    for function in feature.feature_func_list:
-        code_content += (
-            "function name:" + str(function.func_fullName) + "\n"
-            "function code:" + str(function.func_code) + "\n"
-        )
-    return repository_summary.userstory_prompt.format(code_content=code_content)
-
-
-def _feature_files(feature: repository_summary.Feature) -> str:
-    files = sorted({_normalize_rel_file(function.func_file) for function in feature.feature_func_list if function.func_file})
-    return ";".join(files)
-
-
-def _describe_feature_cluster(feature: repository_summary.Feature) -> dict[str, Any]:
-    started_at = time.perf_counter()
-    records = _feature_records(feature)
-    desc = None
-    flow = ""
-    notf = ""
-    source = "fallback:description_disabled"
-    attempts = 0
-    if _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        if os.getenv("OPENAI_API_KEY"):
-            desc, flow, notf, source, attempts = _llm_feature_description_with_retry(feature)
-        else:
-            source = "fallback:missing_openai_api_key"
-    if not desc:
-        desc = repository_summary.fallback_feature_description(feature)
-    feature.feature_desc = desc
-    feature.feature_flow = flow
-    feature.feature_notf = notf
-    elapsed_seconds = time.perf_counter() - started_at
-    return {
-        "feature_id": feature.feature_id,
-        "cluster_id": feature.cluster_id,
-        "file_path": _feature_files(feature),
-        "description": desc,
-        "method_count": len(feature.feature_func_list),
-        "source": source,
-        "attempts": attempts,
-        "elapsed_seconds": elapsed_seconds,
-    }
-
-
-def _describe_features(feature_list: list[repository_summary.Feature], output_dir: Path) -> None:
-    max_workers = min(
-        _positive_int_env("REPOSUMMARY_PYTHON_LLM_MAX_WORKERS", 4),
-        max(1, len(feature_list)),
-    )
-    started_at = time.perf_counter()
-    results: list[dict[str, Any]] = []
-    should_parallel = (
-        _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True)
-        and bool(os.getenv("OPENAI_API_KEY"))
-        and len(feature_list) > 1
-    )
-    if should_parallel:
-        print(
-            f"[python-reposummary] Generating descriptions for {len(feature_list)} clustered features "
-            f"with {max_workers} workers",
-            file=sys.stderr,
-        )
-        progress_interval = _positive_float_env("REPOSUMMARY_DESCRIPTION_PROGRESS_INTERVAL_SECONDS", 10.0)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_feature = {
-                executor.submit(_describe_feature_cluster, feature): feature
-                for feature in feature_list
-            }
-            pending = set(future_to_feature.keys())
-            _log_description_progress(
-                output_dir,
-                label="Feature descriptions",
-                completed=0,
-                total=len(feature_list),
-                started_at=started_at,
-                results=results,
-                pending=len(pending),
-            )
-            while pending:
-                done, pending = concurrent.futures.wait(
-                    pending,
-                    timeout=progress_interval,
-                    return_when=concurrent.futures.FIRST_COMPLETED,
-                )
-                if not done:
-                    _log_description_progress(
-                        output_dir,
-                        label="Feature descriptions",
-                        completed=len(results),
-                        total=len(feature_list),
-                        started_at=started_at,
-                        results=results,
-                        pending=len(pending),
-                    )
-                    continue
-                for future in done:
-                    feature = future_to_feature[future]
-                    try:
-                        results.append(future.result())
-                    except Exception as exc:
-                        print(
-                            f"[python-reposummary] Description fallback for feature {feature.feature_id}: {exc}",
-                            file=sys.stderr,
-                        )
-                        feature.feature_desc = repository_summary.fallback_feature_description(feature)
-                        results.append(
-                            {
-                                "feature_id": feature.feature_id,
-                                "cluster_id": feature.cluster_id,
-                                "file_path": _feature_files(feature),
-                                "description": feature.feature_desc,
-                                "method_count": len(feature.feature_func_list),
-                                "source": "fallback:description_task_failed",
-                                "attempts": 0,
-                                "elapsed_seconds": 0.0,
-                            }
-                        )
-                _log_description_progress(
-                    output_dir,
-                    label="Feature descriptions",
-                    completed=len(results),
-                    total=len(feature_list),
-                    started_at=started_at,
-                    results=results,
-                    pending=len(pending),
-                )
-    else:
-        for feature in feature_list:
-            results.append(_describe_feature_cluster(feature))
-            _log_description_progress(
-                output_dir,
-                label="Feature descriptions",
-                completed=len(results),
-                total=len(feature_list),
-                started_at=started_at,
-                results=results,
-                pending=len(feature_list) - len(results),
-            )
-    _log_description_progress(
-        output_dir,
-        label="Feature descriptions",
-        completed=len(results),
-        total=len(feature_list),
-        started_at=started_at,
-        results=results,
-        pending=0,
-        final=True,
-    )
-    _write_description_timing(output_dir, results, time.perf_counter() - started_at, max_workers)
-
-
-def _extract_description_text(text: str) -> str:
-    value = str(text or "").strip()
-    if not value:
-        return ""
-    try:
-        cleaned = repository_summary.clean_json_text(value)
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            desc = data.get("description")
-            if desc is None and data:
-                desc = next(iter(data.values()))
-            return str(desc or "").strip()
-    except Exception:
-        pass
-    return value.strip().strip('"').strip()
-
-
-def _parse_feature_payload(text: str) -> dict[str, str]:
-    try:
-        data = repository_summary.parse_usecase_payload(text)
-    except Exception:
-        data = {}
-        desc = _extract_description_text(text)
-        if desc:
-            data["description"] = desc
-    return {
-        "description": str(data.get("description", "") or "").strip(),
-        "flow": str(data.get("flow", "") or "").strip(),
-        "notf": str(data.get("notf", "") or "").strip(),
-    }
-
-
-def _llm_feature_description(feature: repository_summary.Feature) -> tuple[str | None, str, str, str]:
-    if not _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        return None, "", "", "fallback:description_disabled"
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None, "", "", "fallback:missing_openai_api_key"
-    try:
-        from openai import OpenAI
-    except Exception:
-        return None, "", "", "fallback:missing_openai_package"
-
-    model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
-    timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": _feature_prompt(feature)}],
-            response_format={"type": "json_object"},
-            temperature=0.3,
-            top_p=0.95,
-            frequency_penalty=0.5,
-            presence_penalty=0.2,
-        )
-        choice = response.choices[0]
-        parsed = _parse_feature_payload(choice.message.content or "")
-        if parsed["description"]:
-            return parsed["description"], parsed["flow"], parsed["notf"], "llm"
-        finish_reason = getattr(choice, "finish_reason", None) or "unknown"
-        return None, "", "", f"fallback:empty_response:{finish_reason}"
-    except Exception as exc:
-        print(f"[python-reposummary] Feature description fallback for {feature.feature_id}: {exc}", file=sys.stderr)
-        return None, "", "", f"fallback:exception:{type(exc).__name__}"
-
-
-def _llm_feature_description_with_retry(feature: repository_summary.Feature) -> tuple[str | None, str, str, str, int]:
-    retry_attempts = _non_negative_int_env("REPOSUMMARY_LLM_RETRY_ATTEMPTS", 2)
-    max_attempts = retry_attempts + 1
-    last_source = "fallback:not_attempted"
-    for attempt in range(1, max_attempts + 1):
-        desc, flow, notf, source = _llm_feature_description(feature)
-        if desc:
-            return desc, flow, notf, source if attempt == 1 else f"{source}:attempt_{attempt}", attempt
-        last_source = source
-        if source in {
-            "fallback:description_disabled",
-            "fallback:missing_openai_api_key",
-            "fallback:missing_openai_package",
-        }:
-            return None, "", "", source, attempt
-        if attempt < max_attempts:
-            print(
-                f"[python-reposummary] Retrying feature description for {feature.feature_id} "
-                f"(attempt {attempt + 1}/{max_attempts}) after {source}",
-                file=sys.stderr,
-            )
-    return None, "", "", f"{last_source}:after_{max_attempts}_attempts", max_attempts
-
-
-def _llm_module_description(prompt: str, label: str) -> tuple[str | None, str]:
-    if not _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        return None, "fallback:description_disabled"
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        return None, "fallback:missing_openai_api_key"
-    try:
-        from openai import OpenAI
-    except Exception:
-        return None, "fallback:missing_openai_package"
-
-    model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
-    timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
-    client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
-    try:
-        request = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.3,
-            "top_p": 0.95,
-            "frequency_penalty": 0.5,
-            "presence_penalty": 0.2,
-        }
-        max_tokens = _optional_positive_int_env("REPOSUMMARY_LLM_MAX_TOKENS")
-        if max_tokens is not None:
-            request["max_tokens"] = max_tokens
-        response = client.chat.completions.create(**request)
-        choice = response.choices[0]
-        desc = _extract_description_text(choice.message.content or "")
-        if desc:
-            return desc, "llm"
-        finish_reason = getattr(choice, "finish_reason", None) or "unknown"
-        return None, f"fallback:empty_response:{finish_reason}"
-    except Exception as exc:
-        print(f"[python-reposummary] Module description fallback for {label}: {exc}", file=sys.stderr)
-        return None, f"fallback:exception:{type(exc).__name__}"
-
-
-def _llm_module_description_with_retry(prompt: str, label: str) -> tuple[str | None, str, int]:
-    if not _truthy_env("REPOSUMMARY_GENERATE_DESCRIPTION", True):
-        return None, "fallback:description_disabled", 0
-    if not os.getenv("OPENAI_API_KEY"):
-        return None, "fallback:missing_openai_api_key", 0
-    retry_attempts = _non_negative_int_env("REPOSUMMARY_LLM_RETRY_ATTEMPTS", 2)
-    max_attempts = retry_attempts + 1
-    last_source = "fallback:not_attempted"
-    for attempt in range(1, max_attempts + 1):
-        desc, source = _llm_module_description(prompt, label)
-        if desc:
-            return desc, source if attempt == 1 else f"{source}:attempt_{attempt}", attempt
-        last_source = source
-        if source in {
-            "fallback:description_disabled",
-            "fallback:missing_openai_api_key",
-            "fallback:missing_openai_package",
-        }:
-            return None, source, attempt
-        if attempt < max_attempts:
-            print(
-                f"[python-reposummary] Retrying module description for {label} "
-                f"(attempt {attempt + 1}/{max_attempts}) after {source}",
-                file=sys.stderr,
-            )
-    return None, f"{last_source}:after_{max_attempts}_attempts", max_attempts
-
-
-def _write_module_description_timing(output_dir: Path, rows: list[dict[str, Any]]) -> None:
-    path = output_dir / "module_description_timing.csv"
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
-                "module_index",
-                "cluster_id",
-                "feature_count",
-                "method_count",
-                "source",
-                "attempts",
-                "elapsed_seconds",
-                "description",
-            ],
-        )
-        writer.writeheader()
-        for index, row in enumerate(rows, start=1):
-            writer.writerow(
-                {
-                    "module_index": index,
-                    "cluster_id": row.get("cluster_id", ""),
-                    "feature_count": row.get("feature_count", 0),
-                    "method_count": row.get("method_count", 0),
-                    "source": row.get("source", ""),
-                    "attempts": row.get("attempts", 0),
-                    "elapsed_seconds": f"{float(row.get('elapsed_seconds', 0.0)):.6f}",
-                    "description": row.get("description", ""),
-                }
-            )
-
-
-def _merge_features_by_method_cluster(
-    features: list[repository_summary.Feature],
-    method_clusters: list[repository_summary.method_Cluster],
-    output_dir: Path,
-) -> None:
-    merged_descriptions: list[str] = []
-    module_rows: list[dict[str, Any]] = []
-    total_modules = len(method_clusters)
-    for module_index, method_cluster in enumerate(method_clusters, start=1):
-        started_at = time.perf_counter()
-        related_features = [feature for feature in features if feature.cluster_id == method_cluster.cluster_id]
-        if not related_features:
-            method_cluster.cluster_desc = repository_summary.fallback_module_description(method_cluster, related_features)
-            module_rows.append(
-                {
-                    "cluster_id": method_cluster.cluster_id,
-                    "feature_count": 0,
-                    "method_count": len(method_cluster.cluster_func_list),
-                    "source": "fallback:no_related_features",
-                    "attempts": 0,
-                    "elapsed_seconds": time.perf_counter() - started_at,
-                    "description": method_cluster.cluster_desc,
-                }
-            )
-            continue
-        feature_list = "\n".join(
-            f"{index + 1}. {feature.feature_desc}"
-            for index, feature in enumerate(related_features)
-        )
-        module_list = "\n".join(
-            f"{index + 1}. {description}"
-            for index, description in enumerate(merged_descriptions)
-        )
-        prompt = repository_summary.merge_userstory_prompt.format(
-            feature_list=feature_list,
-            module_list=module_list,
-        )
-        print(
-            f"[python-reposummary] Module descriptions running "
-            f"{_progress_bar(module_index - 1, total_modules)} {module_index - 1}/{total_modules} "
-            f"cluster_id={method_cluster.cluster_id} features={len(related_features)}",
-            file=sys.stderr,
-            flush=True,
-        )
-        desc, source, attempts = _llm_module_description_with_retry(prompt, f"module {method_cluster.cluster_id}")
-        if not desc:
-            desc = repository_summary.fallback_module_description(method_cluster, related_features)
-        method_cluster.cluster_desc = desc
-        merged_descriptions.append(desc)
-        module_rows.append(
-            {
-                "cluster_id": method_cluster.cluster_id,
-                "feature_count": len(related_features),
-                "method_count": len(method_cluster.cluster_func_list),
-                "source": source,
-                "attempts": attempts,
-                "elapsed_seconds": time.perf_counter() - started_at,
-                "description": desc,
-            }
-        )
-        print(
-            f"[python-reposummary] Module descriptions running "
-            f"{_progress_bar(module_index, total_modules)} {module_index}/{total_modules} "
-            f"cluster_id={method_cluster.cluster_id} source={source} desc={desc}",
-            file=sys.stderr,
-            flush=True,
-        )
-    _write_module_description_timing(output_dir, module_rows)
-
-
 def _write_cluster_results(
     output_dir: Path,
-    feature_list: list[repository_summary.Feature],
+    feature_list: list[Feature],
     summary: dict[str, Any],
 ) -> None:
     payload = {
@@ -1352,8 +724,8 @@ def _json_safe(value: Any) -> Any:
 
 def _write_features_csv(
     output_dir: Path,
-    feature_list: list[repository_summary.Feature],
-    method_clusters: list[repository_summary.method_Cluster],
+    feature_list: list[Feature],
+    method_clusters: list[method_Cluster],
 ) -> int:
     cluster_desc_by_id = {
         method_cluster.cluster_id: method_cluster.cluster_desc
@@ -1391,7 +763,7 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
     functions = _load_python_functions(methods_df)
     if not functions:
         raise RuntimeError("No Python functions found in methods.csv")
-    repository_summary.func_adj_matrix = _load_method_matrix(output_dir, len(functions))
+    function_adj_matrix = _load_method_matrix(output_dir, len(functions))
 
     files = _create_python_files(project_path)
     attached_functions = _attach_functions_to_files(files, functions)
@@ -1407,9 +779,9 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
         file.file_txt_vector = vector
 
     if len(files) == 1:
-        method_clusters = [repository_summary.method_Cluster(0, "", files[0].func_list)]
+        method_clusters = [method_Cluster(0, "", files[0].func_list)]
     else:
-        best_gamma, best_labels, _ = repository_summary.find_best_resolution(
+        best_gamma, best_labels, _ = summary_clustering.find_best_resolution(
             files,
             a=0.5,
             n_points=25,
@@ -1426,11 +798,11 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
             use_silhouette=False,
         )
         method_clusters = []
-        for cluster in repository_summary.save_to_file_cluster(files, best_labels):
-            func_list: list[repository_summary.Function] = []
+        for cluster in summary_clustering.save_to_file_cluster(files, best_labels):
+            func_list: list[Function] = []
             for file in cluster.cluster_file_list:
                 func_list.extend(file.func_list)
-            method_clusters.append(repository_summary.method_Cluster(cluster.cluster_id, "", func_list))
+            method_clusters.append(method_Cluster(cluster.cluster_id, "", func_list))
         print(
             f"[python-reposummary] File clustering gamma={best_gamma}; modules={len(method_clusters)}",
             file=sys.stderr,
@@ -1441,8 +813,9 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
         for function, vector in zip(method_cluster.cluster_func_list, func_vectors):
             function.func_txt_vector = vector
 
-    feature_list, summary = repository_summary.cluster_all_functions_to_features(
+    feature_list, summary = summary_clustering.cluster_all_functions_to_features(
         method_clusters,
+        function_adj_matrix=function_adj_matrix,
         weight_parameter=0.25,
         gamma_min=0.05,
         gamma_max=0.15,
@@ -1464,8 +837,8 @@ def _write_features(methods_df: pd.DataFrame, output_dir: Path, project_path: Pa
     )
     print(f"[python-reposummary] Total clustered features: {len(feature_list)}", file=sys.stderr)
 
-    _describe_features(feature_list, output_dir)
-    _merge_features_by_method_cluster(feature_list, method_clusters, output_dir)
+    generate_feature_descriptions(feature_list, output_dir=output_dir)
+    generate_epic_descriptions(feature_list, method_clusters, output_dir=output_dir)
     _write_cluster_results(output_dir, feature_list, summary)
     feature_rows = _write_features_csv(output_dir, feature_list, method_clusters)
     pd.DataFrame([function.__dict__ for function in functions]).to_csv(

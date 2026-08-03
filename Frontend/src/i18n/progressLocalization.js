@@ -2,6 +2,13 @@ const normalizedLanguage = (language) => language === "zh" ? "zh" : "en";
 
 const hasValue = (value) => value !== null && value !== undefined && value !== "";
 
+const summaryFailureMessage = (language, args, fallback) => {
+    if (!hasValue(args?.error)) return fallback;
+    return language === "zh"
+        ? `${fallback} 原因：${args.error}`
+        : `${fallback} Cause: ${args.error}`;
+};
+
 const summaryFunctionProgress = (language, args, fallback) => {
     if (!hasValue(args?.done) || !hasValue(args?.total)) return fallback;
     return language === "zh"
@@ -177,7 +184,9 @@ export const localizeSummaryProgressMessage = (progress, language) => {
     const lang = normalizedLanguage(language);
     const copy = SUMMARY_COPY[lang];
     const status = String(progress?.status || "").toLowerCase();
-    if (status === "failed") return copy.summaryFailed;
+    if (status === "failed") {
+        return summaryFailureMessage(lang, progress?.messageArgs, copy.summaryFailed);
+    }
     if (status === "complete" || status === "done") return copy.summaryComplete;
 
     const message = getSummaryMessage(progress, lang)?.[1];
@@ -191,7 +200,10 @@ export const localizeSummaryStepDetail = (step, language) => {
     const label = localizeSummaryStageLabel(step, lang);
 
     if (status === "pending") return copy.waiting;
-    if (status === "failed") return lang === "zh" ? `${label}失败。` : `${label} failed.`;
+    if (status === "failed") {
+        const fallback = lang === "zh" ? `${label}失败。` : `${label} failed.`;
+        return summaryFailureMessage(lang, step?.messageArgs, fallback);
+    }
 
     const message = renderMessage(getSummaryMessage(step, lang)?.[1], step?.messageArgs);
     if (status === "done" || status === "complete") {

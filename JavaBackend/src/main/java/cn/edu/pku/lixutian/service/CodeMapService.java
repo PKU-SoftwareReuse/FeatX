@@ -113,6 +113,7 @@ public class CodeMapService {
     private EntityManager entityManager;
 
 
+    @Transactional(readOnly = true)
     public List<ModuleResult> readFeatureFromDatabase(Integer repoId) {
         if (repoId == null) {
             throw new IllegalStateException("No project is currently selected.");

@@ -135,9 +135,6 @@ public class ProjectController {
             if (type == ProjectType.JAVA) {
                 processService.process();
             }
-            if (Boolean.TRUE.equals(projectInfo.getSummaryFlag())) {
-                repoSummaryIndexService.warmRepositoryIndexes(state, request.getRepoId());
-            }
             codeMapService.invalidateRepository(request.getRepoId());
         }
         ProjectState.assignWorkspace(workspaceId, request.getRepoId());
@@ -457,14 +454,24 @@ public class ProjectController {
     private void startRepoSummaryPipeline(ProjectInfo projectInfo, ProjectType type, Path repoPath) throws IOException {
         Integer repositoryId = projectInfo.getId();
         RepoSummaryHelper.runRepoSummary(repositoryId, () -> {
+            setSummaryReady(repositoryId, false);
             ProjectState state = ProjectState.loadRepository(repositoryId, repoPath.toString(), type.name());
             try (ProjectState.Scope ignored = ProjectState.bindProject("reposummary-index-" + repositoryId, state)) {
                 if (type == ProjectType.JAVA) {
                     processService.process();
                 }
+                codeMapService.invalidateRepository(repositoryId);
                 repoSummaryIndexService.warmRepositoryIndexes(state, repositoryId);
             }
+            setSummaryReady(repositoryId, true);
         });
+    }
+
+    private void setSummaryReady(Integer repositoryId, boolean ready) {
+        ProjectInfo current = projectInfoRepository.findById(repositoryId)
+                .orElseThrow(() -> new IllegalStateException("Project not found: " + repositoryId));
+        current.setSummaryFlag(ready);
+        projectInfoRepository.save(current);
     }
 
     private ProjectType extractProjectType(ProjectInfo projectInfo) {

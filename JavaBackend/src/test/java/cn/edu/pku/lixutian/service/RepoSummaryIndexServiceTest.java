@@ -83,6 +83,34 @@ class RepoSummaryIndexServiceTest {
         }
     }
 
+    @Test
+    void repositoryIndexIsReadyOnlyWhenFeatureAndGraphCachesExist() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(jsonResponse("""
+                    {"entries":[
+                      {"entityKind":"feature","count":3,"bytes":100},
+                      {"entityKind":"graph-node","count":7,"bytes":200}
+                    ]}
+                    """));
+            server.enqueue(jsonResponse("""
+                    {"entries":[
+                      {"entityKind":"feature","count":3,"bytes":100}
+                    ]}
+                    """));
+            server.start();
+
+            RepoSummaryIndexService service = new RepoSummaryIndexService(
+                    new RepoSummaryHttpClient(server.url("/").toString()),
+                    mock(CodeMapService.class)
+            );
+
+            assertTrue(service.isRepositoryIndexReady(12));
+            assertFalse(service.isRepositoryIndexReady(13));
+            assertEquals("/v1/cache/stats/12", server.takeRequest(5, TimeUnit.SECONDS).getPath());
+            assertEquals("/v1/cache/stats/13", server.takeRequest(5, TimeUnit.SECONDS).getPath());
+        }
+    }
+
     private MockResponse jsonResponse(String body) {
         return new MockResponse()
                 .setHeader("Content-Type", "application/json")

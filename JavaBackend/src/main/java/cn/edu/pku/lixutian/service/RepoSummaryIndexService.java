@@ -7,6 +7,7 @@ import cn.edu.pku.lixutian.graph.SKG;
 import cn.edu.pku.lixutian.graph.softwareGraph.vertex.Vertex;
 import cn.edu.pku.lixutian.helper.ProjectPathMapping;
 import cn.edu.pku.lixutian.service.code.AgentRunContext;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -48,6 +49,27 @@ public class RepoSummaryIndexService {
         } else if (project.isPython()) {
             warmPythonIndex(project, repositoryId);
         }
+    }
+
+    public boolean isRepositoryIndexReady(Integer repositoryId) throws IOException {
+        if (repositoryId == null) {
+            return false;
+        }
+        JsonNode stats = httpClient.getJson("/v1/cache/stats/" + repositoryId, 30);
+        boolean featureIndexReady = false;
+        boolean graphIndexReady = false;
+        for (JsonNode entry : stats.path("entries")) {
+            if (entry.path("count").asLong() <= 0) {
+                continue;
+            }
+            String entityKind = entry.path("entityKind").asText();
+            if ("feature".equals(entityKind)) {
+                featureIndexReady = true;
+            } else if ("graph-node".equals(entityKind)) {
+                graphIndexReady = true;
+            }
+        }
+        return featureIndexReady && graphIndexReady;
     }
 
     public void refreshConfirmedChanges(AgentRunContext run, List<String> changedProjectPaths) throws IOException {

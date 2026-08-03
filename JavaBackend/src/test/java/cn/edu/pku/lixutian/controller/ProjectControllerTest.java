@@ -165,14 +165,14 @@ class ProjectControllerTest {
     }
 
     @Test
-    void selectingSummarizedJavaProjectBuildsGraphAndWarmsIndexes() throws Exception {
+    void selectingSummarizedJavaProjectBuildsGraphWithoutBlockingOnIndexWarmup() throws Exception {
         mockMvc.perform(post("/project/select")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"repoId\":12}"))
                 .andExpect(status().isOk());
 
         verify(processService).process();
-        verify(repoSummaryIndexService).warmRepositoryIndexes(any(ProjectState.class), eq(12));
+        verify(repoSummaryIndexService, never()).warmRepositoryIndexes(any(ProjectState.class), eq(12));
     }
 
     @Test

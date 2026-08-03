@@ -55,6 +55,20 @@ describe("feature-summary progress localization", () => {
         expect(formatLocalizedDuration(3_723_000, "zh")).toBe("1 小时 2 分 3 秒");
         expect(formatLocalizedDuration(3_723_000, "en")).toBe("1h 2m 3s");
     });
+
+    test("shows the backend failure detail for a failed summary stage", () => {
+        const progress = {
+            currentStage: "embedding-cache",
+            messageKey: "progress.summary.failed",
+            messageArgs: {error: "LazyInitializationException: could not initialize proxy"},
+            status: "failed",
+        };
+
+        expect(localizeSummaryProgressMessage(progress, "zh"))
+            .toContain("LazyInitializationException: could not initialize proxy");
+        expect(localizeSummaryStepDetail({...progress, id: "embedding-cache"}, "en"))
+            .toContain("Cause: LazyInitializationException: could not initialize proxy");
+    });
 });
 
 describe("feature-operation progress localization", () => {
