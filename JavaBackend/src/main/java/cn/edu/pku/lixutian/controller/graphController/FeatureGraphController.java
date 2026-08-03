@@ -34,25 +34,7 @@ public class FeatureGraphController {
     @GetMapping("/maxGraph")
     public FeatureGraphResult getMaxGraph(@RequestParam Integer featureId) {
         featureController.select(featureId);
-        if (ProjectState.getInstance().isPython()) {
-            FeatureGraphResult graph = codemapService.getPythonFeatureGraph(featureId);
-            java.util.Set<String> pendingPaths = candidateCodeService.pendingModificationKeys().stream()
-                    .map(path -> path.replace('\\', '/'))
-                    .collect(java.util.stream.Collectors.toSet());
-            java.util.Set<String> stagedPaths = candidateCodeService.stagedModificationKeys().stream()
-                    .map(path -> path.replace('\\', '/'))
-                    .collect(java.util.stream.Collectors.toSet());
-            graph.getNodes().forEach(node -> {
-                String path = CodeMapService.resolvePythonNodeToFile(node.getId()).replace('\\', '/');
-                if (stagedPaths.contains(path)) {
-                    node.setType("Staged");
-                } else if (pendingPaths.contains(path)) {
-                    node.setType("Modify");
-                }
-            });
-            return graph;
-        }
-        return codemapService.getMaxGraph();
+        return codemapService.getRepoSummaryFeatureFileGraph(featureId);
     }
 
     @GetMapping("/debloatGraph")

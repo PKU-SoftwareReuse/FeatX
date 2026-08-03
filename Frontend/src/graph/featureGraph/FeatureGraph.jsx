@@ -17,6 +17,25 @@ const nodeColor = (type) => ({
     },
 });
 
+const methodDisplayName = (signature) => {
+    const qualifiedName = String(signature || '').split('(', 1)[0].trim();
+    if (!qualifiedName) return '';
+    const separator = qualifiedName.lastIndexOf('.');
+    const methodName = separator >= 0 ? qualifiedName.slice(separator + 1) : qualifiedName;
+    if (methodName !== '<init>') return methodName;
+
+    const owner = separator >= 0 ? qualifiedName.slice(0, separator) : '';
+    const ownerSeparator = owner.lastIndexOf('.');
+    return owner ? owner.slice(ownerSeparator + 1) : methodName;
+};
+
+const displayedMethods = (methods) => {
+    const values = Array.isArray(methods)
+        ? methods
+        : String(methods || '').split('\n');
+    return [...new Set(values.map(methodDisplayName).filter(Boolean))];
+};
+
 const graphStructure = (graphData) => JSON.stringify({
     nodes: (graphData?.nodes || []).map((node) => ({
         id: node.id,
@@ -47,9 +66,7 @@ const FeatureGraph = ({graphData, onNodeClick, onBackgroundClick, nodeFontSize})
         const currentGraphData = graphDataRef.current;
         if (containerRef.current && currentGraphData && currentGraphData.nodes.length > 0) {
             const nodes = currentGraphData.nodes.map(node => {
-                const funcList = Array.isArray(node.methods)
-                    ? node.methods.join('\n')
-                    : node.methods;
+                const funcList = displayedMethods(node.methods).join('\n');
                 return {
                     id: node.id,
                     label: `${node.id}\n——————————\n${funcList}`,

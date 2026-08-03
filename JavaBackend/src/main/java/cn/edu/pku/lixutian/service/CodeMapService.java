@@ -109,6 +109,9 @@ public class CodeMapService {
     @Autowired
     private RepoSummaryHttpClient repoSummaryHttpClient;
 
+    @Autowired
+    private RepoSummaryFileGraphService repoSummaryFileGraphService;
+
     @PersistenceContext
     private EntityManager entityManager;
 
@@ -194,6 +197,15 @@ public class CodeMapService {
         maxFeatureGraph.setEdges(edgeSet);
 
         return maxFeatureGraph;
+    }
+
+    /**
+     * Read-only file-level CodeMap used by the pre-modification panel.
+     * The legacy Java SKG and Python container graph builders remain available
+     * for delete/new graph workflows and compatibility callers.
+     */
+    public FeatureGraphResult getRepoSummaryFeatureFileGraph(Integer featureId) {
+        return repoSummaryFileGraphService.getFeatureFileGraph(featureId);
     }
 
     public FeatureGraphResult getPythonFeatureGraph(Integer featureId) {

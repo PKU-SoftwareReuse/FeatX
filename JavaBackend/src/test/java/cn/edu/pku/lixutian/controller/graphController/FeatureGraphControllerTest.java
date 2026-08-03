@@ -18,6 +18,8 @@ import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -39,6 +41,26 @@ class FeatureGraphControllerTest {
 
     @MockitoBean
     private AgentRunRegistry agentRunRegistry;
+
+    @Test
+    void maxGraphUsesTheUnifiedRepoSummaryFileGraph(@TempDir Path projectPath) throws Exception {
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+        FeatureGraphResult fileGraph = new FeatureGraphResult(
+                new LinkedHashSet<>(Set.of(new FeatureGraphResult.Node("src/main/java/example/App.java"))),
+                new LinkedHashSet<>()
+        );
+        when(codeMapService.getRepoSummaryFeatureFileGraph(61)).thenReturn(fileGraph);
+
+        mockMvc.perform(get("/graph/feature/maxGraph").param("featureId", "61"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nodes[0].id").value("src/main/java/example/App.java"))
+                .andExpect(jsonPath("$.nodes[0].type").value("Default"));
+
+        verify(featureController).select(61);
+        verify(codeMapService).getRepoSummaryFeatureFileGraph(61);
+        verify(codeMapService, never()).getMaxGraph();
+        verify(codeMapService, never()).getPythonFeatureGraph(61);
+    }
 
     @Test
     void newGraphUsesSourceRelativeJavaClassIds(@TempDir Path projectPath) throws Exception {

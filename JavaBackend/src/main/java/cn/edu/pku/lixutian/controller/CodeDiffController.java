@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -106,6 +107,14 @@ public class CodeDiffController {
 
     @GetMapping("/contextByClass")
     public String contextByClass(@RequestParam String classId) throws IOException {
+        Optional<Path> graphFile = resolveGraphFile(classId);
+        if (graphFile.isPresent()) {
+            String content = Files.readString(graphFile.get(), StandardCharsets.UTF_8);
+            return CodeDiffHelper.generateDiffByCode(content, content, classId);
+        }
+        if (isLanguageSourceFileId(classId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Source file not found: " + classId);
+        }
         if (ProjectState.getInstance().isPython()) {
             String filePath = CodeMapService.resolvePythonNodeToFile(classId);
             String content = ListFileHelper.getPythonFileContent(ProjectState.getInstance().getSrcPath(), filePath);
@@ -115,6 +124,46 @@ public class CodeDiffController {
         Vertex<TypeDeclaration<?>> classVertex = vertexMap.getClassDeclaration(classId);
 
         return CodeDiffHelper.generateContextDiff(SKG.getInstance(), classVertex, ClusterState.getInstance().getClusterIds());
+    }
+
+    private Optional<Path> resolveGraphFile(String nodeId) {
+        if (!isLanguageSourceFileId(nodeId)) {
+            return Optional.empty();
+        }
+
+        ProjectState project = ProjectState.getInstance();
+        try {
+            String projectRelativePath = ProjectFilePath.normalize(nodeId);
+            Path projectFile = ProjectPathMapping.resolveProjectFile(project, projectRelativePath);
+            if (Files.isRegularFile(projectFile)) {
+                return Optional.of(projectFile);
+            }
+        } catch (IllegalArgumentException | IllegalStateException ignored) {
+            // The node may use the legacy source-root-relative file protocol.
+        }
+
+        try {
+            String sourceRelativePath = project.isJava()
+                    ? JavaFilePath.normalize(nodeId)
+                    : ProjectFilePath.normalize(nodeId);
+            Path sourceFile = ProjectFilePath.resolve(
+                    Path.of(project.getSrcPath()),
+                    sourceRelativePath
+            );
+            return Files.isRegularFile(sourceFile) ? Optional.of(sourceFile) : Optional.empty();
+        } catch (IllegalArgumentException | IllegalStateException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    private boolean isLanguageSourceFileId(String nodeId) {
+        if (nodeId == null) {
+            return false;
+        }
+        String normalized = nodeId.trim().toLowerCase();
+        return ProjectState.getInstance().isPython()
+                ? normalized.endsWith(".py")
+                : normalized.endsWith(".java");
     }
 
     @GetMapping("/newDiffByClass")

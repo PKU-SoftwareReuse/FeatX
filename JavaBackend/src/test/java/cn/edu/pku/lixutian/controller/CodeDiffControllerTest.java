@@ -40,6 +40,47 @@ class CodeDiffControllerTest {
     private AgentRunRegistry agentRunRegistry;
 
     @Test
+    void contextByClassReadsTheWholeJavaFileNode(@TempDir Path projectPath) throws Exception {
+        String relativePath = "src/main/java/example/WholeFile.java";
+        Path sourceFile = projectPath.resolve(relativePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, String.join("\n",
+                "package example;",
+                "class WholeFile {",
+                "    int first = 1;",
+                "    int last = 2;",
+                "}"
+        ));
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+
+        mockMvc.perform(get("/code/contextByClass").param("classId", relativePath))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("--- " + relativePath)))
+                .andExpect(content().string(containsString(" package example;")))
+                .andExpect(content().string(containsString("     int last = 2;")));
+    }
+
+    @Test
+    void contextByClassReadsTheWholePythonFileNode(@TempDir Path projectPath) throws Exception {
+        String relativePath = "src/main/python/sample/whole_file.py";
+        Path sourceFile = projectPath.resolve(relativePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, String.join("\n",
+                "VALUE = 1",
+                "",
+                "def run():",
+                "    return VALUE"
+        ));
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "PYTHON");
+
+        mockMvc.perform(get("/code/contextByClass").param("classId", relativePath))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("--- " + relativePath)))
+                .andExpect(content().string(containsString(" VALUE = 1")))
+                .andExpect(content().string(containsString("     return VALUE")));
+    }
+
+    @Test
     void repositoryDiffIncludesTrackedAndUntrackedFiles(@TempDir Path repoPath) throws Exception {
         runGit(repoPath, "init", "-b", "main");
         runGit(repoPath, "config", "user.name", "FeatX Test");

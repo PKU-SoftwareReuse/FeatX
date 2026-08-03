@@ -77,6 +77,37 @@ test("waits for an explicit node click and clears selection on a background clic
     expect(mockUnselectAll).toHaveBeenCalledTimes(1);
 });
 
+test("shows only unique unqualified function names in file nodes", async () => {
+    const fileGraphData = {
+        nodes: [{
+            id: "src/main/java/example/Demo.java",
+            methods: [
+                "example.Demo.run(String)",
+                "example.Demo.run(Integer)",
+                "sample.module.help(value, flag)",
+                "example.Demo.<init>()",
+            ],
+            type: "Default",
+        }],
+        edges: [],
+    };
+
+    render(
+        <FeatureGraph
+            graphData={fileGraphData}
+            onNodeClick={jest.fn(() => true)}
+            onBackgroundClick={jest.fn(() => true)}
+            nodeFontSize={17}
+        />
+    );
+
+    await waitFor(() => expect(mockNetworkCreated).toHaveBeenCalledTimes(1));
+    const renderedNode = mockNetworkCreated.mock.calls[0][1].nodes.items[0];
+    expect(renderedNode.label).toContain("\nrun\nhelp\nDemo");
+    expect(renderedNode.label).not.toContain("example.Demo.run");
+    expect(renderedNode.label.match(/\nrun/g)).toHaveLength(1);
+});
+
 test("updates node colors in place without rebuilding or moving the graph", async () => {
     const onNodeClick = jest.fn(() => true);
     const {rerender} = render(
