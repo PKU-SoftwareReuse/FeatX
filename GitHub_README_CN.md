@@ -114,7 +114,7 @@ docker compose down -v
 *   Java JDK 17，以及 `JavaBackend/mvnw`
 *   Node.js 20.x 和 npm 10.x
 *   Python 3.10，以及 `PyBackend/requirements.txt` 中的依赖
-*   MySQL 8，并使用 `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql` 初始化 schema
+*   MySQL 8，并使用 `JavaBackend/src/main/java/com/mycode/dao/update-schema.sql` 初始化 schema
 *   用于完整流程的 OpenAI-compatible LLM API
 *   生产环境前端可使用 Nginx 或其他静态文件服务器
 

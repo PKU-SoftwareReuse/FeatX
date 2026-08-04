@@ -1,0 +1,12 @@
+package com.mycode.dto.request;
+
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
+public class GitCommitRequest {
+    private String operation;
+    private String message;
+    private String runId;
+}

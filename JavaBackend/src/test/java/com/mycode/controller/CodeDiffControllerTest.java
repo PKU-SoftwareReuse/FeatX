@@ -1,0 +1,146 @@
+package com.mycode.controller;
+
+import com.mycode.config.ProjectState;
+import com.mycode.dto.result.CodeFileDiffResult;
+import com.mycode.service.CandidateCodeService;
+import com.mycode.service.RepositoryGitService;
+import com.mycode.service.code.AgentRunRegistry;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Optional;
+
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(CodeDiffController.class)
+class CodeDiffControllerTest {
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private CandidateCodeService candidateCodeService;
+
+    @MockitoBean
+    private RepositoryGitService repositoryGitService;
+
+    @MockitoBean
+    private AgentRunRegistry agentRunRegistry;
+
+    @Test
+    void contextByClassReadsTheWholeJavaFileNode(@TempDir Path projectPath) throws Exception {
+        String relativePath = "src/main/java/example/WholeFile.java";
+        Path sourceFile = projectPath.resolve(relativePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, String.join("\n",
+                "package example;",
+                "class WholeFile {",
+                "    int first = 1;",
+                "    int last = 2;",
+                "}"
+        ));
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+
+        mockMvc.perform(get("/code/contextByClass").param("classId", relativePath))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("--- " + relativePath)))
+                .andExpect(content().string(containsString(" package example;")))
+                .andExpect(content().string(containsString("     int last = 2;")));
+    }
+
+    @Test
+    void contextByClassReadsTheWholePythonFileNode(@TempDir Path projectPath) throws Exception {
+        String relativePath = "src/main/python/sample/whole_file.py";
+        Path sourceFile = projectPath.resolve(relativePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, String.join("\n",
+                "VALUE = 1",
+                "",
+                "def run():",
+                "    return VALUE"
+        ));
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "PYTHON");
+
+        mockMvc.perform(get("/code/contextByClass").param("classId", relativePath))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("--- " + relativePath)))
+                .andExpect(content().string(containsString(" VALUE = 1")))
+                .andExpect(content().string(containsString("     return VALUE")));
+    }
+
+    @Test
+    void repositoryDiffIncludesTrackedAndUntrackedFiles(@TempDir Path repoPath) throws Exception {
+        runGit(repoPath, "init", "-b", "main");
+        runGit(repoPath, "config", "user.name", "FeatX Test");
+        runGit(repoPath, "config", "user.email", "featx-test@localhost");
+
+        Path trackedFile = repoPath.resolve("Tracked.java");
+        Files.writeString(trackedFile, "class Tracked {}\n");
+        runGit(repoPath, "add", "Tracked.java");
+        runGit(repoPath, "commit", "-m", "baseline");
+
+        Files.writeString(trackedFile, "class Tracked { int changed; }\n");
+        Files.writeString(repoPath.resolve("Untracked.java"), "class Untracked {}\n");
+        ProjectState.getInstance().setProjectPath(repoPath.toString(), "JAVA");
+
+        mockMvc.perform(get("/code/repositoryDiff"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("Tracked.java")))
+                .andExpect(content().string(containsString("Untracked.java")));
+    }
+
+    @Test
+    void repositoryDiffRejectsProjectWithoutGit(@TempDir Path projectPath) throws Exception {
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+
+        mockMvc.perform(get("/code/repositoryDiff"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void candidateDiffAcceptsGraphNodeWithProjectSourcePrefix(@TempDir Path projectPath) throws Exception {
+        String candidatePath = "src/main/java/top/naccl/util/MailUtils.java";
+        Path sourceFile = projectPath.resolve(candidatePath);
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package top.naccl.util; class MailUtils {}\n");
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+
+        CodeFileDiffResult candidate = new CodeFileDiffResult();
+        candidate.setKey(candidatePath);
+        candidate.setPath(candidatePath);
+        when(candidateCodeService.existingCandidate(candidatePath)).thenReturn(Optional.of(candidate));
+
+        mockMvc.perform(get("/code/candidateDiff")
+                        .param("classId", "src.main.java.top.naccl.util.MailUtils")
+                        .param("operation", "edit")
+                        .param("runId", "run-1"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(candidatePath)));
+
+        verify(candidateCodeService).existingCandidate(candidatePath);
+    }
+
+    private void runGit(Path workingDirectory, String... arguments) throws IOException, InterruptedException {
+        String[] command = new String[arguments.length + 1];
+        command[0] = "git";
+        System.arraycopy(arguments, 0, command, 1, arguments.length);
+        Process process = new ProcessBuilder(command)
+                .directory(workingDirectory.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes());
+        assertEquals(0, process.waitFor(), output);
+    }
+}

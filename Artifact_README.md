@@ -425,7 +425,7 @@ OpenAI-compatible LLM API for full workflows.
 At minimum:
 
 1. Create a MySQL database and initialize it with
-   `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`. Versioned
+   `JavaBackend/src/main/java/com/mycode/dao/update-schema.sql`. Versioned
    migrations under `JavaBackend/src/main/resources/db/migration` run automatically
    when the backend starts.
 2. Create `JavaBackend/src/main/resources/application.properties` from

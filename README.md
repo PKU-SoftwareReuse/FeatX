@@ -135,7 +135,7 @@ Requirements:
 *   Node.js 20.x and npm 10.x
 *   Python 3.10 and dependencies from `PyBackend/requirements.txt`
 *   MySQL 8 initialized with
-    `JavaBackend/src/main/java/cn/edu/pku/lixutian/dao/update-schema.sql`; the
+    `JavaBackend/src/main/java/com/mycode/dao/update-schema.sql`; the
     backend then applies `JavaBackend/src/main/resources/db/migration` automatically
 *   An OpenAI-compatible LLM API endpoint for full workflows
 *   Nginx or another static server if serving the production frontend build
