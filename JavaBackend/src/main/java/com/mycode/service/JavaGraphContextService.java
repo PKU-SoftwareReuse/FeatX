@@ -715,10 +715,10 @@ public class JavaGraphContextService {
         }
         Set<String> methods = new LinkedHashSet<>();
         feature.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getLxtFull() == null) return;
-            candidate.getLxtFull().forEach(full -> {
-                if (full.getLxtFullSignature() != null && !full.getLxtFullSignature().isBlank()) {
-                    methods.add(full.getLxtFullSignature());
+            if (candidate.getFullCandidateMethods() == null) return;
+            candidate.getFullCandidateMethods().forEach(full -> {
+                if (full.getFullSignature() != null && !full.getFullSignature().isBlank()) {
+                    methods.add(full.getFullSignature());
                 }
             });
         });
@@ -731,15 +731,16 @@ public class JavaGraphContextService {
         }
         Set<String> methods = new LinkedHashSet<>();
         feature.getCandidateMethods().forEach(candidate -> {
-            boolean resolved = candidate.getLxtFull() != null && !candidate.getLxtFull().isEmpty();
+            boolean resolved = candidate.getFullCandidateMethods() != null
+                    && !candidate.getFullCandidateMethods().isEmpty();
             if (resolved) {
-                candidate.getLxtFull().forEach(full -> {
-                    if (full.getLxtFullSignature() != null && !full.getLxtFullSignature().isBlank()) {
-                        methods.add(full.getLxtFullSignature());
+                candidate.getFullCandidateMethods().forEach(full -> {
+                    if (full.getFullSignature() != null && !full.getFullSignature().isBlank()) {
+                        methods.add(full.getFullSignature());
                     }
                 });
-            } else if (candidate.getZyfShortSignature() != null && !candidate.getZyfShortSignature().isBlank()) {
-                methods.add(candidate.getZyfShortSignature());
+            } else if (candidate.getShortSignature() != null && !candidate.getShortSignature().isBlank()) {
+                methods.add(candidate.getShortSignature());
             }
         });
         return new ArrayList<>(methods);

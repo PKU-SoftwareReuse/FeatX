@@ -172,15 +172,15 @@ public class LlmController {
         List<String> currentCodeMap = new ArrayList<>();
         if (candidateFeature.getCandidateMethods() != null) {
             candidateFeature.getCandidateMethods().forEach(candidate -> {
-                if (candidate.getLxtFull() == null || candidate.getLxtFull().isEmpty()) {
-                    if (candidate.getZyfShortSignature() != null) {
-                        currentCodeMap.add(candidate.getZyfShortSignature());
+                if (candidate.getFullCandidateMethods() == null || candidate.getFullCandidateMethods().isEmpty()) {
+                    if (candidate.getShortSignature() != null) {
+                        currentCodeMap.add(candidate.getShortSignature());
                     }
                     return;
                 }
-                candidate.getLxtFull().forEach(full -> {
-                    if (full.getLxtFullSignature() != null) {
-                        currentCodeMap.add(full.getLxtFullSignature());
+                candidate.getFullCandidateMethods().forEach(full -> {
+                    if (full.getFullSignature() != null) {
+                        currentCodeMap.add(full.getFullSignature());
                     }
                 });
             });
@@ -655,15 +655,15 @@ public class LlmController {
             return currentCodeMap;
         }
         candidateFeature.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getLxtFull() == null || candidate.getLxtFull().isEmpty()) {
-                if (candidate.getZyfShortSignature() != null) {
-                    currentCodeMap.add(candidate.getZyfShortSignature());
+            if (candidate.getFullCandidateMethods() == null || candidate.getFullCandidateMethods().isEmpty()) {
+                if (candidate.getShortSignature() != null) {
+                    currentCodeMap.add(candidate.getShortSignature());
                 }
                 return;
             }
-            candidate.getLxtFull().forEach(full -> {
-                if (full.getLxtFullSignature() != null) {
-                    currentCodeMap.add(full.getLxtFullSignature());
+            candidate.getFullCandidateMethods().forEach(full -> {
+                if (full.getFullSignature() != null) {
+                    currentCodeMap.add(full.getFullSignature());
                 }
             });
         });

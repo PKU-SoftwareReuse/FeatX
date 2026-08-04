@@ -212,14 +212,14 @@ public class RepoSummaryIndexService {
         }
         LinkedHashSet<String> methods = new LinkedHashSet<>();
         feature.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getLxtFull() != null && !candidate.getLxtFull().isEmpty()) {
-                candidate.getLxtFull().forEach(full -> {
-                    if (full.getLxtFullSignature() != null && !full.getLxtFullSignature().isBlank()) {
-                        methods.add(full.getLxtFullSignature());
+            if (candidate.getFullCandidateMethods() != null && !candidate.getFullCandidateMethods().isEmpty()) {
+                candidate.getFullCandidateMethods().forEach(full -> {
+                    if (full.getFullSignature() != null && !full.getFullSignature().isBlank()) {
+                        methods.add(full.getFullSignature());
                     }
                 });
-            } else if (candidate.getZyfShortSignature() != null && !candidate.getZyfShortSignature().isBlank()) {
-                methods.add(candidate.getZyfShortSignature());
+            } else if (candidate.getShortSignature() != null && !candidate.getShortSignature().isBlank()) {
+                methods.add(candidate.getShortSignature());
             }
         });
         return List.copyOf(methods);

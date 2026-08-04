@@ -48,7 +48,7 @@ public class FeatureResult {
         for (CodeMap codeMap : feature.getMethodNameList()) {
             CandidateMethod candidateMethod = new CandidateMethod(codeMap.getMethodName());
             List<String> matchedFullSignatures = matchingFullSignatures(
-                    candidateMethod.getZyfShortSignature(),
+                    candidateMethod.getShortSignature(),
                     fullMethodSignatureList
             );
 
@@ -263,44 +263,44 @@ public class FeatureResult {
     @Getter
     @Setter
     public static class CandidateMethod {
-        private String zyfShortSignature;
-        private List<FullCandidateMethod> lxtFull;
+        private String shortSignature;
+        private List<FullCandidateMethod> fullCandidateMethods;
 
         public CandidateMethod() {
-            this.lxtFull = new ArrayList<>();
+            this.fullCandidateMethods = new ArrayList<>();
         }
 
-        public CandidateMethod(String zyfShortSignature) {
-            this.zyfShortSignature = zyfShortSignature;
-            this.lxtFull = new ArrayList<>();
+        public CandidateMethod(String shortSignature) {
+            this.shortSignature = shortSignature;
+            this.fullCandidateMethods = new ArrayList<>();
         }
 
-        public void addFullCandidateMethod(String lxtFullSignature) {
-            this.lxtFull.add(new FullCandidateMethod(lxtFullSignature));
+        public void addFullCandidateMethod(String fullSignature) {
+            this.fullCandidateMethods.add(new FullCandidateMethod(fullSignature));
         }
 
         public void addPythonCandidateMethod(String signature) {
-            this.lxtFull.add(new FullCandidateMethod(signature, Collections.emptySet()));
+            this.fullCandidateMethods.add(new FullCandidateMethod(signature, Collections.emptySet()));
         }
 
         @Getter
         @Setter
         public static class FullCandidateMethod {
-            private String lxtFullSignature;
+            private String fullSignature;
             private Set<Integer> clusterIds;
 
             public FullCandidateMethod() {
                 this.clusterIds = new HashSet<>();
             }
 //
-            public FullCandidateMethod(String lxtFullSignature) {
-                this.lxtFullSignature = lxtFullSignature;
+            public FullCandidateMethod(String fullSignature) {
+                this.fullSignature = fullSignature;
                 this.clusterIds = VertexMap.getInstance().getMethodDeclarationMap()
-                        .get(lxtFullSignature).getClusterIds();
+                        .get(fullSignature).getClusterIds();
             }
 
-            public FullCandidateMethod(String lxtFullSignature, Set<Integer> clusterIds) {
-                this.lxtFullSignature = lxtFullSignature;
+            public FullCandidateMethod(String fullSignature, Set<Integer> clusterIds) {
+                this.fullSignature = fullSignature;
                 this.clusterIds = clusterIds == null ? new HashSet<>() : new HashSet<>(clusterIds);
             }
         }

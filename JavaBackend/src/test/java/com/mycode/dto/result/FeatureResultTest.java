@@ -1,5 +1,7 @@
 package com.mycode.dto.result;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -8,6 +10,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FeatureResultTest {
+    @Test
+    void serializesCandidateMethodsWithSemanticFieldNames() {
+        FeatureResult.CandidateMethod candidate =
+                new FeatureResult.CandidateMethod("demo.Service.run()");
+        candidate.addPythonCandidateMethod("demo.Service.run()");
+
+        JsonNode json = new ObjectMapper().valueToTree(candidate);
+
+        assertEquals("demo.Service.run()", json.get("shortSignature").asText());
+        assertTrue(json.has("fullCandidateMethods"));
+        assertEquals(
+                "demo.Service.run()",
+                json.get("fullCandidateMethods").get(0).get("fullSignature").asText()
+        );
+    }
+
     @Test
     void matchesArrayQualifiedGenericAndVarargsSignatures() {
         assertEquals(

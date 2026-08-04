@@ -336,15 +336,15 @@ public class CodeMapService {
         }
         List<String> methods = new ArrayList<>();
         candidateFeature.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getLxtFull() == null || candidate.getLxtFull().isEmpty()) {
-                if (candidate.getZyfShortSignature() != null && !candidate.getZyfShortSignature().isBlank()) {
-                    methods.add(candidate.getZyfShortSignature());
+            if (candidate.getFullCandidateMethods() == null || candidate.getFullCandidateMethods().isEmpty()) {
+                if (candidate.getShortSignature() != null && !candidate.getShortSignature().isBlank()) {
+                    methods.add(candidate.getShortSignature());
                 }
                 return;
             }
-            candidate.getLxtFull().forEach(full -> {
-                if (full.getLxtFullSignature() != null && !full.getLxtFullSignature().isBlank()) {
-                    methods.add(full.getLxtFullSignature());
+            candidate.getFullCandidateMethods().forEach(full -> {
+                if (full.getFullSignature() != null && !full.getFullSignature().isBlank()) {
+                    methods.add(full.getFullSignature());
                 }
             });
         });
@@ -446,9 +446,9 @@ public class CodeMapService {
 
     public Set<Integer> clusterMap(FeatureResult candidateFeature) {
         Set<Integer> clusterIds = new HashSet<>();
-        candidateFeature.getCandidateMethods().stream().forEach(candidateMethod -> {
-            candidateMethod.getLxtFull().stream().forEach(lxtFull -> {
-                lxtFull.getClusterIds().stream().forEach(clusterId -> {
+        candidateFeature.getCandidateMethods().forEach(candidateMethod -> {
+            candidateMethod.getFullCandidateMethods().forEach(fullCandidate -> {
+                fullCandidate.getClusterIds().forEach(clusterId -> {
                     clusterIds.add(clusterId);
                 });
             });
@@ -469,9 +469,9 @@ public class CodeMapService {
 
         Set<String> classIds = new LinkedHashSet<>();
         featureResult.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getLxtFull() == null) return;
-            candidate.getLxtFull().forEach(full -> {
-                String signature = full.getLxtFullSignature();
+            if (candidate.getFullCandidateMethods() == null) return;
+            candidate.getFullCandidateMethods().forEach(full -> {
+                String signature = full.getFullSignature();
                 if (signature == null) return;
                 int leftParen = signature.indexOf('(');
                 if (leftParen < 0) return;
