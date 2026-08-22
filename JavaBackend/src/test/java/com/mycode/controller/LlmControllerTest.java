@@ -10,6 +10,7 @@ import com.mycode.service.CandidateCodeService;
 import com.mycode.service.CodeMapService;
 import com.mycode.service.FocusGraphContextService;
 import com.mycode.service.JavaGraphContextService;
+import com.mycode.service.JavaStaticDeleteContextService;
 import com.mycode.service.OperationProgressService;
 import com.mycode.service.code.AgentLanguage;
 import com.mycode.service.code.AgentRunContext;
@@ -246,6 +247,8 @@ class LlmControllerTest {
         when(javaGraphService.buildDeleteContext(feature, "Delete this Java feature", AgentLanguage.EN))
                 .thenReturn(graphContext);
         FocusGraphContextService pythonGraphService = mock(FocusGraphContextService.class);
+        JavaStaticDeleteContextService staticDeleteContextService = mock(JavaStaticDeleteContextService.class);
+        when(staticDeleteContextService.buildContext()).thenReturn("complete legacy Java static delete diff");
         CodeMapService codeMapService = mock(CodeMapService.class);
         when(codeMapService.sharedCodeMapMethods(anyInt(), anyList()))
                 .thenReturn(Set.of("demo.Shared.keep()"));
@@ -257,6 +260,7 @@ class LlmControllerTest {
                 mock(LlmClient.class),
                 codeMapService
         );
+        ReflectionTestUtils.setField(controller, "javaStaticDeleteContextService", staticDeleteContextService);
         AddOrModifyRequest request = new AddOrModifyRequest();
         request.setFeatureId(8);
         request.setLanguage(AgentLanguage.EN);
@@ -267,10 +271,12 @@ class LlmControllerTest {
         assertEquals("delete", run.mode());
         assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(result.runId()));
         assertTrue(run.relatedCodes().contains("Java delete reasoning context"));
+        assertTrue(run.relatedCodes().contains("complete legacy Java static delete diff"));
         assertTrue(run.relatedCodes().contains("PROTECTED_SYMBOL: demo.Shared.keep()"));
         assertEquals(List.of("reasoning"), run.graphStages().stream()
                 .map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildDeleteContext(feature, "Delete this Java feature", AgentLanguage.EN);
+        verify(staticDeleteContextService).buildContext();
         verifyNoInteractions(pythonGraphService);
     }
 
@@ -492,6 +498,7 @@ class LlmControllerTest {
         LlmController controller = new LlmController();
         ReflectionTestUtils.setField(controller, "agentRunRegistry", registry);
         ReflectionTestUtils.setField(controller, "javaGraphContextService", javaGraphService);
+        ReflectionTestUtils.setField(controller, "javaStaticDeleteContextService", mock(JavaStaticDeleteContextService.class));
         ReflectionTestUtils.setField(controller, "focusGraphContextService", pythonGraphService);
         ReflectionTestUtils.setField(controller, "llmClient", llmClient);
         ReflectionTestUtils.setField(controller, "codeMapService", codeMapService);

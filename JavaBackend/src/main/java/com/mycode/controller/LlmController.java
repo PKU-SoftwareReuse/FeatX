@@ -20,6 +20,7 @@ import com.mycode.service.CodeMapService;
 import com.mycode.service.CandidateCodeService;
 import com.mycode.service.FocusGraphContextService;
 import com.mycode.service.JavaGraphContextService;
+import com.mycode.service.JavaStaticDeleteContextService;
 import com.mycode.service.OperationProgressService;
 import com.mycode.service.llm.LlmClient;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -58,6 +59,9 @@ public class LlmController {
 
     @Autowired
     private JavaGraphContextService javaGraphContextService;
+
+    @Autowired
+    private JavaStaticDeleteContextService javaStaticDeleteContextService;
 
     @Autowired
     private OperationProgressService progressService;
@@ -373,6 +377,7 @@ public class LlmController {
                     Map.of("protectedSharedMethods", sharedMethods.size())
             );
             JsonNode deterministicPlan = null;
+            String javaStaticDeleteContext = "";
             FocusGraphContextResult graphContext;
             if (project.isPython()) {
                 progressService.update(
@@ -397,13 +402,15 @@ public class LlmController {
                         oldRequest,
                         requestLanguage
                 );
+                javaStaticDeleteContext = javaStaticDeleteContextService.buildContext();
             }
 
             String relatedCodes = deletionSafetyContext(
                     graphContext,
                     currentCodeMap,
                     sharedMethods,
-                    deterministicPlan
+                    deterministicPlan,
+                    javaStaticDeleteContext
             );
 
             AgentRunContext run = agentRunRegistry.prepare(
@@ -547,13 +554,17 @@ public class LlmController {
             FocusGraphContextResult graphContext,
             List<String> currentCodeMap,
             Set<String> sharedMethods,
-            JsonNode deterministicPlan
+            JsonNode deterministicPlan,
+            String javaStaticDeleteContext
     ) {
         StringBuilder context = new StringBuilder(
                 graphContext == null || graphContext.getContextPrompt() == null
                         ? ""
                         : graphContext.getContextPrompt()
         );
+        if (hasText(javaStaticDeleteContext)) {
+            context.append("\n\n").append(javaStaticDeleteContext.trim()).append('\n');
+        }
         context.append("\n\n## FeatX Deterministic Delete Safety Boundary\n\n")
                 .append("Only the selected feature may be removed. Preserve unrelated behavior.\n")
                 .append("Every PROTECTED_SYMBOL line is enforced after Agent generation.\n\n")

@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 ACTION="${1:-up}"
+CLEAN_REBUILD=false
 COMPOSE=(docker compose)
 ROOTLESSKIT_API_SOCK="/run/user/$(id -u)/dockerd-rootless/api.sock"
 
@@ -14,8 +15,8 @@ Usage:
   scripts/run_merge_dev.sh [up|rebuild|restart|down|logs|ps]
 
 Commands:
-  up       Build changed images if needed and start/recreate FeatX.
-  rebuild  Rebuild images without cache, then start FeatX.
+  up       Build with normal compiler/Docker caches and start/recreate FeatX.
+  rebuild  Clean application outputs, rebuild without Docker cache, then start FeatX.
   restart  Restart containers without rebuilding images.
   down     Stop the Docker Compose stack.
   logs     Follow logs from all services.
@@ -335,10 +336,23 @@ expose_host_ports() {
   ensure_rootlesskit_port "$FRONTEND_PORT"
 }
 
+host_mysql_uses_port() {
+  local port="$1"
+  local status
+
+  status="$(docker inspect "$HOST_MYSQL_CONTAINER" --format '{{.State.Status}}' 2>/dev/null || true)"
+  [[ "$status" == "running" ]] || return 1
+  docker inspect "$HOST_MYSQL_CONTAINER" \
+    --format '{{range .Config.Cmd}}{{println .}}{{end}}' 2>/dev/null \
+    | grep -Fxq -- "--port=$port"
+}
+
 prepare_mysql_port() {
   local requested_mysql="${FEATX_MYSQL_PORT:-$(read_env_value FEATX_MYSQL_PORT 3307)}"
 
-  if [[ -z "${FEATX_MYSQL_PORT:-}" ]] && port_in_use "$requested_mysql"; then
+  if [[ -z "${FEATX_MYSQL_PORT:-}" ]] \
+      && port_in_use "$requested_mysql" \
+      && ! host_mysql_uses_port "$requested_mysql"; then
     FEATX_MYSQL_PORT="$(find_free_port "$requested_mysql")"
     export FEATX_MYSQL_PORT
     write_env_value FEATX_MYSQL_PORT "$FEATX_MYSQL_PORT"
@@ -350,8 +364,19 @@ prepare_mysql_port() {
 }
 
 host_overlay_build() {
-  local default_language models_host
+  local default_language models_host container_maven_command
+  local -a docker_build_args=()
+  local -a maven_args=(-q -DskipTests package)
   default_language="$(read_env_value REACT_APP_DEFAULT_LANGUAGE CN)"
+  container_maven_command="./mvnw -q -DskipTests package"
+
+  if [[ "$CLEAN_REBUILD" == "true" ]]; then
+    echo "Clean rebuild enabled: clearing application outputs and disabling Docker layer cache."
+    maven_args=(-q clean -DskipTests package)
+    container_maven_command="./mvnw -q clean -DskipTests package"
+    docker_build_args+=(--no-cache)
+    rm -rf Frontend/build
+  fi
 
   if ! image_exists featx-backend:ase26 || ! image_exists featx-frontend:ase26; then
     echo "Cannot use host overlay build because base FeatX images are missing." >&2
@@ -368,7 +393,7 @@ host_overlay_build() {
   prepare_backend_build_output
   if command -v javac >/dev/null 2>&1; then
     echo "Building backend jar on host..."
-    (cd JavaBackend && ./mvnw -q -DskipTests package)
+    (cd JavaBackend && ./mvnw "${maven_args[@]}")
   else
     echo "Host javac was not found; building backend jar in a JDK 17 container..."
     docker run --rm \
@@ -378,7 +403,7 @@ host_overlay_build() {
       -v featx-maven-cache:/root/.m2 \
       -w /workspace/JavaBackend \
       eclipse-temurin:17-jdk-jammy \
-      sh -lc "./mvnw -q -DskipTests package && chmod -R a+rwX target"
+      sh -lc "$container_maven_command && chmod -R a+rwX target"
   fi
 
   echo "Building frontend bundle on host..."
@@ -402,7 +427,7 @@ host_overlay_build() {
   cp "$backend_jar" "$tmp_dir/backend/featx-javabackend.jar"
   cp -a JavaBackend/tools "$tmp_dir/backend/JavaBackend-tools"
   cp -a PyBackend "$tmp_dir/backend/PyBackend"
-  docker build --network host -t featx-backend:ase26 -f - "$tmp_dir/backend" <<'DOCKERFILE'
+  docker build "${docker_build_args[@]}" --network host -t featx-backend:ase26 -f - "$tmp_dir/backend" <<'DOCKERFILE'
 FROM featx-models:ase26
 RUN command -v git >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*)
 COPY featx-javabackend.jar /app/featx-javabackend.jar
@@ -416,7 +441,7 @@ DOCKERFILE
   mkdir -p "$tmp_dir/frontend"
   cp docker/nginx.conf "$tmp_dir/frontend/nginx.conf"
   cp -a Frontend/build "$tmp_dir/frontend/build"
-  docker build -t featx-frontend:ase26 -f - "$tmp_dir/frontend" <<'DOCKERFILE'
+  docker build "${docker_build_args[@]}" -t featx-frontend:ase26 -f - "$tmp_dir/frontend" <<'DOCKERFILE'
 FROM featx-frontend:ase26
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY build /usr/share/nginx/html
@@ -746,6 +771,7 @@ case "$ACTION" in
     start_stack build
     ;;
   rebuild)
+    CLEAN_REBUILD=true
     if [[ "${FEATX_BUILD_MODE:-host-overlay}" == "compose" ]]; then
       start_stack build --no-cache
     else

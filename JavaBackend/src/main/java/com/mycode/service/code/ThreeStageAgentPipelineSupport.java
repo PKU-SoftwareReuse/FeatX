@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +32,7 @@ import java.util.regex.Pattern;
 
 abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static final int MAX_ADDITIONAL_FILES = 12;
+    private static final int MAX_AGENT1_CONTEXT_ROUNDS = 5;
     private static final int MAX_MODIFIED_FILES = 20;
     private static final int MAX_CORE_CONTEXT_CHARS = contextLimit(
             "AGENT_MAX_CORE_CONTEXT_CHARS",
@@ -60,6 +62,17 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private static class Agent1ParsedResult {
         boolean needAdditionalFile;
         List<AdditionalFile> additionalFileList = new ArrayList<>();
+        List<AdditionalFile> removeContextFileList = new ArrayList<>();
+
+        boolean hasContextChanges() {
+            return !additionalFileList.isEmpty() || !removeContextFileList.isEmpty();
+        }
+    }
+
+    private record LoadedContextFile(String filename, String recommendReason, String content) {
+    }
+
+    private record Agent1ContextResult(String coreContext, String additionalContext) {
     }
 
     private static class ModifiedFile {
@@ -138,59 +151,17 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     ? buildLiveSourceVerification(context, existingFiles)
                     : "";
 
-            sendStatus(eventSink, context.language().stageOneDescription());
-            String agent1Prompt = buildAgent1Prompt(
+            Agent1ContextResult refinedContext = refineAgent1Context(
                     context,
                     projectLanguage,
                     operation,
-                    liveSourceVerification
-            );
-            Agent1ParsedResult agent1 = requestAndParseAgent1(
-                    context,
-                    "agent1",
-                    agent1Prompt,
-                    eventSink,
-                    model,
+                    liveSourceVerification,
                     existingFiles,
-                    context.language()
+                    eventSink,
+                    model
             );
-
-            String extraInfo = loadAdditionalContext(context.projectRoot(), agent1, context.language());
-            if (agent1.needAdditionalFile) {
-                sendStatus(eventSink, context.language().stageOneRecheckDescription());
-                String followUpPrompt = agent1Prompt + "\n\nThe following requested files are now available:\n"
-                        + boundedPromptSection(extraInfo, MAX_REFERENCE_CONTEXT_CHARS)
-                        + "\nRe-evaluate sufficiency once. Do not request a file already shown above.";
-                Agent1ParsedResult followUp = requestAndParseAgent1(
-                        context,
-                        "agent1-recheck",
-                        followUpPrompt,
-                        eventSink,
-                        model,
-                        existingFiles,
-                        context.language()
-                );
-                if (followUp.needAdditionalFile) {
-                    Set<String> firstRound = agent1.additionalFileList.stream()
-                            .map(file -> file.filename)
-                            .collect(java.util.stream.Collectors.toSet());
-                    followUp.additionalFileList.removeIf(file -> firstRound.contains(file.filename));
-                    if (agent1.additionalFileList.size() + followUp.additionalFileList.size()
-                            > MAX_ADDITIONAL_FILES) {
-                        throw new IllegalArgumentException("Agent1 requested too many additional files across rounds.");
-                    }
-                    if (!followUp.additionalFileList.isEmpty()) {
-                        extraInfo = boundedPromptSection(
-                                extraInfo + "\n" + loadAdditionalContext(
-                                        context.projectRoot(),
-                                        followUp,
-                                        context.language()
-                                ),
-                                MAX_REFERENCE_CONTEXT_CHARS
-                        );
-                    }
-                }
-            }
+            String workingCoreContext = refinedContext.coreContext();
+            String extraInfo = refinedContext.additionalContext();
 
             Set<String> protectedSymbols = markedValues(context.relatedCodes(), PROTECTED_SYMBOL_MARKER);
             Set<String> allowedDeleteFiles = markedValues(context.relatedCodes(), ALLOWED_DELETE_FILE_MARKER).stream()
@@ -199,6 +170,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             sendStatus(eventSink, context.language().stageTwoDescription());
             String agent2Prompt = buildAgent2Prompt(
                     context,
+                    workingCoreContext,
                     extraInfo,
                     projectLanguage,
                     operation,
@@ -225,7 +197,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
             String globalPlan = renderGlobalPlan(agent2.modifiedFileList);
             String referenceContext = boundedPromptSection(
-                    context.relatedCodes()
+                    workingCoreContext
                             + "\n\n" + liveSourceVerification
                             + "\n\nAdditional file context:\n" + extraInfo,
                     MAX_REFERENCE_CONTEXT_CHARS
@@ -340,6 +312,87 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         }
     }
 
+    private Agent1ContextResult refineAgent1Context(
+            AgentRunContext context,
+            String projectLanguage,
+            AgentOperation operation,
+            String liveSourceVerification,
+            Set<String> existingFiles,
+            AgentEventSink eventSink,
+            String model
+    ) throws IOException {
+        String originalCoreContext = context.relatedCodes() == null ? "" : context.relatedCodes();
+        Set<String> optionalReasoningFiles = reasoningContextFiles(originalCoreContext);
+        Set<String> excludedReasoningFiles = new LinkedHashSet<>();
+        Set<String> everAddedFiles = new LinkedHashSet<>();
+        Map<String, LoadedContextFile> loadedFiles = new LinkedHashMap<>();
+        String workingCoreContext = originalCoreContext;
+
+        for (int round = 1; round <= MAX_AGENT1_CONTEXT_ROUNDS; round++) {
+            ensureNotInterrupted();
+            if (round == 1) {
+                sendStatus(eventSink, context.language().stageOneDescription());
+            } else {
+                sendStatus(eventSink, context.language().stageOneRecheckDescription());
+            }
+
+            String additionalContext = renderAdditionalContext(loadedFiles, context.language());
+            Set<String> removableFiles = new LinkedHashSet<>(optionalReasoningFiles);
+            removableFiles.removeAll(excludedReasoningFiles);
+            removableFiles.addAll(loadedFiles.keySet());
+            String prompt = buildAgent1Prompt(
+                    context,
+                    projectLanguage,
+                    operation,
+                    liveSourceVerification,
+                    workingCoreContext,
+                    additionalContext,
+                    removableFiles,
+                    round
+            );
+            String stage = round == 1
+                    ? "agent1"
+                    : round == 2 ? "agent1-recheck" : "agent1-recheck-" + (round - 1);
+            Agent1ParsedResult result = requestAndParseAgent1(
+                    context,
+                    stage,
+                    prompt,
+                    eventSink,
+                    model,
+                    existingFiles,
+                    removableFiles,
+                    loadedFiles.keySet(),
+                    context.language()
+            );
+            if (!result.hasContextChanges()) {
+                return new Agent1ContextResult(workingCoreContext, additionalContext);
+            }
+
+            for (AdditionalFile file : result.removeContextFileList) {
+                loadedFiles.remove(file.filename);
+                if (optionalReasoningFiles.contains(file.filename)) {
+                    excludedReasoningFiles.add(file.filename);
+                }
+            }
+            for (AdditionalFile file : result.additionalFileList) {
+                if (everAddedFiles.add(file.filename) && everAddedFiles.size() > MAX_ADDITIONAL_FILES) {
+                    throw new IllegalArgumentException("Agent1 requested too many additional files across rounds.");
+                }
+                loadedFiles.put(file.filename, new LoadedContextFile(
+                        file.filename,
+                        file.recommendReason,
+                        ListFileHelper.getProjectFileContent(context.projectRoot(), file.filename)
+                ));
+            }
+            workingCoreContext = removeReasoningFileSections(originalCoreContext, excludedReasoningFiles);
+        }
+
+        return new Agent1ContextResult(
+                workingCoreContext,
+                renderAdditionalContext(loadedFiles, context.language())
+        );
+    }
+
     private Agent1ParsedResult requestAndParseAgent1(
             AgentRunContext context,
             String stage,
@@ -347,6 +400,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentEventSink eventSink,
             String model,
             Set<String> existingFiles,
+            Set<String> removableContextFiles,
+            Set<String> alreadyLoadedFiles,
             AgentLanguage language
     ) throws IOException {
         Exception lastFailure = null;
@@ -363,7 +418,12 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         withoutDeltas(eventSink),
                         model
                 );
-                Agent1ParsedResult parsed = parseAndValidateAgent1(response, existingFiles);
+                Agent1ParsedResult parsed = parseAndValidateAgent1(
+                        response,
+                        existingFiles,
+                        removableContextFiles,
+                        alreadyLoadedFiles
+                );
                 publishValidatedResponse(eventSink, response);
                 return parsed;
             } catch (IOException | RuntimeException exception) {
@@ -601,10 +661,16 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         return false;
     }
 
-    private Agent1ParsedResult parseAndValidateAgent1(String response, Set<String> existingFiles) {
+    private Agent1ParsedResult parseAndValidateAgent1(
+            String response,
+            Set<String> existingFiles,
+            Set<String> removableContextFiles,
+            Set<String> alreadyLoadedFiles
+    ) {
         JsonNode root = readJsonObject(response);
         JsonNode needNode = root.get("needAdditionalFile");
         JsonNode filesNode = root.get("additionalFileList");
+        JsonNode removeFilesNode = root.get("removeContextFileList");
         if (needNode == null || !needNode.isBoolean()) {
             throw new IllegalArgumentException("Agent1 must return boolean needAdditionalFile.");
         }
@@ -613,6 +679,12 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         }
         if (filesNode.size() > MAX_ADDITIONAL_FILES) {
             throw new IllegalArgumentException("Agent1 requested too many additional files.");
+        }
+        if (removeFilesNode != null && !removeFilesNode.isArray()) {
+            throw new IllegalArgumentException("Agent1 removeContextFileList must be an array.");
+        }
+        if (removeFilesNode != null && removeFilesNode.size() > MAX_ADDITIONAL_FILES) {
+            throw new IllegalArgumentException("Agent1 requested too many context file removals.");
         }
 
         Agent1ParsedResult result = new Agent1ParsedResult();
@@ -626,6 +698,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             if (!seen.add(filename)) {
                 continue;
             }
+            if (alreadyLoadedFiles.contains(filename)) {
+                throw new IllegalArgumentException("Agent1 requested a file already loaded in the working context: " + filename);
+            }
             AdditionalFile file = new AdditionalFile();
             file.filename = filename;
             file.recommendReason = requiredText(fileNode, "recommendReason", "Agent1");
@@ -633,6 +708,29 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         }
         if (result.needAdditionalFile != !result.additionalFileList.isEmpty()) {
             throw new IllegalArgumentException("Agent1 needAdditionalFile does not match additionalFileList.");
+        }
+        if (removeFilesNode != null) {
+            Set<String> removed = new HashSet<>();
+            for (JsonNode fileNode : removeFilesNode) {
+                String filename = ProjectFilePath.normalize(requiredText(fileNode, "filename", "Agent1"));
+                if (!removableContextFiles.contains(filename)) {
+                    throw new IllegalArgumentException(
+                            "Agent1 attempted to remove a file outside the removable working context: " + filename
+                    );
+                }
+                if (seen.contains(filename)) {
+                    throw new IllegalArgumentException(
+                            "Agent1 cannot add and remove the same context file in one round: " + filename
+                    );
+                }
+                if (!removed.add(filename)) {
+                    continue;
+                }
+                AdditionalFile file = new AdditionalFile();
+                file.filename = filename;
+                file.recommendReason = requiredText(fileNode, "recommendReason", "Agent1");
+                result.removeContextFileList.add(file);
+            }
         }
         return result;
     }
@@ -879,24 +977,67 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         return singleLine.length() <= 500 ? singleLine : singleLine.substring(0, 500);
     }
 
-    private String loadAdditionalContext(
-            String sourceRoot,
-            Agent1ParsedResult agent1,
+    private String renderAdditionalContext(
+            Map<String, LoadedContextFile> loadedFiles,
             AgentLanguage language
     ) throws IOException {
-        if (!agent1.needAdditionalFile) {
+        if (loadedFiles.isEmpty()) {
             return language.noExtraInformation();
         }
         StringBuilder extra = new StringBuilder();
-        for (AdditionalFile file : agent1.additionalFileList) {
+        for (LoadedContextFile file : loadedFiles.values()) {
             ensureNotInterrupted();
-            extra.append("filename: ").append(file.filename).append("\n")
-                    .append("recommendReason: ").append(file.recommendReason).append("\n")
+            extra.append("filename: ").append(file.filename()).append("\n")
+                    .append("recommendReason: ").append(file.recommendReason()).append("\n")
                     .append("fileContent:\n")
-                    .append(ListFileHelper.getProjectFileContent(sourceRoot, file.filename))
+                    .append(file.content())
                     .append("\n=======================\n");
         }
         return boundedPromptSection(extra.toString(), MAX_REFERENCE_CONTEXT_CHARS);
+    }
+
+    private Set<String> reasoningContextFiles(String context) {
+        Set<String> files = new LinkedHashSet<>();
+        boolean inReasoningContext = false;
+        for (String line : context.split("\\R")) {
+            if ("## Java Reasoning Context".equals(line.trim())) {
+                inReasoningContext = true;
+                continue;
+            }
+            if (inReasoningContext && line.startsWith("## ")) {
+                break;
+            }
+            if (inReasoningContext && line.startsWith("### File: ")) {
+                files.add(ProjectFilePath.normalize(line.substring("### File: ".length()).trim()));
+            }
+        }
+        return files;
+    }
+
+    private String removeReasoningFileSections(String context, Set<String> excludedFiles) {
+        if (excludedFiles.isEmpty() || context == null || context.isBlank()) {
+            return context;
+        }
+        StringBuilder result = new StringBuilder();
+        boolean inReasoningContext = false;
+        boolean skipFileSection = false;
+        for (String line : context.split("\\R", -1)) {
+            String trimmed = line.trim();
+            if ("## Java Reasoning Context".equals(trimmed)) {
+                inReasoningContext = true;
+                skipFileSection = false;
+            } else if (inReasoningContext && line.startsWith("## ")) {
+                inReasoningContext = false;
+                skipFileSection = false;
+            } else if (inReasoningContext && line.startsWith("### File: ")) {
+                String filename = ProjectFilePath.normalize(line.substring("### File: ".length()).trim());
+                skipFileSection = excludedFiles.contains(filename);
+            }
+            if (!skipFileSection) {
+                result.append(line).append('\n');
+            }
+        }
+        return result.toString();
     }
 
     private String buildLiveSourceVerification(
@@ -1010,7 +1151,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             AgentRunContext context,
             String projectLanguage,
             AgentOperation operation,
-            String liveSourceVerification
+            String liveSourceVerification,
+            String workingCoreContext,
+            String additionalContext,
+            Set<String> removableContextFiles,
+            int round
     ) {
         String originalSection = operation.isAddition() ? "" : """
                 Original feature description:
@@ -1020,8 +1165,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
                 """.formatted(context.oldRequest());
         return """
-                You are Agent1 for a %s project. Determine which existing project files are required to implement
-                the requested %s.
+                You are Agent1 for a %s project. Refine the working code context required to implement the requested %s.
+                This is context selection only; removing a context file never deletes that project file.
+
+                Context refinement round: %d of %d.
 
                 Requirement:
                 \"\"\"
@@ -1030,6 +1177,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
                 %s
                 Retrieved graph and CodeMap context:
+                \"\"\"
+                %s
+                \"\"\"
+
+                Current additional full-file context:
                 \"\"\"
                 %s
                 \"\"\"
@@ -1046,29 +1198,52 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 %s
                 \"\"\"
 
+                Optional context files that may be removed from subsequent prompts:
+                \"\"\"
+                %s
+                \"\"\"
+
+                Add a file when its complete content is still required. Remove a file only when its current optional
+                reasoning or full-file content is irrelevant. Files omitted from the removable list are mandatory and
+                must remain, including Feature CodeMap declarations, deterministic deletion diffs, and safety markers.
+                Do not request a file already present in the additional full-file context.
+
                 Return JSON only. Do not include reasoning or Markdown fences:
                 {
                   "needAdditionalFile": true,
                   "additionalFileList": [
                     {"filename": "path/to/project.file", "recommendReason": "why it is needed"}
+                  ],
+                  "removeContextFileList": [
+                    {"filename": "path/to/optional-context.file", "recommendReason": "why it is irrelevant"}
                   ]
                 }
                 Write recommendReason values in %s.
-                If no additional files are needed, return false and an empty array.
+                needAdditionalFile describes additionalFileList only. If the current context is sufficient, return false
+                and two empty arrays. Context refinement stops early when both arrays are empty and otherwise runs for at
+                most %d rounds.
                 """.formatted(
                 projectLanguage,
                 operation.promptLabel(),
+                round,
+                MAX_AGENT1_CONTEXT_ROUNDS,
                 context.newRequest(),
                 originalSection,
-                boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
+                boundedPromptSection(workingCoreContext, MAX_CORE_CONTEXT_CHARS),
+                additionalContext,
                 boundedPromptSection(liveSourceVerification, MAX_REFERENCE_CONTEXT_CHARS),
                 context.allFiles(),
-                context.language().promptLanguageName()
+                removableContextFiles.isEmpty()
+                        ? context.language().noExtraInformation()
+                        : String.join("\n", removableContextFiles),
+                context.language().promptLanguageName(),
+                MAX_AGENT1_CONTEXT_ROUNDS
         );
     }
 
     private String buildAgent2Prompt(
             AgentRunContext context,
+            String workingCoreContext,
             String extraInfo,
             String projectLanguage,
             AgentOperation operation,
@@ -1140,7 +1315,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 operation.promptLabel(),
                 context.newRequest(),
                 context.oldRequest(),
-                boundedPromptSection(context.relatedCodes(), MAX_CORE_CONTEXT_CHARS),
+                boundedPromptSection(workingCoreContext, MAX_CORE_CONTEXT_CHARS),
                 extraInfo,
                 boundedPromptSection(liveSourceVerification, MAX_REFERENCE_CONTEXT_CHARS),
                 deleteConstraints,

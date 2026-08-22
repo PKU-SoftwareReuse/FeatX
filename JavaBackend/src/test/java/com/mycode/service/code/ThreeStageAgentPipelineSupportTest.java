@@ -143,6 +143,117 @@ class ThreeStageAgentPipelineSupportTest {
     }
 
     @Test
+    void agent1RefinesContextForAtMostFiveRounds(@TempDir Path projectRoot) throws Exception {
+        Path sourceRoot = projectRoot.resolve("src/main/java/demo");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Target.java"),
+                "package demo;\npublic class Target { int obsolete = 1; }\n");
+        Files.writeString(sourceRoot.resolve("Noise.java"), "package demo; class Noise {}\n");
+        Files.writeString(sourceRoot.resolve("Keep.java"), "package demo; class Keep {}\n");
+        for (int index = 1; index <= 5; index++) {
+            Files.writeString(
+                    sourceRoot.resolve("Extra" + index + ".java"),
+                    "package demo; class Extra" + index + " {}\n"
+            );
+        }
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(97);
+
+        String coreContext = """
+                ## Current Feature Complete CodeMap
+                mandatory target method
+
+                ## Java Reasoning Context
+
+                ### File: src/main/java/demo/Noise.java
+                NOISE_CONTEXT_MARKER
+
+                ### File: src/main/java/demo/Keep.java
+                KEEP_CONTEXT_MARKER
+
+                ## Deterministic Java Static Deletion Context
+                MANDATORY_STATIC_DELETE_MARKER
+
+                ## FeatX Deterministic Delete Safety Boundary
+                FEATURE_SYMBOL: demo.Target.obsolete()
+                """;
+        String allFiles = java.util.stream.IntStream.rangeClosed(1, 5)
+                .mapToObj(index -> "src/main/java/demo/Extra" + index + ".java")
+                .collect(java.util.stream.Collectors.joining("\n", "src/main/java/demo/Target.java\n"
+                        + "src/main/java/demo/Noise.java\nsrc/main/java/demo/Keep.java\n", ""));
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "delete",
+                "Delete obsolete field",
+                "Obsolete field exists",
+                coreContext,
+                allFiles,
+                AgentLanguage.EN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                10,
+                null,
+                List.of()
+        );
+
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation(contextAdjustment("Extra1.java", "Noise.java")))
+                .thenReturn(generation(contextAdjustment("Extra2.java", "Extra1.java")))
+                .thenReturn(generation(contextAdjustment("Extra3.java", null)))
+                .thenReturn(generation(contextAdjustment("Extra4.java", "Keep.java")))
+                .thenReturn(generation(contextAdjustment("Extra5.java", null)))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"src/main/java/demo/Target.java",
+                          "action":"rewrite",
+                          "plan":"Remove the obsolete field.",
+                          "note":"Preserve the type."
+                        }]}
+                        """))
+                .thenReturn(generation("""
+                        <<<<<<< SEARCH
+                         int obsolete = 1;
+                        =======
+
+                        >>>>>>> REPLACE
+                        """));
+
+        DeleteAgentService service = new DeleteAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(7)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        String agent2Prompt = prompts.getAllValues().get(5);
+        assertTrue(agent2Prompt.contains("MANDATORY_STATIC_DELETE_MARKER"));
+        assertTrue(agent2Prompt.contains("Extra2"));
+        assertTrue(agent2Prompt.contains("Extra3"));
+        assertTrue(agent2Prompt.contains("Extra4"));
+        assertTrue(agent2Prompt.contains("Extra5"));
+        assertFalse(agent2Prompt.contains("NOISE_CONTEXT_MARKER"));
+        assertFalse(agent2Prompt.contains("KEEP_CONTEXT_MARKER"));
+        assertFalse(agent2Prompt.contains("class Extra1"));
+        assertTrue(registry.modifications(context.runId())
+                .get("src/main/java/demo/Target.java")
+                .contains("public class Target"));
+        assertFalse(registry.modifications(context.runId())
+                .get("src/main/java/demo/Target.java")
+                .contains("obsolete"));
+    }
+
+    @Test
     void standardJavaProjectReadsAndReturnsProjectRelativePaths(@TempDir Path projectRoot) throws Exception {
         Path sourceFile = projectRoot.resolve("src/main/java/demo/Feature.java");
         Files.createDirectories(sourceFile.getParent());
@@ -907,6 +1018,20 @@ class ThreeStageAgentPipelineSupportTest {
         assertTrue(prompts.getAllValues().get(0).contains("FEATURE_SYMBOL_STATUS: MISSING demo.Api.removed()"));
         assertTrue(prompts.getAllValues().get(0).contains("LIVE_REFERENCE_FILE: demo/Caller.java"));
         assertTrue(prompts.getAllValues().get(2).contains("demo/Mapper.xml"));
+    }
+
+    private String contextAdjustment(String addedFile, String removedFile) {
+        String addition = addedFile == null
+                ? ""
+                : "{\"filename\":\"src/main/java/demo/" + addedFile
+                        + "\",\"recommendReason\":\"needed for the deletion\"}";
+        String removal = removedFile == null
+                ? ""
+                : "{\"filename\":\"src/main/java/demo/" + removedFile
+                        + "\",\"recommendReason\":\"irrelevant to the deletion\"}";
+        return "{\"needAdditionalFile\":" + (addedFile != null)
+                + ",\"additionalFileList\":[" + addition + "]"
+                + ",\"removeContextFileList\":[" + removal + "]}";
     }
 
     private LlmGenerationResult generation(String content) {
