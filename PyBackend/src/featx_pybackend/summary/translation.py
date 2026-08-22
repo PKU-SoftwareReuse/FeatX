@@ -195,7 +195,7 @@ def _request_translation_once(kind: str, english_description: str) -> str:
         raise RuntimeError("The openai package is required for Chinese summary translation") from error
 
     model = os.getenv("OPENAI_API_MODEL") or os.getenv("LLM_API_MODEL") or "deepseek-v4-flash"
-    timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 20.0)
+    timeout = _positive_float_env("REPOSUMMARY_LLM_TIMEOUT_SECONDS", 120.0)
     client = OpenAI(api_key=api_key, base_url=openai_base_url(), timeout=timeout)
     response = client.chat.completions.create(
         model=model,
