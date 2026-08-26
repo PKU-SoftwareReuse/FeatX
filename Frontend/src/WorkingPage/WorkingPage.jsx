@@ -1,6 +1,6 @@
-// DebloatingPage.jsx
+// WorkingPage.jsx
 
-import styles from './DebloatingPage.module.css';
+import styles from './WorkingPage.module.css';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
@@ -19,7 +19,7 @@ import {
 } from '@ant-design/icons';
 import classNames from "classnames";
 
-import API from "../API";
+import API from "../api";
 import FeatureGraph from "../graph/featureGraph/FeatureGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
@@ -31,7 +31,7 @@ const {Panel} = Collapse;
 const {TextArea} = Input;
 const loadGitDiffEditor = () => import("./GitDiffEditor/GitDiffEditor");
 
-const DEBLOATING_THEME = {
+const WORKING_PAGE_THEME = {
     token: {
         fontSize: 13,
         fontSizeSM: 12,
@@ -280,7 +280,7 @@ const clearFeatureRequestDraft = () => {
     }
 };
 
-const DEBLOATING_COPY = {
+const WORKING_PAGE_COPY = {
     zh: {
         noAction: "当前没有可执行的操作",
         switchTitle: "确认切换操作",
@@ -675,9 +675,9 @@ export const FeatureListItem = ({
     );
 };
 
-const DebloatingPage = () => {
+const WorkingPage = () => {
     const {language, apiLanguage} = useLanguage();
-    const copy = DEBLOATING_COPY[language];
+    const copy = WORKING_PAGE_COPY[language];
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
@@ -2506,7 +2506,7 @@ const DebloatingPage = () => {
 
 
     return (
-        <ConfigProvider theme={DEBLOATING_THEME}>
+        <ConfigProvider theme={WORKING_PAGE_THEME}>
             {contextHolder}
             <Spin
                 wrapperClassName={styles.pageSpin}
@@ -2515,7 +2515,7 @@ const DebloatingPage = () => {
                 size={"large"}
             >
                 <div
-                    className={classNames(styles.debloatingPage, {
+                    className={classNames(styles.workingPage, {
                         [styles.diffDrawerResizing]: diffDrawerResizing,
                     })}
                     style={{
@@ -2976,4 +2976,4 @@ const DebloatingPage = () => {
     )
 }
 
-export default DebloatingPage;
+export default WorkingPage;

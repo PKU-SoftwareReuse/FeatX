@@ -2,7 +2,7 @@ import React from "react";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {Modal} from "antd";
 import {LanguageProvider} from "../i18n/LanguageContext";
-import API from "../API";
+import API from "../api";
 import WelcomePage from "./WelcomePage";
 
 const mockNavigate = jest.fn();
@@ -11,7 +11,7 @@ jest.mock("react-router-dom", () => ({
     useNavigate: () => mockNavigate,
 }));
 
-jest.mock("../API", () => ({
+jest.mock("../api", () => ({
     testConnect: jest.fn(),
     getProjectsInfo: jest.fn(),
     getSummaryProgressAll: jest.fn(),
@@ -100,7 +100,7 @@ test("asks before discarding an active Agent run and switches only after confirm
     await waitFor(() => expect(API.discardFeatureChanges).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(API.postProjectPath).toHaveBeenCalledTimes(2));
     expect(API.postProjectPath).toHaveBeenLastCalledWith(13);
-    expect(mockNavigate).toHaveBeenCalledWith("/debloating");
+    expect(mockNavigate).toHaveBeenCalledWith("/working");
 });
 
 test("keeps the current operation when the switch confirmation is cancelled", async () => {

@@ -127,7 +127,7 @@
     min-height: 0;
 }
 
-.debloatingPage {
+.workingPage {
     height: 100vh;
     height: 100dvh;
     min-height: 0;
@@ -136,14 +136,14 @@
     font-size: 13px;
 }
 
-.debloatingPage :global(.ant-alert),
-.debloatingPage :global(.ant-btn),
-.debloatingPage :global(.ant-card),
-.debloatingPage :global(.ant-collapse),
-.debloatingPage :global(.ant-input),
-.debloatingPage :global(.ant-list),
-.debloatingPage :global(.ant-segmented),
-.debloatingPage :global(.ant-select) {
+.workingPage :global(.ant-alert),
+.workingPage :global(.ant-btn),
+.workingPage :global(.ant-card),
+.workingPage :global(.ant-collapse),
+.workingPage :global(.ant-input),
+.workingPage :global(.ant-list),
+.workingPage :global(.ant-segmented),
+.workingPage :global(.ant-select) {
     font-size: 13px;
 }
 

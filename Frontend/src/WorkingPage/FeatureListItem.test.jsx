@@ -14,7 +14,7 @@ import {
     resolveActiveRunIdForRepository,
     shouldShowCandidateDiff,
     supportsReasoningGraphStages,
-} from "./DebloatingPage";
+} from "./WorkingPage";
 
 describe("FeatureListItem", () => {
     test("supports reasoning stages for add, edit, and delete operations", () => {

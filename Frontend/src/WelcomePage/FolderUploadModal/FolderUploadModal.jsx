@@ -1,7 +1,7 @@
 import React, {useEffect, useRef, useState} from "react";
 import {Modal, Button, Input, Upload, Tree, message, Tag} from "antd";
 import {InboxOutlined, FileOutlined, UploadOutlined} from "@ant-design/icons";
-import API from "../../API";
+import API from "../../api";
 import styles from "../WelcomePage.module.css";
 import {useLanguage} from "../../i18n/LanguageContext";
 

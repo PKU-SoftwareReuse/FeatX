@@ -2,9 +2,9 @@ import React from "react";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {LanguageProvider} from "../../i18n/LanguageContext";
 import FolderUploadModal from "./FolderUploadModal";
-import API from "../../API";
+import API from "../../api";
 
-jest.mock("../../API", () => ({
+jest.mock("../../api", () => ({
     uploadProject: jest.fn(),
 }));
 

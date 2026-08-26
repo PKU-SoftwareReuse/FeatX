@@ -1,7 +1,7 @@
 import React, {useState} from "react";
 import {Button, Input, message, Modal, Spin, Tag, Tree} from "antd";
 import {FileOutlined, GithubOutlined} from "@ant-design/icons";
-import API from "../../API";
+import API from "../../api";
 import styles from "../WelcomePage.module.css";
 import {useLanguage} from "../../i18n/LanguageContext";
 

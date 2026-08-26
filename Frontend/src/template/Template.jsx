@@ -1,6 +1,6 @@
 import styles from './Template.module.css';
 import React, {useEffect, useState} from "react";
-import API from "../API";
+import API from "../api";
 import {Button, Card, Layout, List, Spin, Typography} from "antd";
 import classNames from "classnames";
 import {Prism as SyntaxHighlighter} from "react-syntax-highlighter";

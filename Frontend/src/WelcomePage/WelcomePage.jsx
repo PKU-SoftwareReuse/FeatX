@@ -4,7 +4,7 @@ import {useNavigate} from 'react-router-dom';
 import styles from './WelcomePage.module.css';
 import {Button, Card, Descriptions, Form, Input, message, Modal, Popconfirm, Popover, Progress, Segmented, Spin, Tag, Tooltip,} from "antd";
 import {DeleteOutlined, DownOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined, TranslationOutlined} from '@ant-design/icons';
-import API from "../API";
+import API from "../api";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
 import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
@@ -280,7 +280,7 @@ const WelcomePage = () => {
             if (String(currentProject?.repoId) !== String(repoId)) {
                 await API.postProjectPath(repoId);
             }
-            navigate('/debloating')
+            navigate('/working')
         } catch (error) {
             console.log(error)
             if (error?.response?.status === 409) {
@@ -296,7 +296,7 @@ const WelcomePage = () => {
                         try {
                             await API.discardFeatureChanges();
                             await API.postProjectPath(repoId);
-                            navigate('/debloating');
+                            navigate('/working');
                         } catch (switchError) {
                             console.log(switchError);
                             message.error(
