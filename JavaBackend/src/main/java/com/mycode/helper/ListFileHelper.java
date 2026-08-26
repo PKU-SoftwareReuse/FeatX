@@ -88,19 +88,6 @@ public class ListFileHelper {
         }
     }
 
-    public static String getFileContent(String baseFolder, String javaFileName) throws IOException {
-        Path file = JavaFilePath.resolve(Path.of(baseFolder), javaFileName);
-        if (!Files.exists(file)) return "This file does not exist before, it's a brand new file.";
-        if (!Files.isRegularFile(file)) {
-            throw new IOException("Java source path is not a regular file: " + javaFileName);
-        }
-        if (Files.size(file) > MAX_AGENT_FILE_BYTES) {
-            throw new IOException("Java source file exceeds the 2 MiB Agent limit: " + javaFileName);
-        }
-
-        return Files.readString(file, StandardCharsets.UTF_8);
-    }
-
     public static String getProjectFileContent(String baseFolder, String relativePath) throws IOException {
         Path file = ProjectFilePath.resolve(Path.of(baseFolder), relativePath);
         if (!Files.isRegularFile(file)) {
@@ -116,38 +103,6 @@ public class ListFileHelper {
             }
         }
         return new String(content, StandardCharsets.UTF_8);
-    }
-
-    public static List<String> findPythonFiles(String folderPath) {
-        List<String> pythonFiles = new ArrayList<>();
-        File folder = new File(folderPath);
-        if (!folder.exists() || !folder.isDirectory()) {
-            return pythonFiles;
-        }
-        recursiveFindPython(folder, pythonFiles, folder.getAbsolutePath());
-        pythonFiles.sort(Comparator.naturalOrder());
-        return pythonFiles;
-    }
-
-    private static void recursiveFindPython(File current, List<String> result, String rootPath) {
-        File[] files = current.listFiles();
-        if (files == null) return;
-
-        for (File file : files) {
-            if (Files.isSymbolicLink(file.toPath())) {
-                continue;
-            }
-            if (file.isDirectory()) {
-                String name = file.getName();
-                if (IGNORED_DIRECTORIES.contains(name)) {
-                    continue;
-                }
-                recursiveFindPython(file, result, rootPath);
-            } else if (file.isFile() && file.getName().endsWith(".py")) {
-                String relativePath = file.getAbsolutePath().substring(rootPath.length() + 1);
-                result.add(relativePath.replace(File.separatorChar, '/'));
-            }
-        }
     }
 
     public static String getPythonFileContent(String baseFolder, String pythonFileName) throws IOException {

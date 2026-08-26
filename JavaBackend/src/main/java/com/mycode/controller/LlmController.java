@@ -541,19 +541,6 @@ public class LlmController {
         return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
     }
 
-    @GetMapping("/testLLM")
-    public SseEmitter testLLM() throws IOException {
-        SseEmitter emitter = new SseEmitter(0L); // 不超时
-        llmClient.streamGenerateWithPrompt("你是谁", emitter);
-        return emitter;
-    }
-
-    @GetMapping("/testLLM2")
-    public String testLLM2() throws IOException {
-        SseEmitter emitter = new SseEmitter(0L); // 不超时
-        return llmClient.streamGenerateWithPrompt("你是谁", emitter);
-    }
-
     private String localizedDescription(String englishDescription, String chineseDescription, AgentLanguage language) {
         if (language == AgentLanguage.CN && hasText(chineseDescription)) {
             return chineseDescription;

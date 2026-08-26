@@ -18,10 +18,6 @@ import java.util.Set;
 
 public class RewriteFileHelper {
 
-    public static boolean isNewFile(String fullName) {
-        return !Files.exists(resolveJavaFilePath(fullName));
-    }
-
     public static Path resolveJavaFilePath(String fullName) {
         String absoluteSrcPath = ProjectState.getInstance().getSrcPath();
         return JavaFilePath.resolve(Paths.get(absoluteSrcPath), fullName);

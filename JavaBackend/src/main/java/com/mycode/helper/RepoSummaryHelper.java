@@ -38,10 +38,6 @@ public class RepoSummaryHelper {
     private static final Pattern JAVA_CLUSTER_FUNCTIONS_PATTERN = Pattern.compile("Cluster ID: (\\d+), Functions: \\[(.*)]");
     private static final Pattern JAVA_CLUSTER_FILES_PATTERN = Pattern.compile("Cluster ID: (\\d+), (\\d+) Files: \\[.*]");
 
-    public static void runRepoSummary(Integer repoId) throws IOException {
-        runRepoSummary(repoId, null);
-    }
-
     public static void runRepoSummary(Integer repoId, CompletionAction completionAction) throws IOException {
         ProgressState progressState = startProgress(repoId);
         JsonNode request = OBJECT_MAPPER.createObjectNode().put("repoId", repoId);

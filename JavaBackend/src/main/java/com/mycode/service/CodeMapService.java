@@ -15,8 +15,6 @@ import com.mycode.dto.result.FeatureResult;
 import com.mycode.dto.result.ModuleResult;
 import com.mycode.dao.repository.CodeMapRepository;
 import com.mycode.graph.SKG;
-import com.mycode.graph.softwareGraph.vertex.Vertex;
-import com.mycode.graph.softwareGraph.vertex.VertexMap;
 import com.mycode.helper.ListFileHelper;
 import com.mycode.helper.JavaFilePath;
 import com.mycode.helper.ProjectFilePath;
@@ -27,7 +25,6 @@ import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.Parameter;
-import com.github.javaparser.ast.body.TypeDeclaration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -38,7 +35,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -127,10 +123,6 @@ public class CodeMapService {
                     .map(ModuleResult::new)
                     .collect(Collectors.toCollection(ArrayList::new));
         });
-    }
-
-    public List<ModuleResult> getModuleResults() {
-        return currentModuleResults();
     }
 
     public void invalidateRepository(Integer repositoryId) {
@@ -455,67 +447,6 @@ public class CodeMapService {
         });
 
         return clusterIds;
-    }
-
-    public Map<String, String> getCodeByFeatureId(Integer featureId) {
-        if (featureId == null) {
-            return Collections.emptyMap();
-        }
-
-        FeatureResult featureResult = getFeature(featureId);
-        if (featureResult == null || featureResult.getCandidateMethods() == null) {
-            return Collections.emptyMap();
-        }
-
-        Set<String> classIds = new LinkedHashSet<>();
-        featureResult.getCandidateMethods().forEach(candidate -> {
-            if (candidate.getFullCandidateMethods() == null) return;
-            candidate.getFullCandidateMethods().forEach(full -> {
-                String signature = full.getFullSignature();
-                if (signature == null) return;
-                int leftParen = signature.indexOf('(');
-                if (leftParen < 0) return;
-                String beforeArgs = signature.substring(0, leftParen);
-                int lastDot = beforeArgs.lastIndexOf('.');
-                if (lastDot <= 0) return;
-                String classId = beforeArgs.substring(0, lastDot);
-                classIds.add(classId);
-            });
-        });
-
-        VertexMap vertexMap = VertexMap.getInstance();
-        if (vertexMap == null) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, String> result = new LinkedHashMap<>();
-        for (String classId : classIds) {
-            Vertex<TypeDeclaration<?>> vertex = vertexMap.getClassDeclaration(classId);
-            if (vertex != null && vertex.getDeclaration() != null) {
-                result.put(classId, vertex.getDeclaration().toString());
-            }
-        }
-        return result;
-    }
-
-    public Map<String, String> getCodeByModuleId(Integer moduleId) {
-        if (moduleId == null) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, String> merged = new LinkedHashMap<>();
-        currentModuleResults().stream()
-                .filter(m -> m.getModuleId().equals(moduleId))
-                .findFirst()
-                .map(m -> m.getFeatureList())
-                .ifPresent(features -> {
-                    for (FeatureResult fr : features) {
-                        Map<String, String> perFeature = getCodeByFeatureId(fr.getFeatureId());
-                        perFeature.forEach(merged::putIfAbsent);
-                    }
-                });
-
-        return merged;
     }
 
     /**
@@ -1067,10 +998,6 @@ public class CodeMapService {
         }
         ClusterState.getInstance().setCandidateFeature(candidateFeature);
         ClusterState.getInstance().setClusterIds(clusterIds);
-    }
-
-    public List<Feature> getFeaturesByModuleId(Integer moduleId) {
-        return featureRepository.findByModule_Id(moduleId);
     }
 
     private static Map<String, String> loadPythonMethodFileMap() {

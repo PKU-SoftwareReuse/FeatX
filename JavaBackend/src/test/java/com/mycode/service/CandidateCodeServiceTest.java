@@ -35,14 +35,13 @@ class CandidateCodeServiceTest {
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
         putModification(
-                "demo/Example.java",
+                "src/main/java/demo/Example.java",
                 "package demo;\n\nclass Example {\n    int value = 2;\n}\n"
         );
 
-        CodeFileDiffResult result = service.prepareJavaCandidate(
-                "demo/Example.java",
-                "edit",
-                ProjectState.getInstance().getModifications().get("demo/Example.java")
+        CodeFileDiffResult result = service.prepareProjectCandidate(
+                "src/main/java/demo/Example.java",
+                ProjectState.getInstance().getModifications().get("src/main/java/demo/Example.java")
         );
 
         assertEquals("src/main/java/demo/Example.java", result.getPath());
@@ -62,16 +61,16 @@ class CandidateCodeServiceTest {
 
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
-        putModification("demo/Example.java", original);
-        service.prepareJavaCandidate("demo/Example.java", "edit", original);
+        putModification("src/main/java/demo/Example.java", original);
+        service.prepareProjectCandidate("src/main/java/demo/Example.java", original);
 
         String edited = "package demo;\n\nimport java.util.List;\n\nclass Example { List<String> values; }\n";
-        CodeFileDiffResult saved = service.updateCandidate("demo/Example.java", "edit", edited);
+        CodeFileDiffResult saved = service.updateCandidate("src/main/java/demo/Example.java", "edit", edited);
 
         assertFalse(saved.getDiff().isBlank());
-        assertEquals(edited, service.authoritativeJavaContent("demo/Example.java").orElseThrow());
+        assertEquals(edited, service.authoritativeJavaContent("src/main/java/demo/Example.java").orElseThrow());
         assertEquals(original, Files.readString(sourceFile));
-        assertTrue(ProjectState.getInstance().getModifications().get("demo/Example.java").contains("List<String> values"));
+        assertTrue(ProjectState.getInstance().getModifications().get("src/main/java/demo/Example.java").contains("List<String> values"));
     }
 
     @Test
@@ -83,18 +82,18 @@ class CandidateCodeServiceTest {
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
         CandidateCodeService service = new CandidateCodeService();
-        CodeFileDiffResult opened = service.prepareManualJavaCandidate("demo/Example.java");
+        CodeFileDiffResult opened = service.prepareManualProjectCandidate("src/main/java/demo/Example.java");
 
         assertTrue(opened.getDiff().isBlank());
         assertTrue(service.pendingModificationKeys().isEmpty());
 
         service.updateCandidate(
-                "demo/Example.java",
+                "src/main/java/demo/Example.java",
                 "edit",
                 "package demo;\n\nclass Example { int manuallyEdited; }\n"
         );
 
-        assertEquals(java.util.Set.of("demo/Example.java"), service.pendingModificationKeys());
+        assertEquals(java.util.Set.of("src/main/java/demo/Example.java"), service.pendingModificationKeys());
         assertFalse(ProjectState.getInstance().getModifications().isEmpty());
     }
 
@@ -107,17 +106,17 @@ class CandidateCodeServiceTest {
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
         CandidateCodeService service = new CandidateCodeService();
-        service.prepareManualJavaCandidate("demo/Example.java");
+        service.prepareManualProjectCandidate("src/main/java/demo/Example.java");
 
         String incompleteEdit = "package demo;\n\nclass Example { int value = ; }\n";
         CodeFileDiffResult saved = service.updateCandidate(
-                "demo/Example.java",
+                "src/main/java/demo/Example.java",
                 "edit",
                 incompleteEdit
         );
 
         assertEquals(incompleteEdit, saved.getModifiedContent());
-        assertEquals(incompleteEdit, ProjectState.getInstance().getModifications().get("demo/Example.java"));
+        assertEquals(incompleteEdit, ProjectState.getInstance().getModifications().get("src/main/java/demo/Example.java"));
 
         IllegalStateException error = assertThrows(
                 IllegalStateException.class,
@@ -134,11 +133,11 @@ class CandidateCodeServiceTest {
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
         CandidateCodeService service = new CandidateCodeService();
-        service.prepareManualJavaCandidate("demo/Example.java");
+        service.prepareManualProjectCandidate("src/main/java/demo/Example.java");
         String incompleteEdit = "package demo;\n\nclass Example { int value = ; }\n";
-        service.updateCandidate("demo/Example.java", "edit", incompleteEdit);
+        service.updateCandidate("src/main/java/demo/Example.java", "edit", incompleteEdit);
 
-        service.materializeCandidate("demo/Example.java");
+        service.materializeCandidate("src/main/java/demo/Example.java");
 
         assertEquals(incompleteEdit, Files.readString(sourceFile));
     }
@@ -154,11 +153,11 @@ class CandidateCodeServiceTest {
 
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
-        putModification("demo/First.java", "package demo;\n\nclass First { int changed; }\n");
-        putModification("demo/Second.java", "package demo;\n\nclass Second { int untouched; }\n");
-        service.prepareJavaCandidate("demo/First.java", "edit", ProjectState.getInstance().getModifications().get("demo/First.java"));
+        putModification("src/main/java/demo/First.java", "package demo;\n\nclass First { int changed; }\n");
+        putModification("src/main/java/demo/Second.java", "package demo;\n\nclass Second { int untouched; }\n");
+        service.prepareProjectCandidate("src/main/java/demo/First.java", ProjectState.getInstance().getModifications().get("src/main/java/demo/First.java"));
 
-        service.materializeCandidate("demo/First.java");
+        service.materializeCandidate("src/main/java/demo/First.java");
 
         assertTrue(Files.readString(firstFile).contains("int changed"));
         assertEquals("package demo;\n\nclass Second {}\n", Files.readString(secondFile));
@@ -172,7 +171,7 @@ class CandidateCodeServiceTest {
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
 
         CandidateCodeService service = new CandidateCodeService();
-        service.beginOperation("delete", Set.of("demo/Example.java"));
+        service.beginOperation("delete", Set.of("src/main/java/demo/Example.java"));
 
         assertEquals(
                 java.util.List.of("src/main/java/demo/Example.java"),
@@ -190,14 +189,13 @@ class CandidateCodeServiceTest {
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
         putModification(
-                "demo/Example.java",
+                "src/main/java/demo/Example.java",
                 "package demo;\n\nclass Example { int changed; }\n"
         );
         service.beginOperation("test", ProjectState.getInstance().getModifications().keySet());
-        service.prepareJavaCandidate(
-                "demo/Example.java",
-                "edit",
-                ProjectState.getInstance().getModifications().get("demo/Example.java")
+        service.prepareProjectCandidate(
+                "src/main/java/demo/Example.java",
+                ProjectState.getInstance().getModifications().get("src/main/java/demo/Example.java")
         );
 
         service.validateCompleteCandidateSet();
@@ -212,15 +210,14 @@ class CandidateCodeServiceTest {
 
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
-        putModification("demo/Example.java", "package demo; class Example {");
+        putModification("src/main/java/demo/Example.java", "package demo; class Example {");
         service.beginOperation("test", ProjectState.getInstance().getModifications().keySet());
 
         IllegalStateException error = assertThrows(
                 IllegalStateException.class,
-                () -> service.prepareJavaCandidate(
-                        "demo/Example.java",
-                        "edit",
-                        ProjectState.getInstance().getModifications().get("demo/Example.java")
+                () -> service.prepareProjectCandidate(
+                        "src/main/java/demo/Example.java",
+                        ProjectState.getInstance().getModifications().get("src/main/java/demo/Example.java")
                 )
         );
         assertTrue(error.getMessage().contains("valid Java source"));
@@ -232,14 +229,13 @@ class CandidateCodeServiceTest {
 
         CandidateCodeService service = new CandidateCodeService();
         ProjectState.getInstance().setModifications(new LinkedHashMap<>());
-        putModification("cn/edu/pku/Foo.java", "public class Bar {}");
+        putModification("src/main/java/cn/edu/pku/Foo.java", "public class Bar {}");
         service.beginOperation("test", ProjectState.getInstance().getModifications().keySet());
         IllegalStateException error = assertThrows(
                 IllegalStateException.class,
-                () -> service.prepareJavaCandidate(
-                        "cn/edu/pku/Foo.java",
-                        "add",
-                        ProjectState.getInstance().getModifications().get("cn/edu/pku/Foo.java")
+                () -> service.prepareProjectCandidate(
+                        "src/main/java/cn/edu/pku/Foo.java",
+                        ProjectState.getInstance().getModifications().get("src/main/java/cn/edu/pku/Foo.java")
                 )
         );
         assertTrue(error.getMessage().contains("Foo"));
@@ -251,13 +247,11 @@ class CandidateCodeServiceTest {
         ProjectState.getInstance().setProjectPath(projectRoot.toString(), "PYTHON");
 
         CandidateCodeService service = new CandidateCodeService();
-        CodeFileDiffResult added = service.preparePythonCandidate(
-                "added.py",
+        CodeFileDiffResult added = service.prepareProjectCandidate(
                 "added.py",
                 "print('new')\n"
         );
-        CodeFileDiffResult deleted = service.preparePythonCandidate(
-                "removed.py",
+        CodeFileDiffResult deleted = service.prepareProjectCandidate(
                 "removed.py",
                 AgentService.DELETE_FILE_SENTINEL
         );

@@ -14,14 +14,12 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -147,27 +145,6 @@ public class LlmClient {
         } catch (Exception e) {
             return "调用失败：" + e.getMessage();
         }
-    }
-
-    public String streamGenerateWithPrompt(String prompt, SseEmitter emitter) throws IOException {
-        return streamGenerateWithPrompt(prompt, emitter, resolveModel(null));
-    }
-
-    public String streamGenerateWithPrompt(String prompt, SseEmitter emitter, String model) throws IOException {
-        return streamGenerateWithPromptResult(prompt, emitter, model).content();
-    }
-
-    public LlmGenerationResult streamGenerateWithPromptResult(
-            String prompt,
-            SseEmitter emitter,
-            String model
-    ) throws IOException {
-        return streamGenerateWithPromptResult(prompt, model, contentChunk -> {
-            String encoded = Base64.getEncoder().encodeToString(
-                    contentChunk.getBytes(StandardCharsets.UTF_8)
-            );
-            emitter.send(SseEmitter.event().name("delta").data(encoded));
-        });
     }
 
     public String streamGenerateWithPrompt(String prompt, AgentEventSink eventSink, String model) throws IOException {

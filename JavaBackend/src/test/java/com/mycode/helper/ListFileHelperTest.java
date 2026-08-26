@@ -31,15 +31,11 @@ class ListFileHelperTest {
     }
 
     @Test
-    void javaFileDiscoveryAndReadsUseRelativeSlashPaths(@TempDir Path sourceRoot) throws Exception {
+    void javaFileDiscoveryUsesRelativeSlashPaths(@TempDir Path sourceRoot) throws Exception {
         Path source = sourceRoot.resolve("cn/edu/pku/Foo.java");
         Files.createDirectories(source.getParent());
         Files.writeString(source, "package cn.edu.pku; class Foo {}\n");
 
         assertEquals(List.of("cn/edu/pku/Foo.java"), ListFileHelper.findJavaFiles(sourceRoot.toString()));
-        assertEquals(
-                "package cn.edu.pku; class Foo {}\n",
-                ListFileHelper.getFileContent(sourceRoot.toString(), "cn/edu/pku/Foo.java")
-        );
     }
 }

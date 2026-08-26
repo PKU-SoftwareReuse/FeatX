@@ -363,21 +363,6 @@ public class SKG extends SoftwareGraph<Arc> {
         }
     }
 
-//    public SKG getMinGraph() {
-//        SKG minGraph = new SKG();
-//        Set<Integer> candidateClusterIds = ClusterState.getInstance().getClusterIds();
-//        vertexSet().stream()
-//                .filter(vertex -> candidateClusterIds.containsAll(vertex.getClusterIds()))
-//                .forEach(vertex -> minGraph.addVertex(vertex));
-//
-//        edgeSet().stream()
-//                .filter(edge -> candidateClusterIds.containsAll(edge.getClusterIds()))
-//                .filter(edge -> minGraph.vertexSet().contains(edge.getSource()) && minGraph.vertexSet().contains(edge.getTarget()))
-//                .forEach(edge -> minGraph.addEdge(edge.getSource(), edge.getTarget(), edge));
-//
-//        return minGraph;
-//    }
-
     public SKG getMaxGraph() {
         return getMaxGraph(ClusterState.getInstance().getClusterIds());
     }

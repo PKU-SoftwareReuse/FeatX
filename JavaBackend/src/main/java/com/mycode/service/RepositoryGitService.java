@@ -184,10 +184,6 @@ public class RepositoryGitService {
         }
     }
 
-    public String commit(String message) throws IOException, InterruptedException {
-        return commit(message, false);
-    }
-
     public String commit(String message, boolean allowEmpty) throws IOException, InterruptedException {
         synchronized (currentRepositoryLock()) {
             Path repository = repositoryRoot();

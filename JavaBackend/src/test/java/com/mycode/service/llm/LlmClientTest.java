@@ -8,7 +8,6 @@ import okhttp3.mockwebserver.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.List;
@@ -87,9 +86,14 @@ class LlmClientTest {
                         + "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n"
                         + "data: [DONE]\n\n"));
 
-        String result = client.streamGenerateWithPrompt("test prompt", new SseEmitter(), "chosen-model");
+        LlmGenerationResult result = client.streamGenerateWithPromptResult(
+                "test prompt",
+                (event, content) -> {
+                },
+                "chosen-model"
+        );
 
-        assertEquals("Hello world", result);
+        assertEquals("Hello world", result.content());
         RecordedRequest request = server.takeRequest(1, TimeUnit.SECONDS);
         assertNotNull(request);
         assertEquals("/v1/chat/completions", request.getPath());

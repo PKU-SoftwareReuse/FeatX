@@ -25,10 +25,6 @@ public class StatisticHelper {
             "preprocess1", "delombok", "preprocess2"
     );
 
-    public static Map<String, Integer> countInRepo(String repoPath) {
-        return countJavaProject(repoPath);
-    }
-
     public static Map<String, Integer> countJavaProject(String repoPath) {
         File projectDir = new File(repoPath);
 

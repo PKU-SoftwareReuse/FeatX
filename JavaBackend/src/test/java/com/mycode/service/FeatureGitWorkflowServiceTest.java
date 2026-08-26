@@ -358,8 +358,7 @@ class FeatureGitWorkflowServiceTest {
 
         CandidateCodeService candidateService = new CandidateCodeService();
         ProjectState.getInstance().setModifications(Map.of("feature.py", "print('candidate')\n"));
-        candidateService.preparePythonCandidate(
-                "feature.py",
+        candidateService.prepareProjectCandidate(
                 "feature.py",
                 ProjectState.getInstance().getModifications().get("feature.py")
         );
@@ -390,8 +389,8 @@ class FeatureGitWorkflowServiceTest {
         modifications.put("first.py", "print('first changed')\n");
         modifications.put("second.py", "print('second changed')\n");
         ProjectState.getInstance().setModifications(modifications);
-        candidateService.preparePythonCandidate("first.py", "first.py", modifications.get("first.py"));
-        candidateService.preparePythonCandidate("second.py", "second.py", modifications.get("second.py"));
+        candidateService.prepareProjectCandidate("first.py", modifications.get("first.py"));
+        candidateService.prepareProjectCandidate("second.py", modifications.get("second.py"));
         return candidateService;
     }
 

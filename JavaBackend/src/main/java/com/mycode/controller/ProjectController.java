@@ -290,14 +290,6 @@ public class ProjectController {
         deleteDirectoryIfExists(gitStagingPath(request));
     }
 
-    @GetMapping("/tempRepoSummary")
-    public void temp() throws IOException, InterruptedException {
-
-        Path repoPath = repoPath(12);
-
-        Map<String, Integer> statisticInfo = StatisticHelper.countInRepo(repoPath.resolve("src/main/java").toString());
-    }
-
     @PostMapping("/resummary")
     public void reSummary(@RequestBody SelectProjectRequest request) throws IOException, InterruptedException {
         ProjectInfo projectInfo = projectInfoRepository.findById(request.getRepoId()).get();

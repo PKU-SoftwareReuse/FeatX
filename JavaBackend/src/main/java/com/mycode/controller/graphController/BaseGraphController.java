@@ -2,9 +2,6 @@ package com.mycode.controller.graphController;
 
 import com.mycode.dto.result.ClusterResult;
 import com.mycode.dto.result.GraphResult;
-import com.mycode.graph.CallGraph;
-import com.mycode.graph.ClassGraph;
-import com.mycode.graph.ReferenceGraph;
 import com.mycode.graph.SKG;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

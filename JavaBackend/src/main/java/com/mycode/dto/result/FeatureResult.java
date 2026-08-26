@@ -19,9 +19,7 @@ public class FeatureResult {
     private String featureDescription;
     private String featureDescriptionCn;
     private List<CandidateMethod> candidateMethods;
-//    private Boolean isTemp; // 标记是否为临时特征
-//    private Boolean isNewGenerated; // 标记是否是新生成的feature
-//
+
     public FeatureResult() {
         this.candidateMethods = new ArrayList<>();
     }
@@ -292,7 +290,6 @@ public class FeatureResult {
             public FullCandidateMethod() {
                 this.clusterIds = new HashSet<>();
             }
-//
             public FullCandidateMethod(String fullSignature) {
                 this.fullSignature = fullSignature;
                 this.clusterIds = VertexMap.getInstance().getMethodDeclarationMap()

@@ -5,7 +5,6 @@ import com.mycode.dto.result.CodeFileDiffResult;
 import com.mycode.helper.JavaFilePath;
 import com.mycode.helper.ProjectFilePath;
 import com.mycode.helper.ProjectPathMapping;
-import com.mycode.helper.RewriteFileHelper;
 import com.mycode.service.code.AgentService;
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
@@ -59,16 +58,6 @@ public class CandidateCodeService {
                     .filter(key -> !key.isBlank())
                     .forEach(state.expectedCandidateKeys::add);
         }
-    }
-
-    public void registerExpectedCandidateKeys(Collection<String> candidateKeys) {
-        if (candidateKeys == null) {
-            return;
-        }
-        candidateKeys.stream()
-                .filter(Objects::nonNull)
-                .filter(key -> !key.isBlank())
-                .forEach(state().expectedCandidateKeys::add);
     }
 
     public Set<String> pendingModificationKeys() {
@@ -170,24 +159,6 @@ public class CandidateCodeService {
                 .orElseThrow(() -> new IllegalStateException("Candidate file path is unavailable for " + key + "."));
     }
 
-    public Map<String, String> modificationsForKeys(Collection<String> keys) {
-        if (keys == null || keys.isEmpty()) {
-            return Collections.emptyMap();
-        }
-        Set<String> normalizedKeys = keys.stream()
-                .filter(Objects::nonNull)
-                .map(this::normalizeCandidateKey)
-                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
-        Map<String, String> selected = new LinkedHashMap<>();
-        ProjectState.getInstance().getModifications().forEach((key, value) -> {
-            String normalizedKey = normalizeCandidateKey(key);
-            if (normalizedKeys.contains(normalizedKey)) {
-                selected.put(normalizedKey, value);
-            }
-        });
-        return selected;
-    }
-
     public Map<String, String> adoptStagedCandidateContents(
             Collection<String> keys,
             Map<String, String> contentsByProjectPath
@@ -232,21 +203,6 @@ public class CandidateCodeService {
         ProjectState.getInstance().setModifications(restored);
     }
 
-    public void discardCandidate(String key) {
-        String normalizedKey = normalizeCandidateKey(key);
-        CandidateState state = state();
-        state.candidateDocuments.remove(normalizedKey);
-        state.expectedCandidateKeys.remove(normalizedKey);
-        state.committedCandidateKeys.remove(normalizedKey);
-        state.stagedCandidateKeys.remove(normalizedKey);
-        state.editedAfterStageCandidateKeys.remove(normalizedKey);
-        state.stagedCandidateContents.remove(normalizedKey);
-
-        Map<String, String> modifications = mutableModifications();
-        modifications.entrySet().removeIf(entry -> normalizeCandidateKey(entry.getKey()).equals(normalizedKey));
-        ProjectState.getInstance().setModifications(modifications);
-    }
-
     public void restoreCandidateToOriginal(String key) {
         String normalizedKey = normalizeCandidateKey(key);
         CandidateState state = state();
@@ -277,50 +233,6 @@ public class CandidateCodeService {
         ProjectState.getInstance().setPythonModifiedMethods(Set.of());
     }
 
-    public CodeFileDiffResult prepareJavaCandidate(
-            String classId,
-            String operation,
-            String candidateBody
-    ) throws IOException, InterruptedException {
-        String filePath = JavaFilePath.normalize(classId);
-        CandidateDocument cached = state().candidateDocuments.get(filePath);
-        if (cached != null) {
-            return toResult(cached);
-        }
-
-        Path sourceFile = RewriteFileHelper.resolveJavaFilePath(filePath).toAbsolutePath().normalize();
-        boolean originalExists = Files.isRegularFile(sourceFile);
-        String originalContent = originalExists ? readEditableFile(sourceFile) : "";
-        boolean deletion = "delete".equalsIgnoreCase(operation);
-        if (!deletion && (candidateBody == null || candidateBody.isBlank())) {
-            throw new IllegalArgumentException("Generated Java candidate content cannot be empty.");
-        }
-        String modifiedContent = deletion
-                ? RewriteFileHelper.buildJavaFileContent(filePath, candidateBody, null)
-                : candidateBody;
-        if (!modifiedContent.isBlank()) {
-            validateJavaCandidate(filePath, sourceFile, modifiedContent);
-        }
-        CandidateDocument document = new CandidateDocument(
-                filePath,
-                projectRelativePath(sourceFile),
-                "java",
-                originalContent,
-                modifiedContent,
-                originalExists,
-                true,
-                null,
-                true
-        );
-        state().candidateDocuments.put(filePath, document);
-        return toResult(document);
-    }
-
-    public CodeFileDiffResult preparePythonCandidate(String key, String relativePath, String candidateContent)
-            throws IOException, InterruptedException {
-        return prepareProjectCandidate(relativePath, candidateContent);
-    }
-
     public CodeFileDiffResult prepareProjectCandidate(String relativePath, String candidateContent)
             throws IOException, InterruptedException {
         String key = ProjectFilePath.normalize(relativePath);
@@ -348,38 +260,6 @@ public class CandidateCodeService {
         );
         state().candidateDocuments.put(key, document);
         return toResult(document);
-    }
-
-    public CodeFileDiffResult prepareManualJavaCandidate(String classId)
-            throws IOException, InterruptedException {
-        String filePath = JavaFilePath.normalize(classId);
-        CandidateDocument cached = state().candidateDocuments.get(filePath);
-        if (cached != null) {
-            return toResult(cached);
-        }
-        Path sourceFile = RewriteFileHelper.resolveJavaFilePath(filePath).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(sourceFile)) {
-            throw new IllegalStateException("Source file does not exist for " + classId + ".");
-        }
-        String originalContent = readEditableFile(sourceFile);
-        CandidateDocument document = new CandidateDocument(
-                filePath,
-                projectRelativePath(sourceFile),
-                "java",
-                originalContent,
-                originalContent,
-                true,
-                true,
-                null,
-                false
-        );
-        state().candidateDocuments.put(filePath, document);
-        return toResult(document);
-    }
-
-    public CodeFileDiffResult prepareManualPythonCandidate(String relativePath)
-            throws IOException, InterruptedException {
-        return prepareManualProjectCandidate(relativePath);
     }
 
     public CodeFileDiffResult prepareManualProjectCandidate(String relativePath)

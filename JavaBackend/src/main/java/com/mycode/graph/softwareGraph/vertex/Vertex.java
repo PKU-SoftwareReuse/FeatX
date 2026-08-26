@@ -25,15 +25,10 @@ public class Vertex<T extends BodyDeclaration<?>> {
     @Setter
     private Set<Integer> clusterIds;
 
-//    @Getter
-//    @Setter
-//    private boolean toBeDeleted;
-
     public Vertex(T declaration, String id) {
         this.declaration = declaration;
         this.id = id;
         this.clusterIds = new HashSet<>();
-//        this.toBeDeleted = false;
     }
 
 

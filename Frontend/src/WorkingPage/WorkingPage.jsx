@@ -304,11 +304,8 @@ const WORKING_PAGE_COPY = {
         fetchingGraph: "正在获取相关代码图谱。",
         changesPanel: "代码变更",
         resizeChangesPanel: "调整代码变更面板宽度，双击恢复默认宽度",
-        repositoryDiff: "仓库 Git Diff",
         closeChangesPanel: "关闭代码变更",
         fetchingCode: "正在获取代码详情。",
-        noRepositoryChanges: "当前仓库没有未提交的 Git 变更。",
-        failedFetchRepositoryDiff: "获取仓库 Git Diff 失败。",
         candidateDiff: "候选代码 Git Diff",
         failedFetchCandidateDiff: "获取候选代码 Git Diff 失败。",
         candidateSaved: "候选代码已保存。",
@@ -372,7 +369,6 @@ const WORKING_PAGE_COPY = {
         failedFetchGeneratedGraph: "获取生成后的图谱失败。",
         failedFetchCodeDiff: "获取代码差异失败。",
         failedFetchCodeContext: "获取代码上下文失败。",
-        failedFetchGeneratedCodeDiff: "获取生成后的代码差异失败。",
         failedPrepareDeletion: "准备删除上下文失败。",
         failedPrepareModification: "准备修改上下文失败。",
         failedAddFeature: "新增功能失败。",
@@ -403,11 +399,8 @@ const WORKING_PAGE_COPY = {
         fetchingGraph: "fetching codeMap.",
         changesPanel: "Diff Panel",
         resizeChangesPanel: "Resize the diff panel; double-click to reset",
-        repositoryDiff: "Repository Git Diff",
         closeChangesPanel: "Close Diff Panel",
         fetchingCode: "Fetching code details.",
-        noRepositoryChanges: "The repository has no uncommitted Git changes.",
-        failedFetchRepositoryDiff: "Failed to fetch repository Git diff.",
         candidateDiff: "Candidate Git Diff",
         failedFetchCandidateDiff: "Failed to fetch candidate Git diff.",
         candidateSaved: "Candidate code saved.",
@@ -471,7 +464,6 @@ const WORKING_PAGE_COPY = {
         failedFetchGeneratedGraph: "Failed to fetch generated graph.",
         failedFetchCodeDiff: "Failed to fetch code diff.",
         failedFetchCodeContext: "Failed to fetch code context.",
-        failedFetchGeneratedCodeDiff: "Failed to fetch generated code diff.",
         failedPrepareDeletion: "Failed to prepare deletion context.",
         failedPrepareModification: "Failed to prepare modification context.",
         failedAddFeature: "Failed to add feature.",
@@ -487,10 +479,10 @@ const getModuleDescription = (module, language) =>
 const getFeatureDescription = (feature, language) =>
     getLocalizedField(feature, "featureDescription", language);
 
-const getFeatureDisplayIndex = (featureList, item) => item.isNew || item.isNewGenerated
+const getFeatureDisplayIndex = (featureList, item) => item.isNew
     ? 0
     : featureList
-        .filter((feature) => !feature.isNew && !feature.isNewGenerated)
+        .filter((feature) => !feature.isNew)
         .findIndex((feature) => feature === item) + 1;
 
 export const FeatureListItem = ({
@@ -852,9 +844,7 @@ const WorkingPage = () => {
         setCodeDiff('');
         setSelectedCodeNodeId('');
         setDiffDrawerOpen(false);
-        setIsRepositoryDiff(false);
         setIsCandidateDiff(false);
-        setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
         candidateDraftRef.current = '';
@@ -912,8 +902,6 @@ const WorkingPage = () => {
     const [featurePanelSize, setFeaturePanelSize] = useState("45%");
     const drawerResizeRef = useRef(null);
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
-    const [isRepositoryDiff, setIsRepositoryDiff] = useState(false);
-    const [repositoryDiffError, setRepositoryDiffError] = useState(false);
     const [isCandidateDiff, setIsCandidateDiff] = useState(false);
     const [candidateFile, setCandidateFile] = useState(null);
     const [candidateDraft, setCandidateDraft] = useState('');
@@ -1077,9 +1065,7 @@ const WorkingPage = () => {
             message.warning(copy.saveBeforeClose);
             return false;
         }
-        setIsRepositoryDiff(false);
         setIsCandidateDiff(false);
-        setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
         candidateDraftRef.current = '';
@@ -1352,9 +1338,7 @@ const WorkingPage = () => {
         setDiffDrawerOpen(false);
         setLoadingCode(false);
         setCodeDiff('');
-        setIsRepositoryDiff(false);
         setIsCandidateDiff(false);
-        setRepositoryDiffError(false);
         setCandidateFile(null);
         setCandidateDraft('');
         candidateDraftRef.current = '';
@@ -2642,10 +2626,6 @@ const WorkingPage = () => {
                                                 <List
                                                     dataSource={module.featureList}
                                                     renderItem={(item, featureIndex) => {
-                                                        // // 调试信息：打印当前feature的信息
-                                                        // if (item.isNewGenerated) {
-                                                        //     console.log('Rendering modified feature:', item);
-                                                        // }
                                                         const displayIndex = getFeatureDisplayIndex(module.featureList, item);
                                                         return (
                                                             <FeatureListItem
@@ -2844,9 +2824,7 @@ const WorkingPage = () => {
                         />
                         <header className={styles.diffDrawerHeader}>
                             <div className={styles.diffDrawerTitle}>
-                                <h2>{isRepositoryDiff
-                                    ? copy.repositoryDiff
-                                    : isCandidateDiff ? copy.candidateDiff : copy.changesPanel}</h2>
+                                <h2>{isCandidateDiff ? copy.candidateDiff : copy.changesPanel}</h2>
                                 {(candidateFile?.path || selectedCodeNodeId) && (
                                     <p>{candidateFile?.path || selectedCodeNodeId}</p>
                                 )}
@@ -2898,10 +2876,6 @@ const WorkingPage = () => {
                                             />
                                         </div>
                                     </div>
-                                ) : isRepositoryDiff && repositoryDiffError ? (
-                                    <div className={styles.emptyDiff}>{copy.failedFetchRepositoryDiff}</div>
-                                ) : isRepositoryDiff && !codeDiff.trim() ? (
-                                    <div className={styles.emptyDiff}>{copy.noRepositoryChanges}</div>
                                 ) : (
                                     <CodeDiffComponent
                                         diffText={codeDiff}

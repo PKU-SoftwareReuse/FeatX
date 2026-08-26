@@ -7,7 +7,6 @@ import com.mycode.graph.ReferenceGraph;
 import com.mycode.graph.SKG;
 import com.mycode.graph.softwareGraph.vertex.VertexMap;
 import com.mycode.helper.PreprocessHelper;
-import com.mycode.helper.CodeDiffHelper;
 import com.github.javaparser.ParseException;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.NodeList;
@@ -61,7 +60,6 @@ public class ProcessService {
         ClassGraph.clearRepository(repositoryId);
         ReferenceGraph.clearRepository(repositoryId);
         CallGraph.clearRepository(repositoryId);
-        CodeDiffHelper.clearRepository(repositoryId);
         repositoryBuildLocks.remove(repositoryId);
     }
 }

@@ -1,10 +1,7 @@
 package com.mycode.dto.result;
 
 import com.mycode.config.ClusterState;
-import com.mycode.config.ProjectState;
-import com.mycode.dao.GraphEdge;
 import com.mycode.graph.SKG;
-import com.mycode.graph.softwareGraph.arc.Arc;
 import com.mycode.graph.softwareGraph.arc.ClassArc;
 import com.mycode.graph.softwareGraph.vertex.Vertex;
 import com.mycode.graph.softwareGraph.vertex.VertexMap;
@@ -16,7 +13,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Getter
 @Setter
@@ -33,12 +29,9 @@ public class FeatureGraphResult {
         nodes = new HashSet<>();
         edges = new HashSet<>();
 
-        // Step 1: 收集 Class 节点并构建 Node
-        Map<String, Vertex<?>> classVertexMap = new HashMap<>(); // id -> vertex
+        // Collect class nodes and their member methods.
         skg.vertexSet().forEach(vertex -> {
             if (isClassVertex(vertex)) {
-                classVertexMap.put(vertex.getId(), vertex);
-
                 Node newNode = new Node(vertex.getId());
                 skg.outgoingEdgesOf(vertex).stream()
                         .filter(ClassArc.MemberArc.class::isInstance)
@@ -62,31 +55,6 @@ public class FeatureGraphResult {
                 nodes.add(newNode);
             }
         });
-        // Step2: 交给外部Database来做了
-        // Step 2: 对每个 Class 节点 BFS 找可达的其他 Class 节点
-//        for (Vertex<?> startClass : classVertexMap.values()) {
-//            Set<Vertex<?>> visited = new HashSet<>();
-//            Queue<Vertex<?>> queue = new LinkedList<>();
-//            queue.add(startClass);
-//
-//            while (!queue.isEmpty()) {
-//                Vertex<?> current = queue.poll();
-//                for (Arc edge : skg.outgoingEdgesOf(current)) {
-//                    Vertex<?> target = edge.getTarget();
-//
-//                    if (visited.contains(target)) continue;
-//                    visited.add(target);
-//
-//                    if (isClassVertex(target)) {
-//                        // 找到另一个 Class 节点 → 新图加边
-//                        edges.add(new Edge(startClass.getId(), target.getId()));
-//                    } else {
-//                        // 继续搜索非 Class 节点
-//                        queue.add(target);
-//                    }
-//                }
-//            }
-//        }
 
     }
 

@@ -3,11 +3,8 @@ package com.mycode.helper.graphAggregationHelper;
 import com.mycode.graph.SKG;
 import com.mycode.graph.softwareGraph.arc.ClassArc;
 import com.mycode.graph.softwareGraph.vertex.Vertex;
-import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.NodeList;
-import com.github.javaparser.ast.body.AnnotationMemberDeclaration;
 import com.github.javaparser.ast.body.BodyDeclaration;
-import com.github.javaparser.ast.body.EnumConstantDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.*;
 import com.github.javaparser.ast.nodeTypes.NodeWithAnnotations;
@@ -35,23 +32,6 @@ public abstract class GraphAggregationHelper {
     Map<String, TypeDeclaration<?>> classFullDeclarationMap = new HashMap<>();
 
     abstract public String generateCode();
-//    {
-//        if (debloatingFlag && clusterIds.containsAll(topVertex.getClusterIds())) {
-//            return "";
-//        }
-//        graph.vertexSet().stream()
-//                .filter(vertex -> isClassVertex(vertex))
-//                .forEach(vertex -> {
-//                    classPureDeclarationMap.put(vertex.getId(), classVertex2Declaration(vertex, debloatingFlag));
-//                    classFullDeclarationMap.put(vertex.getId(), (TypeDeclaration<?>) vertex.getDeclaration());
-//                });
-//        BodyDeclaration<?> declaration = topClassVertex2Declaration(topVertex);
-//        return declaration.toString();
-//    }
-
-//        protected boolean isTopClassVertex(Vertex<?> vertex) {
-//            return isClassVertex(vertex) && isTopVertex(vertex);
-//        }
 
     protected static boolean isClassVertex(Vertex<?> vertex) {
         BodyDeclaration<?> declaration = vertex.getDeclaration();
@@ -59,53 +39,7 @@ public abstract class GraphAggregationHelper {
         return isClass;
     }
 
-//        protected boolean isTopVertex(Vertex<?> vertex) {
-//            return graph.incomingEdgesOf(vertex).stream()
-//                    .filter(ClassArc.InnerArc.class::isInstance)
-//                    .count() == 0;
-//        }
-
     abstract protected TypeDeclaration<?> classVertex2Declaration(Vertex<?> vertex);
-//    {
-//        TypeDeclaration<?> pureDeclaration = (TypeDeclaration<?>) vertex.getDeclaration().clone();
-//        pureDeclaration.setParentNode(null);
-//
-//        List<Node> toRemove = pureDeclaration.getChildNodes().stream()
-//                .filter(childNode -> childNode instanceof BodyDeclaration<?>)
-//                .collect(Collectors.toList());
-//        graph.outgoingEdgesOf(vertex).stream()
-//                .filter(ClassArc.MemberArc.class::isInstance)
-//                .map(arc -> arc.getTarget())
-//                .filter(toReserveVertex -> {
-//                    // 去除工具运行中自动生成的声明
-//                    for (AnnotationExpr annotation : toReserveVertex.getDeclaration().getAnnotations()) {
-//                        if (annotation.getNameAsString().equals("lombok.Generated")
-//                                || annotation.getNameAsString().equals("ltm.Generated")) {
-//                            return false;
-//                        }
-//                    }
-//                    // 保留无关代码
-//                    if (debloatingFlag && clusterIds.containsAll(toReserveVertex.getClusterIds())) {
-//                        return false;
-//                    }
-//                    return true;
-//                })
-//                .map(toReserveVertex -> toReserveVertex.getDeclaration())
-//                .forEach(toReserve -> {
-//                    toRemove.remove(toReserve);
-//                });
-//        toRemove.forEach(node -> {
-//            if (node instanceof EnumConstantDeclaration || node instanceof AnnotationMemberDeclaration) {
-//                // pass
-//            } else {
-//                pureDeclaration.remove(node);
-//            }
-//        });
-//
-//        // 还原 lombok 注解
-//        postprocess(pureDeclaration);
-//        return pureDeclaration;
-//    }
 
     protected void postprocess(TypeDeclaration<?> declaration) {
         declaration.accept(new ModifierVisitor<Void>() {
