@@ -75,6 +75,44 @@ class RepoSummaryFileGraphServiceTest {
     }
 
     @Test
+    void readsAdjacencyEdgesForArbitraryCandidateFiles(@TempDir Path projectRoot) throws Exception {
+        Path sourceRoot = projectRoot.resolve("src/main/java");
+        Path firstFile = sourceRoot.resolve("example/First.java");
+        Path secondFile = sourceRoot.resolve("example/Second.java");
+        Files.createDirectories(firstFile.getParent());
+        Files.writeString(firstFile, "package example; class First {}\n");
+        Files.writeString(secondFile, "package example; class Second {}\n");
+
+        Path outputDirectory = Files.createDirectory(projectRoot.resolve("summary"));
+        Files.writeString(outputDirectory.resolve("file_adj_matrix.csv"), String.join("\n",
+                ",example.First,example.Second",
+                "example.First,0,1",
+                "example.Second,1,0"
+        ));
+
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+        ProjectState.getInstance().setRepoId(903);
+        Set<FeatureGraphResult.Edge> edges = new RepoSummaryFileGraphService(mock(CodeMapRepository.class))
+                .getFileAdjacencyEdges(
+                        List.of(
+                                "src/main/java/example/First.java",
+                                "src/main/java/example/Second.java"
+                        ),
+                        outputDirectory
+                );
+
+        assertEquals(
+                Set.of(
+                        "src/main/java/example/First.java->src/main/java/example/Second.java",
+                        "src/main/java/example/Second.java->src/main/java/example/First.java"
+                ),
+                edges.stream()
+                        .map(edge -> edge.getFrom() + "->" + edge.getTo())
+                        .collect(Collectors.toSet())
+        );
+    }
+
+    @Test
     void buildsPythonFeatureGraphWithTheSameFileProtocol(@TempDir Path projectRoot) throws Exception {
         Path sourceRoot = projectRoot.resolve("src/main/python");
         Path firstFile = sourceRoot.resolve("sample/first.py");

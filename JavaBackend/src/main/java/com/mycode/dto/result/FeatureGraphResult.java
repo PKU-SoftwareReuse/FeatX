@@ -70,27 +70,6 @@ public class FeatureGraphResult {
         return vertex.getDeclaration().isClassOrInterfaceDeclaration();
     }
 
-    public FeatureGraphResult setNewType(FeatureGraphResult newGraph) {
-        Set<String> newNodeIds = new HashSet<>();
-        newGraph.nodes.forEach(node -> {
-            newNodeIds.add(node.getId());
-        });
-        nodes.forEach(node -> {
-            if (newNodeIds.contains(node.getId())) {
-                node.setType("Modify");
-                newNodeIds.remove(node.getId());
-            }
-        });
-        newGraph.nodes.forEach(node -> {
-            if (newNodeIds.contains(node.getId())) {
-                node.setType("Modify");
-                nodes.add(node);
-                newNodeIds.remove(node.getId());
-            }
-        });
-        return this;
-    }
-
     public FeatureGraphResult setDebloatType() {
         nodes.forEach(node -> {
             VertexMap vertexMap = VertexMap.getInstance();

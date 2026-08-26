@@ -286,7 +286,7 @@ curl -s -X POST http://localhost:8080/project/select \
 curl -s http://localhost:8080/feature/get \
   | jq '.[] | select(.moduleDesc=="Blog content management and retrieval") | {moduleId, moduleDesc, features: (.featureList | length)}'
 
-curl -s 'http://localhost:8080/graph/feature/maxGraph?featureId=40' \
+curl -s 'http://localhost:8080/graph/feature/initialGraph?featureId=40' \
   | jq '{nodes: (.nodes | length), edges: (.edges | length)}'
 ```
 

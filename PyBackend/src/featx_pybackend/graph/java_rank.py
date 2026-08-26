@@ -172,6 +172,23 @@ def _normalize_nonnegative(values: dict[str, float], fallback_ids: list[str]) ->
     return {node_id: value for node_id in values}
 
 
+def _select_top_nodes_by_method_count(
+    ranked_ids: list[str],
+    node_by_id: dict[str, dict[str, Any]],
+    target_method_count: int,
+) -> list[str]:
+    """Keep the ranked prefix that contains the requested number of callable nodes."""
+    selected: list[str] = []
+    method_count = 0
+    for node_id in ranked_ids:
+        selected.append(node_id)
+        if str(node_by_id[node_id].get("category") or "") in METHOD_CATEGORIES:
+            method_count += 1
+            if method_count >= target_method_count:
+                break
+    return selected
+
+
 def _pagerank(
     node_ids: list[str],
     edges: list[dict[str, Any]],
@@ -221,7 +238,10 @@ def rank_graph(
     query = str(request.get("query") or "").strip()
     nodes = list(request.get("nodes") or [])
     edges = list(request.get("edges") or [])
-    top_k = max(1, int(request.get("topKNodes") or os.getenv("FOCUSGRAPH_TOP_K_NODES", "15")))
+    target_method_count = max(
+        1,
+        int(request.get("topKNodes") or os.getenv("FOCUSGRAPH_TOP_K_NODES", "15")),
+    )
     node_by_id = {str(node["id"]): node for node in nodes}
     node_ids = list(node_by_id)
 
@@ -293,17 +313,28 @@ def rank_graph(
     seed_ids = [node_id for node_id, node in node_by_id.items() if node.get("seed")]
     personalization = _normalize_nonnegative(base_scores, seed_ids)
     rank_scores = _pagerank(node_ids, edges, personalization)
-    selected_ids = [
+    ranked_ids = [
         node_id
         for node_id, _ in sorted(
             rank_scores.items(),
             key=lambda item: (-item[1], item[0]),
-        )[:top_k]
+        )
     ]
+    selected_ids = _select_top_nodes_by_method_count(
+        ranked_ids,
+        node_by_id,
+        target_method_count,
+    )
+    selected_method_count = sum(
+        str(node_by_id[node_id].get("category") or "") in METHOD_CATEGORIES
+        for node_id in selected_ids
+    )
     _progress(
         "top-k-subgraph",
         6,
         selectedNodeCount=len(selected_ids),
+        selectedMethodCount=selected_method_count,
+        targetMethodCount=target_method_count,
     )
     return {
         "similarityScores": similarity_by_id,

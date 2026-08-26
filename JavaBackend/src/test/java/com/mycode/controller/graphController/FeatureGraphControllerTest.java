@@ -3,8 +3,11 @@ package com.mycode.controller.graphController;
 import com.mycode.config.ProjectState;
 import com.mycode.controller.FeatureController;
 import com.mycode.dto.result.FeatureGraphResult;
+import com.mycode.service.CandidateGraphService;
 import com.mycode.service.CandidateCodeService;
 import com.mycode.service.CodeMapService;
+import com.mycode.service.code.AgentLanguage;
+import com.mycode.service.code.AgentRunContext;
 import com.mycode.service.code.AgentRunRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -13,9 +16,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.mockito.Mockito.never;
@@ -42,6 +45,9 @@ class FeatureGraphControllerTest {
     @MockitoBean
     private AgentRunRegistry agentRunRegistry;
 
+    @MockitoBean
+    private CandidateGraphService candidateGraphService;
+
     @Test
     void initialGraphUsesTheUnifiedRepoSummaryFileGraph(@TempDir Path projectPath) throws Exception {
         ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
@@ -63,23 +69,38 @@ class FeatureGraphControllerTest {
     }
 
     @Test
-    void newGraphUsesSourceRelativeJavaClassIds(@TempDir Path projectPath) throws Exception {
+    void candidateGraphUsesTheCompletedRunReasoningGraph(@TempDir Path projectPath) throws Exception {
         String candidatePath = "src/main/java/top/naccl/util/MailUtils.java";
-        Path sourceFile = projectPath.resolve(candidatePath);
-        Files.createDirectories(sourceFile.getParent());
-        Files.writeString(sourceFile, "package top.naccl.util; class MailUtils {}\n");
         ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
-
-        when(candidateCodeService.pendingModificationKeys()).thenReturn(Set.of(candidatePath));
-        when(candidateCodeService.stagedModificationKeys()).thenReturn(Set.of());
-        when(codeMapService.getMaxGraph()).thenReturn(new FeatureGraphResult(
-                new LinkedHashSet<>(),
+        AgentRunContext context = new AgentRunContext(
+                "run-1",
+                "java-modify",
+                "request",
+                "old request",
+                "context",
+                "files",
+                AgentLanguage.EN,
+                projectPath.toString(),
+                projectPath.toString(),
+                1,
+                2,
+                null,
+                List.of()
+        );
+        FeatureGraphResult candidateGraph = new FeatureGraphResult(
+                new LinkedHashSet<>(Set.of(new FeatureGraphResult.Node(candidatePath))),
                 new LinkedHashSet<>()
-        ));
+        );
+        candidateGraph.getNodes().forEach(node -> node.setType("Modify"));
+        when(agentRunRegistry.requireCompleted("run-1")).thenReturn(context);
+        when(candidateGraphService.buildCandidateGraph(context)).thenReturn(candidateGraph);
 
-        mockMvc.perform(get("/graph/feature/newGraph").param("runId", "run-1"))
+        mockMvc.perform(get("/graph/feature/candidateGraph").param("runId", "run-1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.nodes[0].id").value("top.naccl.util.MailUtils"))
+                .andExpect(jsonPath("$.nodes[0].id").value(candidatePath))
                 .andExpect(jsonPath("$.nodes[0].type").value("Modify"));
+
+        verify(agentRunRegistry).requireCompleted("run-1");
+        verify(candidateGraphService).buildCandidateGraph(context);
     }
 }

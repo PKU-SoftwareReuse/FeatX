@@ -1,6 +1,8 @@
 package com.mycode.service;
 
 import com.mycode.config.LtmConfig;
+import com.mycode.helper.ListFileHelper;
+import com.mycode.helper.ProjectFilePath;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParseResult;
 import com.github.javaparser.ast.CompilationUnit;
@@ -11,12 +13,16 @@ import com.github.javaparser.ast.body.TypeDeclaration;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +47,211 @@ public class JavaImportAnalyzerService {
 
     public JavaImportAnalyzerService(LtmConfig ltmConfig) {
         this.ltmConfig = ltmConfig;
+    }
+
+    public record ImportEdge(String from, String to) {
+    }
+
+    /**
+     * Builds import-rule edges for the files shown by the Java candidate graph.
+     * Candidate contents override files on disk, which lets unsaved Agent output
+     * participate in the graph as soon as the run completes.
+     *
+     * <p>Only edges touching an extra candidate file are returned. Existing
+     * files are connected by the persisted RepoSummary matrix; this method
+     * supplies the missing relationships for files absent from the reasoning
+     * graph.</p>
+     */
+    public Set<ImportEdge> candidateEdges(
+            Path projectRoot,
+            Path sourceRoot,
+            Collection<String> selectedProjectFiles,
+            Collection<String> extraCandidateFiles,
+            Map<String, String> candidateContents
+    ) throws IOException {
+        Path normalizedProjectRoot = projectRoot.toAbsolutePath().normalize();
+        Path normalizedSourceRoot = sourceRoot.toAbsolutePath().normalize();
+        Set<String> selectedFiles = normalizeProjectFiles(selectedProjectFiles);
+        Set<String> extraFiles = normalizeProjectFiles(extraCandidateFiles);
+        if (selectedFiles.isEmpty() || extraFiles.isEmpty()) {
+            return Set.of();
+        }
+
+        Map<String, String> overrides = normalizeCandidateContents(candidateContents);
+        Map<String, SourceUnit> units = loadSourceUnits(
+                normalizedProjectRoot,
+                normalizedSourceRoot,
+                overrides
+        );
+        Map<String, String> classToFile = new LinkedHashMap<>();
+        Map<String, Set<String>> classesByPackage = new LinkedHashMap<>();
+        for (SourceUnit unit : units.values()) {
+            for (String className : unit.classNames()) {
+                classToFile.put(className, unit.projectPath());
+                classesByPackage
+                        .computeIfAbsent(unit.packageName(), ignored -> new LinkedHashSet<>())
+                        .add(className);
+            }
+        }
+
+        Set<ImportEdge> result = new LinkedHashSet<>();
+        for (SourceUnit source : units.values()) {
+            if (!selectedFiles.contains(source.projectPath())) {
+                continue;
+            }
+            Set<String> dependencies = dependencies(source, classToFile, classesByPackage);
+            for (String dependency : dependencies) {
+                String targetFile = classToFile.get(dependency);
+                if (targetFile == null
+                        || !selectedFiles.contains(targetFile)
+                        || source.projectPath().equals(targetFile)
+                        || (!extraFiles.contains(source.projectPath()) && !extraFiles.contains(targetFile))) {
+                    continue;
+                }
+                result.add(new ImportEdge(source.projectPath(), targetFile));
+            }
+        }
+        return result.stream()
+                .sorted(Comparator.comparing(ImportEdge::from).thenComparing(ImportEdge::to))
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Set<String> normalizeProjectFiles(Collection<String> files) {
+        Set<String> result = new LinkedHashSet<>();
+        if (files == null) {
+            return result;
+        }
+        for (String file : files) {
+            if (file == null || file.isBlank()) {
+                continue;
+            }
+            try {
+                result.add(ProjectFilePath.normalize(file));
+            } catch (IllegalArgumentException ignored) {
+                // Non-file Agent keys cannot participate in Java import analysis.
+            }
+        }
+        return result;
+    }
+
+    private Map<String, String> normalizeCandidateContents(Map<String, String> contents) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (contents == null) {
+            return result;
+        }
+        contents.forEach((file, content) -> {
+            if (file == null || file.isBlank()) {
+                return;
+            }
+            try {
+                result.put(ProjectFilePath.normalize(file), content == null ? "" : content);
+            } catch (IllegalArgumentException ignored) {
+                // Non-file Agent keys cannot participate in Java import analysis.
+            }
+        });
+        return result;
+    }
+
+    private Map<String, SourceUnit> loadSourceUnits(
+            Path projectRoot,
+            Path sourceRoot,
+            Map<String, String> overrides
+    ) throws IOException {
+        Map<String, SourceUnit> result = new LinkedHashMap<>();
+        for (String sourceRelative : ListFileHelper.findJavaFiles(sourceRoot.toString())) {
+            Path sourceFile = sourceRoot.resolve(sourceRelative).toAbsolutePath().normalize();
+            if (!sourceFile.startsWith(sourceRoot)) {
+                continue;
+            }
+            String projectPath = projectPath(projectRoot, sourceFile);
+            String content = overrides.containsKey(projectPath)
+                    ? overrides.get(projectPath)
+                    : Files.readString(sourceFile, StandardCharsets.UTF_8);
+            if (content == null || content.isBlank()) {
+                continue;
+            }
+            SourceUnit unit = parseSourceUnit(projectPath, content);
+            if (unit != null) {
+                result.put(projectPath, unit);
+            }
+        }
+
+        // New Agent files are not present in the source tree yet.
+        for (Map.Entry<String, String> entry : overrides.entrySet()) {
+            if (result.containsKey(entry.getKey()) || entry.getValue().isBlank()) {
+                continue;
+            }
+            Path sourceFile = projectRoot.resolve(entry.getKey()).toAbsolutePath().normalize();
+            if (!sourceFile.startsWith(sourceRoot)) {
+                continue;
+            }
+            SourceUnit unit = parseSourceUnit(entry.getKey(), entry.getValue());
+            if (unit != null) {
+                result.put(entry.getKey(), unit);
+            }
+        }
+        return result;
+    }
+
+    private SourceUnit parseSourceUnit(String projectPath, String content) {
+        try {
+            ParseResult<CompilationUnit> parseResult = new JavaParser().parse(content);
+            if (!parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
+                return null;
+            }
+            CompilationUnit compilationUnit = parseResult.getResult().get();
+            String packageName = packageName(compilationUnit);
+            Set<String> classNames = new LinkedHashSet<>();
+            for (TypeDeclaration<?> type : compilationUnit.getTypes()) {
+                classNames.add(qualify(packageName, type.getNameAsString()));
+            }
+            return new SourceUnit(projectPath, packageName, classNames, compilationUnit);
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private Set<String> dependencies(
+            SourceUnit source,
+            Map<String, String> classToFile,
+            Map<String, Set<String>> classesByPackage
+    ) {
+        Set<String> dependencies = new LinkedHashSet<>();
+        for (ImportDeclaration importDeclaration : source.compilationUnit().getImports()) {
+            String imported = importDeclaration.getNameAsString();
+            if (importDeclaration.isAsterisk()) {
+                dependencies.addAll(classesByPackage.getOrDefault(imported, Collections.emptySet()));
+            } else if (classToFile.containsKey(imported)) {
+                dependencies.add(imported);
+            }
+        }
+
+        // Keep the same-package behavior as the generated Java import matrix.
+        if (!source.packageName().isEmpty()) {
+            for (String samePackageClass : classesByPackage.getOrDefault(
+                    source.packageName(),
+                    Collections.emptySet()
+            )) {
+                if (!source.classNames().contains(samePackageClass)) {
+                    dependencies.add(samePackageClass);
+                }
+            }
+        }
+        return dependencies;
+    }
+
+    private String projectPath(Path projectRoot, Path file) {
+        return ProjectFilePath.normalize(
+                projectRoot.relativize(file).toString().replace('\\', '/')
+        );
+    }
+
+    private record SourceUnit(
+            String projectPath,
+            String packageName,
+            Set<String> classNames,
+            CompilationUnit compilationUnit
+    ) {
     }
 
     /**

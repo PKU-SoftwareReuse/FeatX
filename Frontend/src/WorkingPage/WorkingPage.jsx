@@ -366,7 +366,7 @@ const WORKING_PAGE_COPY = {
         focusGraphPending: "Java/Python 新增或修改提交后可查看三阶段图。",
         failedFetchFeatureSummary: "获取功能摘要失败。",
         failedFetchCodeMap: "获取代码图谱失败。",
-        failedFetchGeneratedGraph: "获取生成后的图谱失败。",
+        failedFetchCandidateGraph: "获取候选图失败。",
         failedFetchCodeDiff: "获取代码差异失败。",
         failedFetchCodeContext: "获取代码上下文失败。",
         failedPrepareDeletion: "准备删除上下文失败。",
@@ -461,7 +461,7 @@ const WORKING_PAGE_COPY = {
         focusGraphPending: "Graph stages are available after Java/Python Add or Modify submit.",
         failedFetchFeatureSummary: "Failed to fetch feature summary.",
         failedFetchCodeMap: "Failed to fetch CodeMap.",
-        failedFetchGeneratedGraph: "Failed to fetch generated graph.",
+        failedFetchCandidateGraph: "Failed to fetch candidate graph.",
         failedFetchCodeDiff: "Failed to fetch code diff.",
         failedFetchCodeContext: "Failed to fetch code context.",
         failedPrepareDeletion: "Failed to prepare deletion context.",
@@ -875,14 +875,14 @@ const WorkingPage = () => {
         } else if (selectedType === 'add') {
             setGraphData(null)
             setLoadingFeatureGraph(false);
-        } else if (selectedType === 'new') {
-            API.getNewGraphData(runId).then((data) => {
+        } else if (selectedType === 'candidate') {
+            API.getCandidateGraphData(runId).then((data) => {
                 setGraphData(data)
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
                 console.error('Error fetching FeatureGraph data:', error)
                 setLoadingFeatureGraph(false)
-                message.error(errorMessage(error, copy.failedFetchGeneratedGraph))
+                message.error(errorMessage(error, copy.failedFetchCandidateGraph))
             })
         } else {
             setGraphData({nodes: [], edges: []})
@@ -1743,7 +1743,7 @@ const WorkingPage = () => {
             clearFeatureRequestDraft()
 
             graphRefreshTimerRef.current = setTimeout(() => {
-                getFeatureGraphData(0, "new", runId)
+                getFeatureGraphData(0, "candidate", runId)
                 graphRefreshTimerRef.current = null
             }, 1500)
 
@@ -1859,13 +1859,16 @@ const WorkingPage = () => {
                 setLoadingFeatureList(snapshot.status === 'PREPARED' || snapshot.status === 'RUNNING')
                 const recoveringDelete = operationType === 'delete'
                     && snapshot.status !== 'COMPLETED';
+                const graphType = snapshot.status === 'COMPLETED'
+                    ? 'candidate'
+                    : operationType === 'delete'
+                        ? recoveringDelete ? 'select' : 'candidate'
+                        : operationType
                 getFeatureGraphData(
                     operationType === 'add' || (operationType === 'delete' && !recoveringDelete)
                         ? null
                         : targetFeature.featureId,
-                    operationType === 'delete'
-                        ? recoveringDelete ? 'select' : 'new'
-                        : operationType,
+                    graphType,
                     snapshot.runId
                 )
 

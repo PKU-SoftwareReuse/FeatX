@@ -7,7 +7,7 @@ const graphApi = {
     getInitialGraphData: (featureId) => http.get(`${BASE_URL}/graph/feature/initialGraph`, {
         params: {featureId},
     }).then((response) => response.data),
-    getNewGraphData: (runId) => http.get(`${BASE_URL}/graph/feature/newGraph`, {
+    getCandidateGraphData: (runId) => http.get(`${BASE_URL}/graph/feature/candidateGraph`, {
         params: {runId},
     }).then((response) => response.data),
 };

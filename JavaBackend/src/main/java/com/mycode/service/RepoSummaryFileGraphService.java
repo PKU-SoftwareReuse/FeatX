@@ -61,6 +61,47 @@ public class RepoSummaryFileGraphService {
         return getFeatureFileGraph(featureId, outputDirectory);
     }
 
+    /**
+     * Reads the RepoSummary file adjacency matrix for a set of project-relative files.
+     * Matrix identifiers may be Java class names, source-relative paths, or project paths;
+     * they are normalized to the public project-relative file protocol before filtering.
+     */
+    public Set<FeatureGraphResult.Edge> getFileAdjacencyEdges(Collection<String> projectFiles) {
+        ProjectState project = ProjectState.getInstance();
+        Integer repositoryId = project.getRepoId();
+        if (repositoryId == null) {
+            throw new IllegalStateException("No project is currently selected.");
+        }
+        String repoSummaryDir = environmentOrDefault("REPOSUMMARY_DIR", "./PyBackend");
+        Path outputDirectory = Path.of(repoSummaryDir, "output", repositoryId.toString());
+        return getFileAdjacencyEdges(projectFiles, outputDirectory);
+    }
+
+    Set<FeatureGraphResult.Edge> getFileAdjacencyEdges(
+            Collection<String> projectFiles,
+            Path outputDirectory
+    ) {
+        ProjectState project = ProjectState.getInstance();
+        Set<String> selectedFiles = new LinkedHashSet<>();
+        if (projectFiles != null) {
+            for (String file : projectFiles) {
+                if (file == null || file.isBlank()) {
+                    continue;
+                }
+                selectedFiles.add(ProjectFilePath.normalize(file));
+            }
+        }
+        if (selectedFiles.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+        return loadSelectedFileEdges(
+                outputDirectory.resolve("file_adj_matrix.csv"),
+                selectedFiles,
+                aliasesForFiles(selectedFiles, project),
+                project
+        );
+    }
+
     FeatureGraphResult getFeatureFileGraph(Integer featureId, Path outputDirectory) {
         ProjectState project = ProjectState.getInstance();
         List<CodeMap> codeMaps = codeMapRepository.findByFeature_Id(featureId);
@@ -241,6 +282,30 @@ public class RepoSummaryFileGraphService {
         addAlias(aliases, location.fileIdentifier(), fileId);
         addAlias(aliases, location.ownerIdentifier(), fileId);
         addAlias(aliases, fileId, fileId);
+    }
+
+    private Map<String, String> aliasesForFiles(Set<String> selectedFiles, ProjectState project) {
+        Map<String, String> aliases = new LinkedHashMap<>();
+        for (String fileId : selectedFiles) {
+            addAlias(aliases, fileId, fileId);
+            try {
+                Path projectRoot = ProjectPathMapping.projectRoot(project);
+                addAlias(aliases, projectRoot.resolve(fileId).toString(), fileId);
+                Optional<String> sourceRelative = ProjectPathMapping.projectRelativeToSource(project, fileId);
+                if (sourceRelative.isEmpty()) {
+                    continue;
+                }
+                addAlias(aliases, sourceRelative.get(), fileId);
+                Path sourceRoot = ProjectPathMapping.sourceRoot(project);
+                addAlias(aliases, sourceRoot.resolve(sourceRelative.get()).toString(), fileId);
+                if (project.isJava()) {
+                    addAlias(aliases, JavaFilePath.toClassName(sourceRelative.get()), fileId);
+                }
+            } catch (IllegalArgumentException | IllegalStateException ignored) {
+                // A candidate outside the configured source root can still be shown as a node.
+            }
+        }
+        return aliases;
     }
 
     private void addAlias(Map<String, String> aliases, String value, String fileId) {
