@@ -91,6 +91,9 @@ public class LlmController {
     public AgentRunStartResult modifyFeature(AddOrModifyRequest request)
             throws IOException, InterruptedException {
         validateFeatureRequest(request, false);
+        if (!hasText(request.getModel())) {
+            throw new IllegalArgumentException("Model is required when modifying a feature.");
+        }
         ProjectState project = ProjectState.getInstance();
         String runId = agentRunRegistry.reservePreparation();
         try {
@@ -123,7 +126,7 @@ public class LlmController {
                     2,
                     8
             );
-            String deltaQuery = buildDeltaQuery(oldRequest, newRequest);
+            String deltaQuery = buildDeltaQuery(oldRequest, newRequest, request.getModel().trim());
             FocusGraphContextResult graphContext = javaGraphContextService.buildModifyContext(
                     candidateFeature,
                     oldRequest,
@@ -204,7 +207,7 @@ public class LlmController {
                 2,
                 8
         );
-        String deltaQuery = buildDeltaQuery(oldRequest, newRequest);
+        String deltaQuery = buildDeltaQuery(oldRequest, newRequest, request.getModel().trim());
 
         FocusGraphContextResult context = focusGraphContextService.buildModifyContext(
                 candidateFeature.getFeatureId(),
@@ -612,7 +615,7 @@ public class LlmController {
         }
     }
 
-    private String buildDeltaQuery(String oldDescription, String newDescription) {
+    private String buildDeltaQuery(String oldDescription, String newDescription, String model) {
         String prompt = """
                 比较旧版与新版功能描述，只提取发生变化且需要用于代码检索的需求。
                 仅返回 JSON：
@@ -629,7 +632,10 @@ public class LlmController {
                 新版功能描述：
                 %s
                 """;
-        String response = llmClient.generateWithSinglePrompt(String.format(prompt, oldDescription, newDescription));
+        String response = llmClient.generateWithSinglePrompt(
+                String.format(prompt, oldDescription, newDescription),
+                model
+        );
         try {
             JsonNode root = objectMapper.readTree(extractJsonObject(response));
             String deltaQuery = root.path("deltaQuery").asText("");

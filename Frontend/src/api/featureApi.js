@@ -5,9 +5,10 @@ const featureApi = {
         .then((response) => response.data),
     deleteFeature: (requestData) => http.post(`${BASE_URL}/feature/delete`, requestData)
         .then((response) => response.data),
-    modifyFeature: (featureDescription, language) => http.post(`${BASE_URL}/feature/modify`, {
+    modifyFeature: (featureDescription, language, model) => http.post(`${BASE_URL}/feature/modify`, {
         featureDescription,
         language,
+        model,
     }).then((response) => response.data),
     addFeature: (requestData) => http.post(`${BASE_URL}/feature/add`, requestData)
         .then((response) => response.data),

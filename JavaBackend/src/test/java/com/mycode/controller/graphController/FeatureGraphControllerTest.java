@@ -43,7 +43,7 @@ class FeatureGraphControllerTest {
     private AgentRunRegistry agentRunRegistry;
 
     @Test
-    void maxGraphUsesTheUnifiedRepoSummaryFileGraph(@TempDir Path projectPath) throws Exception {
+    void initialGraphUsesTheUnifiedRepoSummaryFileGraph(@TempDir Path projectPath) throws Exception {
         ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
         FeatureGraphResult fileGraph = new FeatureGraphResult(
                 new LinkedHashSet<>(Set.of(new FeatureGraphResult.Node("src/main/java/example/App.java"))),
@@ -51,7 +51,7 @@ class FeatureGraphControllerTest {
         );
         when(codeMapService.getRepoSummaryFeatureFileGraph(61)).thenReturn(fileGraph);
 
-        mockMvc.perform(get("/graph/feature/maxGraph").param("featureId", "61"))
+        mockMvc.perform(get("/graph/feature/initialGraph").param("featureId", "61"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nodes[0].id").value("src/main/java/example/App.java"))
                 .andExpect(jsonPath("$.nodes[0].type").value("Default"));

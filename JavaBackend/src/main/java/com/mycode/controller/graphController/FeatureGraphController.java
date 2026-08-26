@@ -31,8 +31,8 @@ public class FeatureGraphController {
     @Autowired
     AgentRunRegistry agentRunRegistry;
 
-    @GetMapping("/maxGraph")
-    public FeatureGraphResult getMaxGraph(@RequestParam Integer featureId) {
+    @GetMapping("/initialGraph")
+    public FeatureGraphResult getInitialGraph(@RequestParam Integer featureId) {
         featureController.select(featureId);
         return codemapService.getRepoSummaryFeatureFileGraph(featureId);
     }

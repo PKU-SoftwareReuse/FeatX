@@ -84,7 +84,7 @@ class LlmControllerTest {
                 any(AgentLanguage.class)
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString()))
+        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
                 .thenReturn("{\"deltaQuery\":\"print greeting\"}");
 
         AgentRunRegistry registry = new AgentRunRegistry();
@@ -92,6 +92,7 @@ class LlmControllerTest {
         AddOrModifyRequest request = new AddOrModifyRequest();
         request.setFeatureDescription("Old feature plus greeting");
         request.setLanguage(AgentLanguage.EN);
+        request.setModel("selected-model");
 
         AgentRunStartResult result = controller.modifyFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
@@ -105,7 +106,7 @@ class LlmControllerTest {
         assertEquals(List.of("initial"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildModifyContext(feature, "Old feature", "Old feature plus greeting", "print greeting", AgentLanguage.EN);
         ArgumentCaptor<String> deltaPrompt = ArgumentCaptor.forClass(String.class);
-        verify(llmClient).generateWithSinglePrompt(deltaPrompt.capture());
+        verify(llmClient).generateWithSinglePrompt(deltaPrompt.capture(), eq("selected-model"));
         assertTrue(deltaPrompt.getValue().contains("比较旧版与新版功能描述"));
     }
 
@@ -134,7 +135,7 @@ class LlmControllerTest {
                 any(AgentLanguage.class)
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString()))
+        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
                 .thenReturn("{\"deltaQuery\":\"enable feature\"}");
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
@@ -146,6 +147,7 @@ class LlmControllerTest {
         AddOrModifyRequest request = new AddOrModifyRequest();
         request.setFeatureDescription("Enable feature");
         request.setLanguage(AgentLanguage.EN);
+        request.setModel("selected-model");
 
         AgentRunContext run = registry.requireActiveContext(controller.modifyFeature(request).runId());
 
@@ -215,7 +217,7 @@ class LlmControllerTest {
                 anyList()
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString()))
+        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
                 .thenReturn("{\"deltaQuery\":\"enable feature\"}");
 
         AgentRunRegistry registry = new AgentRunRegistry();
@@ -228,6 +230,7 @@ class LlmControllerTest {
         AddOrModifyRequest request = new AddOrModifyRequest();
         request.setFeatureDescription("Enable the Python feature");
         request.setLanguage(AgentLanguage.EN);
+        request.setModel("selected-model");
 
         AgentRunStartResult result = controller.modifyFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
@@ -412,7 +415,7 @@ class LlmControllerTest {
             return result;
         });
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString()))
+        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
                 .thenReturn("{\"deltaQuery\":\"parallel change\"}");
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
@@ -463,6 +466,7 @@ class LlmControllerTest {
             AddOrModifyRequest request = new AddOrModifyRequest();
             request.setFeatureDescription("New feature " + featureId);
             request.setLanguage(AgentLanguage.EN);
+            request.setModel("selected-model");
             return controller.modifyFeature(request);
         }
     }

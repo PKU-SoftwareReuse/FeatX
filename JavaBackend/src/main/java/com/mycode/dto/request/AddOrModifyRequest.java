@@ -11,4 +11,5 @@ public class AddOrModifyRequest {
     private Integer moduleId;   // 新增
     private AgentLanguage language = AgentLanguage.EN;
     private Integer featureId;
+    private String model;
 }

@@ -4,7 +4,7 @@ const graphApi = {
     getMinGraphData: (featureId, runId) => http.get(`${BASE_URL}/graph/feature/debloatGraph`, {
         params: {featureId, runId},
     }).then((response) => response.data),
-    getMaxGraphData: (featureId) => http.get(`${BASE_URL}/graph/feature/maxGraph`, {
+    getInitialGraphData: (featureId) => http.get(`${BASE_URL}/graph/feature/initialGraph`, {
         params: {featureId},
     }).then((response) => response.data),
     getNewGraphData: (runId) => http.get(`${BASE_URL}/graph/feature/newGraph`, {

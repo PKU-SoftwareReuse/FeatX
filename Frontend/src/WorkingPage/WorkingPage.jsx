@@ -864,7 +864,7 @@ const WorkingPage = () => {
                 message.error(errorMessage(error, copy.failedFetchCodeMap))
             })
         } else if (selectedType === 'edit' || selectedType === 'select') {
-            API.getMaxGraphData(featureId).then((data) => {
+            API.getInitialGraphData(featureId).then((data) => {
                 setGraphData(data)
                 setLoadingFeatureGraph(false)
             }).catch((error) => {
@@ -2184,7 +2184,7 @@ const WorkingPage = () => {
 
         if (selectedType == 'edit') {
             // console.log(editedText);
-            API.modifyFeature(editedText, apiLanguage)
+            API.modifyFeature(editedText, apiLanguage, selectedModel)
                 .then(async (data) => {
                     const runId = data?.runId
                     restoredRunRef.current = runId
