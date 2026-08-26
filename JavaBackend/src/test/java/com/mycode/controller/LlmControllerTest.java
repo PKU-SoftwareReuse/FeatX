@@ -14,9 +14,10 @@ import com.mycode.service.JavaStaticDeleteContextService;
 import com.mycode.service.OperationProgressService;
 import com.mycode.service.code.AgentLanguage;
 import com.mycode.service.code.AgentRunContext;
+import com.mycode.service.code.AgentRunMode;
 import com.mycode.service.code.AgentRunRegistry;
-import com.mycode.service.code.DeleteAgentService;
-import com.mycode.service.code.PythonModifyAgentService;
+import com.mycode.service.code.JavaDeleteAgentService;
+import com.mycode.service.code.PythonDeleteAgentService;
 import com.mycode.service.llm.LlmClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -95,7 +96,7 @@ class LlmControllerTest {
         AgentRunStartResult result = controller.modifyFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        assertEquals("modify", run.mode());
+        assertEquals(AgentRunMode.JAVA_MODIFY.id(), run.mode());
         assertEquals(feature.getFeatureId(), run.featureId());
         assertEquals("complete Java graph context", run.relatedCodes());
         assertTrue(run.allFiles().contains("application.yml"));
@@ -189,7 +190,7 @@ class LlmControllerTest {
         AgentRunStartResult result = controller.addFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        assertEquals("add", run.mode());
+        assertEquals(AgentRunMode.JAVA_ADD.id(), run.mode());
         assertEquals(11, run.moduleId());
         assertEquals("Java add graph context", run.relatedCodes());
         assertEquals(List.of("reasoning"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
@@ -231,7 +232,7 @@ class LlmControllerTest {
         AgentRunStartResult result = controller.modifyFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        assertEquals("modify-python", run.mode());
+        assertEquals(AgentRunMode.PYTHON_MODIFY.id(), run.mode());
         assertEquals(feature.getFeatureId(), run.featureId());
         assertTrue(run.allFiles().contains("Feature.py"));
         assertTrue(run.allFiles().contains("settings.yml"));
@@ -272,7 +273,7 @@ class LlmControllerTest {
         AgentRunStartResult result = controller.deleteFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        assertEquals("delete", run.mode());
+        assertEquals(AgentRunMode.JAVA_DELETE.id(), run.mode());
         assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(result.runId()));
         assertTrue(run.relatedCodes().contains("Java delete reasoning context"));
         assertTrue(run.relatedCodes().contains("complete legacy Java static delete diff"));
@@ -315,7 +316,7 @@ class LlmControllerTest {
         AgentRunStartResult result = controller.deleteFeature(request);
         AgentRunContext run = registry.requireActiveContext(result.runId());
 
-        assertEquals("delete", run.mode());
+        assertEquals(AgentRunMode.PYTHON_DELETE.id(), run.mode());
         assertEquals(feature.getFeatureId(), run.featureId());
         assertEquals(AgentRunRegistry.Status.PREPARED, registry.status(result.runId()));
         assertTrue(run.relatedCodes().contains("Python delete reasoning context"));
@@ -337,18 +338,18 @@ class LlmControllerTest {
                 mock(FocusGraphContextService.class),
                 llmClient
         );
-        DeleteAgentService deleteAgentService = mock(DeleteAgentService.class);
-        PythonModifyAgentService pythonAgentService = mock(PythonModifyAgentService.class);
-        ReflectionTestUtils.setField(controller, "deleteAgentService", deleteAgentService);
-        ReflectionTestUtils.setField(controller, "pythonModifyAgentService", pythonAgentService);
-        AgentRunContext run = preparedDeleteRun(registry, projectRoot);
+        JavaDeleteAgentService javaDeleteAgentService = mock(JavaDeleteAgentService.class);
+        PythonDeleteAgentService pythonDeleteAgentService = mock(PythonDeleteAgentService.class);
+        ReflectionTestUtils.setField(controller, "javaDeleteAgentService", javaDeleteAgentService);
+        ReflectionTestUtils.setField(controller, "pythonDeleteAgentService", pythonDeleteAgentService);
+        AgentRunContext run = preparedDeleteRun(registry, projectRoot, AgentRunMode.JAVA_DELETE);
         SseEmitter emitter = new SseEmitter();
-        when(deleteAgentService.runPipeline(run.runId(), "delete-model")).thenReturn(emitter);
+        when(javaDeleteAgentService.runPipeline(run.runId(), "delete-model")).thenReturn(emitter);
 
         assertSame(emitter, controller.streamResponse(run.runId(), AgentLanguage.EN, "delete-model"));
 
-        verify(deleteAgentService).runPipeline(run.runId(), "delete-model");
-        verifyNoInteractions(pythonAgentService);
+        verify(javaDeleteAgentService).runPipeline(run.runId(), "delete-model");
+        verifyNoInteractions(pythonDeleteAgentService);
     }
 
     @Test
@@ -363,18 +364,18 @@ class LlmControllerTest {
                 mock(FocusGraphContextService.class),
                 llmClient
         );
-        DeleteAgentService deleteAgentService = mock(DeleteAgentService.class);
-        PythonModifyAgentService pythonAgentService = mock(PythonModifyAgentService.class);
-        ReflectionTestUtils.setField(controller, "deleteAgentService", deleteAgentService);
-        ReflectionTestUtils.setField(controller, "pythonModifyAgentService", pythonAgentService);
-        AgentRunContext run = preparedDeleteRun(registry, projectRoot);
+        JavaDeleteAgentService javaDeleteAgentService = mock(JavaDeleteAgentService.class);
+        PythonDeleteAgentService pythonDeleteAgentService = mock(PythonDeleteAgentService.class);
+        ReflectionTestUtils.setField(controller, "javaDeleteAgentService", javaDeleteAgentService);
+        ReflectionTestUtils.setField(controller, "pythonDeleteAgentService", pythonDeleteAgentService);
+        AgentRunContext run = preparedDeleteRun(registry, projectRoot, AgentRunMode.PYTHON_DELETE);
         SseEmitter emitter = new SseEmitter();
-        when(pythonAgentService.runDeletePipeline(run.runId(), "delete-model")).thenReturn(emitter);
+        when(pythonDeleteAgentService.runPipeline(run.runId(), "delete-model")).thenReturn(emitter);
 
         assertSame(emitter, controller.streamResponse(run.runId(), AgentLanguage.EN, "delete-model"));
 
-        verify(pythonAgentService).runDeletePipeline(run.runId(), "delete-model");
-        verifyNoInteractions(deleteAgentService);
+        verify(pythonDeleteAgentService).runPipeline(run.runId(), "delete-model");
+        verifyNoInteractions(javaDeleteAgentService);
     }
 
     @Test
@@ -466,9 +467,13 @@ class LlmControllerTest {
         }
     }
 
-    private AgentRunContext preparedDeleteRun(AgentRunRegistry registry, Path projectRoot) {
+    private AgentRunContext preparedDeleteRun(
+            AgentRunRegistry registry,
+            Path projectRoot,
+            AgentRunMode mode
+    ) {
         return registry.prepare(
-                "delete",
+                mode.id(),
                 "Delete selected feature",
                 "Selected feature",
                 "delete context",

@@ -28,7 +28,7 @@ class ModifyAgentServiceTest {
             }
             """;
 
-    private final ModifyAgentService service = new ModifyAgentService();
+    private final JavaModifyAgentService service = new JavaModifyAgentService();
 
     @Test
     void appliesMinimalSearchReplaceAndPreservesUnrelatedContent() {

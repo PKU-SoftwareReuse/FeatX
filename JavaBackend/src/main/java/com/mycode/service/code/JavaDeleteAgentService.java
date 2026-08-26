@@ -4,8 +4,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
-public class DeleteAgentService extends ThreeStageAgentPipelineSupport {
+public class JavaDeleteAgentService extends ThreeStageAgentPipelineSupport {
     public SseEmitter runPipeline(String runId, String model) {
-        return runThreeStagePipeline(runId, model, "Java", AgentOperation.DELETE);
+        return runThreeStagePipeline(runId, model, AgentRunMode.JAVA_DELETE);
     }
 }

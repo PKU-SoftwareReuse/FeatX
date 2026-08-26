@@ -4,9 +4,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
-public class AddAgentService extends ThreeStageAgentPipelineSupport {
+public class JavaModifyAgentService extends ThreeStageAgentPipelineSupport {
     public SseEmitter runPipeline(String runId, String model) {
-        return runThreeStagePipeline(runId, model, "Java", AgentOperation.ADD);
+        return runThreeStagePipeline(runId, model, AgentRunMode.JAVA_MODIFY);
     }
 
     public String applyAgent3Result(

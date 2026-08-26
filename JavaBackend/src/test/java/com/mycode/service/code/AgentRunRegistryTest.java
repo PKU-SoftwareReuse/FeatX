@@ -238,7 +238,7 @@ class AgentRunRegistryTest {
 
     private AgentRunContext prepare(AgentRunRegistry registry, ProjectState project) {
         return registry.prepare(
-                "modify",
+                AgentRunMode.JAVA_MODIFY.id(),
                 "new requirement",
                 "old requirement",
                 "context",

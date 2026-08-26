@@ -221,7 +221,7 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -322,7 +322,7 @@ class ThreeStageAgentPipelineSupportTest {
                         """))
                 .thenReturn(generation("NO_CHANGES_REQUIRED"));
 
-        ModifyAgentService service = new ModifyAgentService();
+        JavaModifyAgentService service = new JavaModifyAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -379,7 +379,7 @@ class ThreeStageAgentPipelineSupportTest {
                         {"modifiedFileList":[]}
                         """));
 
-        ModifyAgentService service = new ModifyAgentService();
+        JavaModifyAgentService service = new JavaModifyAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -444,7 +444,7 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        ModifyAgentService service = new ModifyAgentService();
+        JavaModifyAgentService service = new JavaModifyAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -506,13 +506,13 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        PythonModifyAgentService service = new PythonModifyAgentService();
+        PythonDeleteAgentService service = new PythonDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
         service.agentPipelineExecutor = executor;
 
-        service.runDeletePipeline(context.runId(), "model");
+        service.runPipeline(context.runId(), "model");
         awaitCompleted(registry, context.runId());
 
         String candidate = registry.modifications(context.runId()).get("feature.py");
@@ -568,13 +568,13 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        PythonModifyAgentService service = new PythonModifyAgentService();
+        PythonDeleteAgentService service = new PythonDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
         service.agentPipelineExecutor = executor;
 
-        service.runDeletePipeline(context.runId(), "model");
+        service.runPipeline(context.runId(), "model");
         awaitFailed(registry, context.runId());
 
         assertTrue(registry.snapshot(context.runId()).failureMessage().contains("protected shared symbol"));
@@ -635,7 +635,7 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -713,7 +713,7 @@ class ThreeStageAgentPipelineSupportTest {
                         >>>>>>> REPLACE
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -776,7 +776,7 @@ class ThreeStageAgentPipelineSupportTest {
                         }]}
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -836,7 +836,7 @@ class ThreeStageAgentPipelineSupportTest {
                         }]}
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -888,13 +888,13 @@ class ThreeStageAgentPipelineSupportTest {
                         }]}
                         """));
 
-        PythonModifyAgentService service = new PythonModifyAgentService();
+        PythonDeleteAgentService service = new PythonDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
         service.agentPipelineExecutor = executor;
 
-        service.runDeletePipeline(context.runId(), "model");
+        service.runPipeline(context.runId(), "model");
         awaitFailed(registry, context.runId());
 
         assertTrue(registry.snapshot(context.runId()).failureMessage().contains("deterministic AST boundary"));
@@ -944,7 +944,7 @@ class ThreeStageAgentPipelineSupportTest {
                         }]
                         """));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -1010,7 +1010,7 @@ class ThreeStageAgentPipelineSupportTest {
                                 """)
                 );
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -1073,7 +1073,7 @@ class ThreeStageAgentPipelineSupportTest {
                                 """)
                 );
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;
@@ -1143,7 +1143,7 @@ class ThreeStageAgentPipelineSupportTest {
                         """))
                 .thenReturn(generation("NO_CHANGES_REQUIRED"));
 
-        DeleteAgentService service = new DeleteAgentService();
+        JavaDeleteAgentService service = new JavaDeleteAgentService();
         executor = Executors.newSingleThreadExecutor();
         service.llmClient = llmClient;
         service.agentRunRegistry = registry;

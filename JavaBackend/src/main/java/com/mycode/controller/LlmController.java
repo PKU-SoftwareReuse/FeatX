@@ -1,11 +1,14 @@
 package com.mycode.controller;
 
-import com.mycode.service.code.AddAgentService;
 import com.mycode.service.code.AgentLanguage;
 import com.mycode.service.code.AgentRunContext;
+import com.mycode.service.code.AgentRunMode;
 import com.mycode.service.code.AgentRunRegistry;
-import com.mycode.service.code.DeleteAgentService;
-import com.mycode.service.code.ModifyAgentService;
+import com.mycode.service.code.JavaAddAgentService;
+import com.mycode.service.code.JavaDeleteAgentService;
+import com.mycode.service.code.JavaModifyAgentService;
+import com.mycode.service.code.PythonAddAgentService;
+import com.mycode.service.code.PythonDeleteAgentService;
 import com.mycode.service.code.PythonModifyAgentService;
 import com.mycode.config.ClusterState;
 import com.mycode.config.ProjectState;
@@ -43,16 +46,22 @@ import java.util.Set;
 @RequestMapping("/llm")
 public class LlmController {
     @Autowired
-    private ModifyAgentService modifyAgentService;
+    private JavaModifyAgentService javaModifyAgentService;
 
     @Autowired
-    private AddAgentService addAgentService;
+    private JavaAddAgentService javaAddAgentService;
 
     @Autowired
-    private DeleteAgentService deleteAgentService;
+    private JavaDeleteAgentService javaDeleteAgentService;
+
+    @Autowired
+    private PythonAddAgentService pythonAddAgentService;
 
     @Autowired
     private PythonModifyAgentService pythonModifyAgentService;
+
+    @Autowired
+    private PythonDeleteAgentService pythonDeleteAgentService;
 
     @Autowired
     private FocusGraphContextService focusGraphContextService;
@@ -91,7 +100,7 @@ public class LlmController {
             }
 
             progressService.start(
-                    "java-modify",
+                    AgentRunMode.JAVA_MODIFY.id(),
                     8,
                     "start"
             );
@@ -124,7 +133,7 @@ public class LlmController {
             );
             AgentRunContext context = agentRunRegistry.prepare(
                     runId,
-                    "modify",
+                    "java-modify",
                     newRequest,
                     oldRequest,
                     graphContext.getContextPrompt(),
@@ -153,7 +162,7 @@ public class LlmController {
     )
             throws IOException, InterruptedException {
         progressService.start(
-                "python-modify",
+                AgentRunMode.PYTHON_MODIFY.id(),
                 8,
                 "start"
         );
@@ -215,7 +224,7 @@ public class LlmController {
         progressService.complete();
         AgentRunContext run = agentRunRegistry.prepare(
                 runId,
-                "modify-python",
+                "python-modify",
                 newRequest,
                 oldRequest,
                 relatedCodes,
@@ -243,7 +252,7 @@ public class LlmController {
             }
 
             progressService.start(
-                    "java-add",
+                    AgentRunMode.JAVA_ADD.id(),
                     8,
                     "start"
             );
@@ -258,7 +267,7 @@ public class LlmController {
             FocusGraphContextResult graphContext = javaGraphContextService.buildAddContext(newRequest, requestLanguage);
             AgentRunContext context = agentRunRegistry.prepare(
                     runId,
-                    "add",
+                    "java-add",
                     newRequest,
                     "",
                     graphContext.getContextPrompt(),
@@ -287,7 +296,7 @@ public class LlmController {
     )
             throws IOException, InterruptedException {
         progressService.start(
-                "python-add",
+                AgentRunMode.PYTHON_ADD.id(),
                 8,
                 "start"
         );
@@ -316,7 +325,7 @@ public class LlmController {
         progressService.complete();
         AgentRunContext run = agentRunRegistry.prepare(
                 runId,
-                "add-python",
+                "python-add",
                 newRequest,
                 "",
                 relatedCodes,
@@ -415,7 +424,7 @@ public class LlmController {
 
             AgentRunContext run = agentRunRegistry.prepare(
                     runId,
-                    "delete",
+                    project.isPython() ? AgentRunMode.PYTHON_DELETE.id() : AgentRunMode.JAVA_DELETE.id(),
                     deleteRequest,
                     oldRequest,
                     relatedCodes,
@@ -464,33 +473,38 @@ public class LlmController {
         }
         agentRunRegistry.selectModel(runId, selectedModel);
 
-        if (context.mode().equals("modify")) {
-            return modifyAgentService.runPipeline(runId, selectedModel);
-        } else if (context.mode().equals("modify-python")) {
+        if (context.mode().equals(AgentRunMode.JAVA_MODIFY.id())) {
+            return javaModifyAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals(AgentRunMode.PYTHON_MODIFY.id())) {
             progressService.update(
                     "agent-stream",
                     8,
                     8
             );
             return pythonModifyAgentService.runPipeline(runId, selectedModel);
-        } else if (context.mode().equals("add-python")) {
+        } else if (context.mode().equals(AgentRunMode.PYTHON_ADD.id())) {
             progressService.update(
                     "agent-stream",
                     8,
                     8
             );
-            return pythonModifyAgentService.runAddPipeline(runId, selectedModel);
-        } else if (context.mode().equals("add")) {
-            return addAgentService.runPipeline(runId, selectedModel);
-        } else if (context.mode().equals("delete")) {
+            return pythonAddAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals(AgentRunMode.JAVA_ADD.id())) {
+            return javaAddAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals(AgentRunMode.PYTHON_DELETE.id())) {
             progressService.update(
                     "agent-stream",
                     8,
                     8
             );
-            return ProjectState.getInstance().isPython()
-                    ? pythonModifyAgentService.runDeletePipeline(runId, selectedModel)
-                    : deleteAgentService.runPipeline(runId, selectedModel);
+            return pythonDeleteAgentService.runPipeline(runId, selectedModel);
+        } else if (context.mode().equals(AgentRunMode.JAVA_DELETE.id())) {
+            progressService.update(
+                    "agent-stream",
+                    8,
+                    8
+            );
+            return javaDeleteAgentService.runPipeline(runId, selectedModel);
         } else {
             agentRunRegistry.fail(runId, new IllegalStateException("Unsupported Agent run mode: " + context.mode()));
             throw new UnsupportedOperationException("非法访问");

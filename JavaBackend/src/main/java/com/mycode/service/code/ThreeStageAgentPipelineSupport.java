@@ -91,9 +91,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     protected SseEmitter runThreeStagePipeline(
             String runId,
             String model,
-            String projectLanguage,
-            AgentOperation operation
+            AgentRunMode mode
     ) {
+        String projectLanguage = mode.projectLanguage();
+        AgentOperation operation = mode.operation();
         AgentRunContext context = agentRunRegistry.claim(runId);
         AgentRunEventStream eventStream = agentRunRegistry.eventStream(runId);
         SseEmitter subscriber = agentRunRegistry.subscribe(runId);

@@ -6,6 +6,7 @@ import com.mycode.dto.result.FeatureResult;
 import com.mycode.dto.result.GitCommitResult;
 import com.mycode.dto.result.GitWorkspaceStatusResult;
 import com.mycode.service.code.AgentRunContext;
+import com.mycode.service.code.AgentRunMode;
 import com.mycode.service.code.AgentRunRegistry;
 import com.mycode.service.code.AgentLanguage;
 import org.junit.jupiter.api.AfterEach;
@@ -188,7 +189,7 @@ class FeatureGitWorkflowServiceTest {
         CodeMapService codeMapService = mock(CodeMapService.class);
         AgentRunRegistry registry = new AgentRunRegistry();
         AgentRunContext context = registry.prepare(
-                "delete",
+                AgentRunMode.PYTHON_DELETE.id(),
                 "",
                 "stale feature metadata",
                 "",
@@ -398,7 +399,7 @@ class FeatureGitWorkflowServiceTest {
         ProjectState project = ProjectState.getInstance();
         AgentRunRegistry registry = new AgentRunRegistry();
         AgentRunContext context = registry.prepare(
-                "modify-python",
+                AgentRunMode.PYTHON_MODIFY.id(),
                 "updated feature",
                 "original feature",
                 "",
@@ -420,7 +421,7 @@ class FeatureGitWorkflowServiceTest {
         ProjectState project = ProjectState.getInstance();
         AgentRunRegistry registry = new AgentRunRegistry();
         AgentRunContext context = registry.prepare(
-                "delete",
+                AgentRunMode.PYTHON_DELETE.id(),
                 "",
                 "feature to delete",
                 "",

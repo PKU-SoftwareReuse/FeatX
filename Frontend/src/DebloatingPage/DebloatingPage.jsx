@@ -1831,9 +1831,9 @@ const DebloatingPage = () => {
 
         API.getAgentRun(activeRunId)
             .then(async (snapshot) => {
-                const operationType = snapshot.mode === 'delete'
+                const operationType = snapshot.mode?.endsWith('-delete')
                     ? 'delete'
-                    : snapshot.mode?.startsWith('add') ? 'add' : 'edit'
+                    : snapshot.mode?.endsWith('-add') ? 'add' : 'edit'
                 let targetFeature = null
                 let targetModule = null
 

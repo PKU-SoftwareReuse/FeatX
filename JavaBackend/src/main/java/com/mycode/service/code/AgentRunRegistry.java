@@ -194,7 +194,7 @@ public class AgentRunRegistry {
         if (state.status != Status.PREPARED) {
             throw statusMismatch(state, Status.PREPARED);
         }
-        boolean metadataOnlyEligible = "delete".equals(requireContext(state).mode())
+        boolean metadataOnlyEligible = AgentRunMode.matchesOperation(requireContext(state).mode(), "delete")
                 && (modifications == null || modifications.isEmpty());
         publishCompletedState(state, modifications, metadataOnlyEligible);
     }
@@ -281,13 +281,7 @@ public class AgentRunRegistry {
 
     public synchronized AgentRunContext requireCompletedOperation(String runId, String operation) {
         AgentRunContext context = requireCompleted(runId);
-        String normalizedOperation = operation == null ? "" : operation.trim().toLowerCase();
-        boolean matches = switch (normalizedOperation) {
-            case "edit" -> "modify".equals(context.mode()) || "modify-python".equals(context.mode());
-            case "add" -> "add".equals(context.mode()) || "add-python".equals(context.mode());
-            case "delete" -> "delete".equals(context.mode());
-            default -> false;
-        };
+        boolean matches = AgentRunMode.matchesOperation(context.mode(), operation);
         if (!matches) {
             throw new IllegalStateException(
                     "Agent run " + runId + " does not belong to the requested " + operation + " operation."
