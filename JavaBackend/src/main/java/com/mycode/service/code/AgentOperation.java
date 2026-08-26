@@ -1,9 +1,9 @@
 package com.mycode.service.code;
 
 public enum AgentOperation {
-    ADD("feature addition"),
-    MODIFY("feature modification"),
-    DELETE("feature deletion");
+    ADD("功能新增"),
+    MODIFY("功能修改"),
+    DELETE("功能删除");
 
     private final String promptLabel;
 

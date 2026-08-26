@@ -254,6 +254,151 @@ class ThreeStageAgentPipelineSupportTest {
     }
 
     @Test
+    void agent1AcceptsMoreThanTwelveContextAdditionsAndRemovals(@TempDir Path projectRoot) throws Exception {
+        Path sourceRoot = projectRoot.resolve("src/main/java/demo");
+        Files.createDirectories(sourceRoot);
+        Files.writeString(sourceRoot.resolve("Target.java"), "package demo;\npublic class Target {}\n");
+
+        StringBuilder coreContext = new StringBuilder("## Java Reasoning Context\n\n");
+        StringBuilder allFiles = new StringBuilder("src/main/java/demo/Target.java\n");
+        var adjustment = OBJECT_MAPPER.createObjectNode();
+        adjustment.put("needAdditionalFile", true);
+        var additions = adjustment.putArray("additionalFileList");
+        var removals = adjustment.putArray("removeContextFileList");
+        for (int index = 1; index <= 13; index++) {
+            String addedFile = "src/main/java/demo/AddedContext" + index + ".java";
+            String optionalFile = "src/main/java/demo/OptionalContext" + index + ".java";
+            Files.writeString(
+                    projectRoot.resolve(addedFile),
+                    "package demo; class AddedContext" + index + " { // ADDED_CONTEXT_MARKER_" + index + "\n}\n"
+            );
+            Files.writeString(
+                    projectRoot.resolve(optionalFile),
+                    "package demo; class OptionalContext" + index + " {}\n"
+            );
+            allFiles.append(addedFile).append('\n').append(optionalFile).append('\n');
+            coreContext.append("### File: ").append(optionalFile).append('\n')
+                    .append("OPTIONAL_CONTEXT_MARKER_").append(index).append("\n\n");
+            additions.addObject()
+                    .put("filename", addedFile)
+                    .put("recommendReason", "需要完整依赖上下文");
+            removals.addObject()
+                    .put("filename", optionalFile)
+                    .put("recommendReason", "与本次修改无关");
+        }
+
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(106);
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "modify-many-context-files",
+                "确认目标类保持不变",
+                "目标类已经存在",
+                coreContext.toString(),
+                allFiles.toString(),
+                AgentLanguage.CN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                21,
+                null,
+                List.of()
+        );
+
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation(adjustment.toString()))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[],"removeContextFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[{
+                          "filename":"src/main/java/demo/Target.java",
+                          "action":"rewrite",
+                          "plan":"确认文件已经满足需求。",
+                          "note":"无需引入额外行为。"
+                        }]}
+                        """))
+                .thenReturn(generation("NO_CHANGES_REQUIRED"));
+
+        ModifyAgentService service = new ModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(4)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        assertTrue(prompts.getAllValues().get(0).contains("你是负责 Java 项目的 Agent1"));
+        assertTrue(prompts.getAllValues().get(0).contains("OptionalContext13.java"));
+        assertTrue(prompts.getAllValues().get(1).contains("ADDED_CONTEXT_MARKER_13"));
+        assertFalse(prompts.getAllValues().get(1).contains("OPTIONAL_CONTEXT_MARKER_13"));
+        assertTrue(prompts.getAllValues().get(2).contains("你是负责 Java 项目的 Agent2"));
+        assertTrue(prompts.getAllValues().get(3).contains("你是负责 Java 项目的 Agent3"));
+        assertTrue(registry.modifications(context.runId()).isEmpty());
+    }
+
+    @Test
+    void agent2CanReturnAnEmptyModificationPlan(@TempDir Path projectRoot) throws Exception {
+        Path sourceFile = projectRoot.resolve("src/main/java/demo/Target.java");
+        Files.createDirectories(sourceFile.getParent());
+        Files.writeString(sourceFile, "package demo;\npublic class Target {}\n");
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(107);
+
+        AgentRunRegistry registry = new AgentRunRegistry();
+        AgentRunContext context = registry.prepare(
+                "modify-empty-plan",
+                "确认当前实现已经满足需求",
+                "当前实现",
+                "目标类上下文",
+                "src/main/java/demo/Target.java",
+                AgentLanguage.CN,
+                project.getSrcPath(),
+                project.getProjectPath(),
+                project.getRepoId(),
+                22,
+                null,
+                List.of()
+        );
+        LlmClient llmClient = mock(LlmClient.class);
+        when(llmClient.streamGenerateWithPromptResult(anyString(), any(AgentEventSink.class), eq("model")))
+                .thenReturn(generation("""
+                        {"needAdditionalFile":false,"additionalFileList":[]}
+                        """))
+                .thenReturn(generation("""
+                        {"modifiedFileList":[]}
+                        """));
+
+        ModifyAgentService service = new ModifyAgentService();
+        executor = Executors.newSingleThreadExecutor();
+        service.llmClient = llmClient;
+        service.agentRunRegistry = registry;
+        service.agentPipelineExecutor = executor;
+
+        service.runPipeline(context.runId(), "model");
+        awaitCompleted(registry, context.runId());
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        verify(llmClient, times(2)).streamGenerateWithPromptResult(
+                prompts.capture(),
+                any(AgentEventSink.class),
+                eq("model")
+        );
+        assertTrue(prompts.getAllValues().get(1).contains("可以返回空的"));
+        assertTrue(registry.modifications(context.runId()).isEmpty());
+    }
+
+    @Test
     void standardJavaProjectReadsAndReturnsProjectRelativePaths(@TempDir Path projectRoot) throws Exception {
         Path sourceFile = projectRoot.resolve("src/main/java/demo/Feature.java");
         Files.createDirectories(sourceFile.getParent());
@@ -588,8 +733,8 @@ class ThreeStageAgentPipelineSupportTest {
                 any(AgentEventSink.class),
                 eq("model")
         );
-        assertTrue(prompts.getAllValues().get(4).contains("return exactly SKIP_FILE_SAFELY"));
-        assertTrue(prompts.getAllValues().get(5).contains("Target file: demo/C.java"));
+        assertTrue(prompts.getAllValues().get(4).contains("只返回 SKIP_FILE_SAFELY"));
+        assertTrue(prompts.getAllValues().get(5).contains("目标文件：demo/C.java"));
     }
 
     @Test
@@ -818,7 +963,7 @@ class ThreeStageAgentPipelineSupportTest {
                 any(AgentEventSink.class),
                 eq("model")
         );
-        assertTrue(prompts.getAllValues().get(2).contains("Escape every double quote"));
+        assertTrue(prompts.getAllValues().get(2).contains("每个双引号都必须使用反斜杠转义"));
         assertTrue(Files.isRegularFile(sourceFile));
     }
 

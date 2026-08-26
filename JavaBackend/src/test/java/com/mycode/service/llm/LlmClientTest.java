@@ -98,6 +98,7 @@ class LlmClientTest {
         JsonNode requestBody = OBJECT_MAPPER.readTree(request.getBody().readUtf8());
         assertEquals("chosen-model", requestBody.path("model").asText());
         assertEquals("system", requestBody.path("messages").get(0).path("role").asText());
+        assertTrue(requestBody.path("messages").get(0).path("content").asText().contains("FeatX 的代码工程组件"));
         assertEquals("test prompt", requestBody.path("messages").get(1).path("content").asText());
         assertTrue(requestBody.path("stream").asBoolean());
         assertTrue(requestBody.path("stream_options").path("include_usage").asBoolean());

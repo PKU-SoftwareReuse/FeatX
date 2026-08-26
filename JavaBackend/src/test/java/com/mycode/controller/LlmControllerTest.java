@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -102,6 +103,9 @@ class LlmControllerTest {
         assertTrue(run.allFiles().contains("Feature.java"));
         assertEquals(List.of("initial"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildModifyContext(feature, "Old feature", "Old feature plus greeting", "print greeting", AgentLanguage.EN);
+        ArgumentCaptor<String> deltaPrompt = ArgumentCaptor.forClass(String.class);
+        verify(llmClient).generateWithSinglePrompt(deltaPrompt.capture());
+        assertTrue(deltaPrompt.getValue().contains("比较旧版与新版功能描述"));
     }
 
     @Test

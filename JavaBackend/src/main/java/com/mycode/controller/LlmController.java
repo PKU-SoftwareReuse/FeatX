@@ -613,19 +613,19 @@ public class LlmController {
 
     private String buildDeltaQuery(String oldDescription, String newDescription) {
         String prompt = """
-                Compare the old and new feature descriptions. Extract only the changed requirement for code retrieval.
-                Return JSON only:
+                比较旧版与新版功能描述，只提取发生变化且需要用于代码检索的需求。
+                仅返回 JSON：
                 {
                   "added": [],
                   "removed": [],
                   "modified": [],
-                  "deltaQuery": "short retrieval query"
+                  "deltaQuery": "简短的检索查询"
                 }
 
-                oldFeatureDescription:
+                旧版功能描述：
                 %s
 
-                newFeatureDescription:
+                新版功能描述：
                 %s
                 """;
         String response = llmClient.generateWithSinglePrompt(String.format(prompt, oldDescription, newDescription));

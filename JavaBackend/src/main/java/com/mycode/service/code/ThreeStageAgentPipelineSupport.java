@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 abstract class ThreeStageAgentPipelineSupport extends AgentService {
-    private static final int MAX_ADDITIONAL_FILES = 12;
     private static final int MAX_AGENT1_CONTEXT_ROUNDS = 5;
     private static final int MAX_MODIFIED_FILES = 20;
     private static final int MAX_CORE_CONTEXT_CHARS = contextLimit(
@@ -189,17 +188,11 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                     allowedDeleteFiles,
                     protectedSymbols
             );
-            if (agent2.modifiedFileList.isEmpty()) {
-                throw new IllegalStateException(
-                        "Agent2 planned no project file changes, so there is no candidate operation to confirm."
-                );
-            }
-
             String globalPlan = renderGlobalPlan(agent2.modifiedFileList);
             String referenceContext = boundedPromptSection(
                     workingCoreContext
                             + "\n\n" + liveSourceVerification
-                            + "\n\nAdditional file context:\n" + extraInfo,
+                            + "\n\n补充文件上下文：\n" + extraInfo,
                     MAX_REFERENCE_CONTEXT_CHARS
             );
             StringBuilder priorGenerations = new StringBuilder();
@@ -232,7 +225,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         validateProtectedSymbols(file.filename, originalContent, "", protectedSymbols);
                     }
                     modifications.put(file.filename, DELETE_FILE_SENTINEL);
-                    priorGenerations.append("\nFILE DELETED: ").append(file.filename).append("\n");
+                    priorGenerations.append("\n已删除文件：").append(file.filename).append("\n");
                     continue;
                 }
                 boolean createMode = !Files.isRegularFile(targetPath);
@@ -275,8 +268,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 }
                 String generatedContent = generated.content();
                 modifications.put(file.filename, generatedContent);
-                priorGenerations.append("\nFILE: ").append(file.filename).append("\n")
-                        .append(generatedContent).append("\nEND FILE\n");
+                priorGenerations.append("\n文件：").append(file.filename).append("\n")
+                        .append(generatedContent).append("\n文件结束\n");
             }
 
             agentRunRegistry.complete(
@@ -324,7 +317,6 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         String originalCoreContext = context.relatedCodes() == null ? "" : context.relatedCodes();
         Set<String> optionalReasoningFiles = reasoningContextFiles(originalCoreContext);
         Set<String> excludedReasoningFiles = new LinkedHashSet<>();
-        Set<String> everAddedFiles = new LinkedHashSet<>();
         Map<String, LoadedContextFile> loadedFiles = new LinkedHashMap<>();
         String workingCoreContext = originalCoreContext;
 
@@ -375,9 +367,6 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 }
             }
             for (AdditionalFile file : result.additionalFileList) {
-                if (everAddedFiles.add(file.filename) && everAddedFiles.size() > MAX_ADDITIONAL_FILES) {
-                    throw new IllegalArgumentException("Agent1 requested too many additional files across rounds.");
-                }
                 loadedFiles.put(file.filename, new LoadedContextFile(
                         file.filename,
                         file.recommendReason,
@@ -476,15 +465,13 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                         withoutDeltas(eventSink),
                         model
                 );
-                Agent2ParsedResult parsed = requirePlannedFiles(
-                        parseAndValidateAgent2(
-                                response,
-                                sourceRoot,
-                                operation,
-                                projectLanguage,
-                                allowedDeleteFiles,
-                                protectedSymbols
-                        )
+                Agent2ParsedResult parsed = parseAndValidateAgent2(
+                        response,
+                        sourceRoot,
+                        operation,
+                        projectLanguage,
+                        allowedDeleteFiles,
+                        protectedSymbols
                 );
                 publishValidatedResponse(eventSink, response);
                 return parsed;
@@ -509,15 +496,6 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
         }
         throw new IOException("Agent2 failed after all retry attempts.", lastFailure);
-    }
-
-    private Agent2ParsedResult requirePlannedFiles(Agent2ParsedResult result) {
-        if (result.modifiedFileList.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Agent2 planned no project file changes for the submitted requirement."
-            );
-        }
-        return result;
     }
 
     protected String requestAndApplyAgent3(
@@ -677,14 +655,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         if (filesNode == null || !filesNode.isArray()) {
             throw new IllegalArgumentException("Agent1 must return an additionalFileList array.");
         }
-        if (filesNode.size() > MAX_ADDITIONAL_FILES) {
-            throw new IllegalArgumentException("Agent1 requested too many additional files.");
-        }
         if (removeFilesNode != null && !removeFilesNode.isArray()) {
             throw new IllegalArgumentException("Agent1 removeContextFileList must be an array.");
-        }
-        if (removeFilesNode != null && removeFilesNode.size() > MAX_ADDITIONAL_FILES) {
-            throw new IllegalArgumentException("Agent1 requested too many context file removals.");
         }
 
         Agent1ParsedResult result = new Agent1ParsedResult();
@@ -987,9 +959,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         StringBuilder extra = new StringBuilder();
         for (LoadedContextFile file : loadedFiles.values()) {
             ensureNotInterrupted();
-            extra.append("filename: ").append(file.filename()).append("\n")
-                    .append("recommendReason: ").append(file.recommendReason()).append("\n")
-                    .append("fileContent:\n")
+            extra.append("文件路径：").append(file.filename()).append("\n")
+                    .append("推荐理由：").append(file.recommendReason()).append("\n")
+                    .append("文件完整内容：\n")
                     .append(file.content())
                     .append("\n=======================\n");
         }
@@ -1052,8 +1024,8 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         Path sourceRoot = Path.of(context.sourceRoot()).toAbsolutePath().normalize();
         Path projectRoot = Path.of(context.projectRoot()).toAbsolutePath().normalize();
         StringBuilder verification = new StringBuilder(
-                "## Live Source Verification\n\n"
-                        + "This section comes from the current source tree and overrides stale graph or CodeMap text.\n"
+                "## 当前源码校验\n\n"
+                        + "本节来自当前源码树，其内容优先于可能已经过时的图数据或 CodeMap 文本。\n"
         );
         for (String symbol : featureSymbols.stream().sorted().toList()) {
             Boolean declared = javaDeclarationExists(sourceRoot, symbol);
@@ -1089,7 +1061,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 for (int index = 0; index < lines.length && matches.size() < 4; index++) {
                     String line = lines[index];
                     if (callablePatterns.stream().anyMatch(pattern -> pattern.matcher(line).find())) {
-                        matches.add("line " + (index + 1) + ": " + line.strip());
+                        matches.add("第 " + (index + 1) + " 行：" + line.strip());
                     }
                 }
                 if (!matches.isEmpty()) {
@@ -1100,9 +1072,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             }
         }
 
-        verification.append("\nFiles containing current declarations or references:\n");
+        verification.append("\n包含当前声明或引用的文件：\n");
         if (references.isEmpty()) {
-            verification.append("None\n");
+            verification.append("无\n");
         } else {
             references.forEach((file, matches) -> {
                 verification.append("LIVE_REFERENCE_FILE: ").append(file).append('\n');
@@ -1139,10 +1111,10 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     private String renderGlobalPlan(List<ModifiedFile> files) {
         StringBuilder plan = new StringBuilder();
         for (ModifiedFile file : files) {
-            plan.append("FILE: ").append(file.filename).append("\n")
-                    .append("ACTION: ").append(file.action).append("\n")
-                    .append("PLAN: ").append(file.plan).append("\n")
-                    .append("NOTE: ").append(file.note).append("\n\n");
+            plan.append("文件：").append(file.filename).append("\n")
+                    .append("操作：").append(file.action).append("\n")
+                    .append("方案：").append(file.plan).append("\n")
+                    .append("备注：").append(file.note).append("\n\n");
         }
         return plan.toString();
     }
@@ -1158,70 +1130,69 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             int round
     ) {
         String originalSection = operation.isAddition() ? "" : """
-                Original feature description:
+                原功能描述：
                 \"\"\"
                 %s
                 \"\"\"
 
                 """.formatted(context.oldRequest());
         return """
-                You are Agent1 for a %s project. Refine the working code context required to implement the requested %s.
-                This is context selection only; removing a context file never deletes that project file.
+                你是负责 %s 项目的 Agent1。请为本次%s筛选并完善实现所需的工作代码上下文。
+                此阶段只调整上下文；从上下文中移除文件绝不会删除项目中的实际文件。
 
-                Context refinement round: %d of %d.
+                当前是第 %d/%d 轮上下文调整。
 
-                Requirement:
+                待实现需求：
                 \"\"\"
                 %s
                 \"\"\"
 
                 %s
-                Retrieved graph and CodeMap context:
+                检索得到的图数据与 CodeMap 上下文：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Current additional full-file context:
+                当前补充的文件完整内容上下文：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Live source verification, if available:
+                当前源码校验（如有）：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Complete project file list from the original project workspace. It includes source code, configuration,
-                metadata, templates, scripts, tests, and other project files without filtering by extension.
-                Every filename is project-root-relative. Return filenames in exactly this format:
+                以下是原项目工作区的完整文件列表，包括源代码、配置、元数据、模板、脚本、测试及其他
+                项目文件，不按扩展名过滤。每个文件名都相对于项目根目录；返回的文件名必须严格沿用
+                此格式：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Optional context files that may be removed from subsequent prompts:
+                后续提示中允许移除的可选上下文文件：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Add a file when its complete content is still required. Remove a file only when its current optional
-                reasoning or full-file content is irrelevant. Files omitted from the removable list are mandatory and
-                must remain, including Feature CodeMap declarations, deterministic deletion diffs, and safety markers.
-                Do not request a file already present in the additional full-file context.
+                只有仍需查看某个文件的完整内容时才将其加入上下文。只有确认某个文件当前的可选推理内容
+                或完整内容与任务无关时才将其移出上下文。未出现在可移除列表中的内容是强制上下文，必须
+                保留，包括 Feature CodeMap 声明、确定性删除差异和安全标记。不要再次请求已存在于补充
+                文件完整内容上下文中的文件。
 
-                Return JSON only. Do not include reasoning or Markdown fences:
+                仅返回 JSON，不要输出推理过程或 Markdown 代码围栏：
                 {
                   "needAdditionalFile": true,
                   "additionalFileList": [
-                    {"filename": "path/to/project.file", "recommendReason": "why it is needed"}
+                    {"filename": "path/to/project.file", "recommendReason": "需要该文件的原因"}
                   ],
                   "removeContextFileList": [
-                    {"filename": "path/to/optional-context.file", "recommendReason": "why it is irrelevant"}
+                    {"filename": "path/to/optional-context.file", "recommendReason": "该文件无关的原因"}
                   ]
                 }
-                Write recommendReason values in %s.
-                needAdditionalFile describes additionalFileList only. If the current context is sufficient, return false
-                and two empty arrays. Context refinement stops early when both arrays are empty and otherwise runs for at
-                most %d rounds.
+                recommendReason 字段使用%s书写。
+                needAdditionalFile 只描述 additionalFileList 是否非空。如果当前上下文已经足够，请返回 false
+                和两个空数组。当两个数组都为空时，上下文调整将提前结束；否则最多执行 %d 轮。
                 """.formatted(
                 projectLanguage,
                 operation.promptLabel(),
@@ -1250,66 +1221,65 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String liveSourceVerification
     ) {
         String wholeFileDeleteRule = "Python".equalsIgnoreCase(projectLanguage)
-                ? "Use action=delete for a whole file only when the context explicitly lists that path as "
-                        + "ALLOWED_DELETE_FILE and the file is dedicated to this feature."
-                : "For Java, use action=delete when an existing file is dedicated to this feature and should be "
-                        + "removed completely. FeatX will still enforce project-path and protected-symbol safety.";
+                ? "只有上下文通过 ALLOWED_DELETE_FILE 明确列出某个路径，且该文件仅服务于此功能时，"
+                        + "才能使用 action=delete 删除整个文件。"
+                : "对于 Java，如果某个现有文件仅服务于此功能且应被完整移除，可以使用 action=delete。"
+                        + "FeatX 仍会校验项目路径和受保护符号的安全边界。";
         String deleteConstraints = operation.isDeletion() ? """
 
-                This is a feature deletion. Preserve unrelated behavior and every protected shared symbol listed
-                in the supplied context. Prefer minimal rewrites. %s
-                Do not create files during deletion. Every planned file must exist in the supplied project list and
-                current source tree. Never include hypothetical or optional mapping files. A symbol marked MISSING by
-                live source verification is already absent and does not need another edit. Include current
-                LIVE_REFERENCE_FILE call sites when their references become invalid.
+                本次任务是功能删除。必须保留无关行为以及上下文中列出的每个受保护共享符号，优先采用最小
+                范围的改写。%s
+                删除功能时不得创建文件。计划中的每个文件都必须同时存在于给出的项目文件列表和当前源码树中。
+                不要加入假设存在或可选的映射文件。当前源码校验中标记为 MISSING 的符号已经不存在，无需再次
+                修改。当 LIVE_REFERENCE_FILE 中的现有调用点会因删除而失效时，必须将其纳入计划。
                 """.formatted(wholeFileDeleteRule) : "";
         return """
-                You are Agent2 for a %s project. Produce a complete, internally consistent file-level plan for this %s.
+                你是负责 %s 项目的 Agent2。请为本次%s制定完整且内部一致的文件级修改方案。
 
-                Requirement:
+                待实现需求：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Original feature description, if any:
+                原功能描述（如有）：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Retrieved graph and CodeMap context:
+                检索得到的图数据与 CodeMap 上下文：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Additional file context:
+                补充文件上下文：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Live source verification, if available:
+                当前源码校验（如有）：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Every filename must be relative to the original project workspace root. Include every edited, newly created,
-                or deleted project file regardless of extension. Make shared API names, signatures, data types,
-                configuration keys, and call sites explicit so independent edits stay consistent.
+                每个 filename 都必须相对于原项目工作区根目录。无论扩展名是什么，都要列出每个需要编辑、
+                新建或删除的项目文件。请明确写出共享 API 名称、签名、数据类型、配置键和调用点，使各文件的
+                独立修改保持一致。
 
-                Return JSON only. Do not include reasoning or Markdown fences:
+                仅返回 JSON，不要输出推理过程或 Markdown 代码围栏：
                 {
                   "modifiedFileList": [
                     {
                       "filename": "path/to/project.file",
                       "action": "rewrite",
-                      "plan": "Concrete steps, including exact shared signatures.",
-                      "note": "Constraints and compatibility risks."
+                      "plan": "具体步骤，包括精确的共享签名。",
+                      "note": "约束与兼容性风险。"
                     }
                   ]
                 }
-                The submitted requirement is authoritative and must produce a concrete change. Do not return an
-                empty modifiedFileList merely because the requested behavior is small or unconventional.
+                如果核对后确认项目已经满足需求，或该需求不需要修改任何项目文件，可以返回空的
+                modifiedFileList。否则必须给出完整、具体的计划，不得仅因需求较小或非常规而漏掉文件。
                 %s
-                Write plan and note values in %s.
+                plan 和 note 字段使用%s书写。
                 """.formatted(
                 projectLanguage,
                 operation.promptLabel(),
@@ -1340,77 +1310,75 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         String expectedTypeName = javaFile ? javaTypeName(target.filename) : "";
         String createExample = javaFile
                 ? packageDeclaration + "public class " + expectedTypeName + " {\n}"
-                : "complete content for " + target.filename;
+                : target.filename + " 的完整内容";
         String outputContract = createMode ? """
-                The target is a new or empty file, so return exactly one CREATE block:
+                当前目标是新文件或空文件，因此只能返回一个 CREATE 块：
                 <<<<<<< CREATE
                 %s
                 >>>>>>> CREATE
 
-                CREATE is the only case where complete-file generation is allowed.
+                只有 CREATE 场景允许生成完整文件。
                 """.formatted(createExample) : """
-                If the target already satisfies its plan because the relevant code is absent or already has the
-                required state, return exactly this token and nothing else:
+                如果相关代码本来就不存在，或目标文件已经达到计划要求，请只返回以下标记，不要输出其他内容：
                 NO_CHANGES_REQUIRED
 
-                Otherwise return only minimal exact Search/Replace blocks in application order:
+                否则只能按应用顺序返回最小且精确的 Search/Replace 块：
                 <<<<<<< SEARCH
-                exact text copied from the current target file
+                从当前目标文件中逐字复制的精确文本
                 =======
-                replacement text
+                替换文本
                 >>>>>>> REPLACE
 
-                Rules:
-                - Never return the complete existing multi-line file. For a single-line file, replacing its one
-                  line is the minimal valid edit.
-                - SEARCH must be non-empty and match exactly once in the current file at that step.
-                - Every REPLACE must differ from its SEARCH and must implement part of the requirement.
-                - Include enough unchanged context to make every SEARCH unique.
-                - Use additional blocks for additional edits, including package or import changes.
-                - Do not use ellipses, line numbers, regexes, explanations, or omitted-code placeholders.
+                规则：
+                - 绝不返回现有多行文件的完整内容。对于单行文件，替换这一行就是最小有效修改。
+                - SEARCH 不得为空，并且在该步骤的当前文件中必须恰好匹配一次。
+                - 每个 REPLACE 都必须与对应的 SEARCH 不同，并实现需求的一部分。
+                - 每个 SEARCH 都要包含足够的未修改上下文，确保匹配唯一。
+                - 其他修改（包括 package 或 import 变更）使用额外的块。
+                - 不要使用省略号、行号、正则表达式、解释文字或省略代码的占位符。
                 """;
         String deleteConstraints = operation.isDeletion() ? """
 
-                Deletion safety rules:
-                - Preserve every PROTECTED_SYMBOL from the reference context.
-                - Remove only implementation that belongs to the selected feature or references made obsolete by it.
-                - Preserve unrelated public APIs, shared configuration, and shared behavior.
-                - This target already exists; do not use CREATE.
+                删除安全规则：
+                - 保留参考上下文中的每个 PROTECTED_SYMBOL。
+                - 只移除属于所选功能的实现，或因该功能删除而失效的引用。
+                - 保留无关的公共 API、共享配置和共享行为。
+                - 当前目标文件已经存在，不要使用 CREATE。
                 """ : "";
         return """
-                You are Agent3 for a %s project. Produce precise Search/Replace edits for one project file in a
-                coordinated multi-file %s.
+                你是负责 %s 项目的 Agent3。请在本次多文件协同%s中，为一个项目文件生成精确的
+                Search/Replace 修改。
 
-                Requirement:
+                待实现需求：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Original feature description, if any:
+                原功能描述（如有）：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Global file plan. Treat exact shared signatures as a contract:
+                全局文件方案。精确的共享签名属于必须遵守的契约：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Reference code and dependency context:
+                参考代码与依赖上下文：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Files already generated in this run:
+                本轮已经生成的文件：
                 \"\"\"
                 %s
                 \"\"\"
 
-                Target file: %s
-                Target plan: %s
-                Target constraints: %s
+                目标文件：%s
+                目标方案：%s
+                目标约束：%s
 
-                Original complete target content:
+                目标文件的原始完整内容：
                 \"\"\"
                 %s
                 \"\"\"
@@ -1419,10 +1387,9 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
 
                 %s
 
-                The resulting file must remain valid for its file type. FeatX applies the blocks only in memory;
-                it syntax-checks generated Java and Python files but does not compile or run the project.
-                Do not wrap the protocol in Markdown fences.
-                Write newly added or modified natural-language comments in %s.
+                修改后的文件必须符合其文件类型的语法。FeatX 只在内存中应用这些块；它会检查生成的 Java
+                和 Python 文件语法，但不会编译或运行项目。不要用 Markdown 代码围栏包裹此协议。
+                新增或修改的自然语言注释使用%s书写。
                 """.formatted(
                 projectLanguage,
                 operation.promptLabel(),
@@ -1581,17 +1548,16 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
     }
 
     private String repairPrompt(String originalPrompt, String agent, Exception failure) {
-        return originalPrompt + "\n\nYour previous " + agent
-                + " response violated the required contract."
-                + (failure == null ? "" : " The exact reason was:\n" + safeFailureMessage(failure))
-                + "\nTry once more and follow the output schema exactly.";
+        return originalPrompt + "\n\n你上一次返回的 " + agent + " 响应违反了指定协议。"
+                + (failure == null ? "" : "具体原因如下：\n" + safeFailureMessage(failure))
+                + "\n请重新生成，并严格遵循输出结构。";
     }
 
     private String agent2RepairPrompt(String originalPrompt, Exception failure) {
         return repairPrompt(originalPrompt, "Agent2", failure)
-                + "\nReturn exactly one JSON object whose only top-level field is modifiedFileList. "
-                + "Escape every double quote inside filename, plan, and note string values with a backslash. "
-                + "Do not return a bare array, prose, comments, or Markdown fences.";
+                + "\n只能返回一个 JSON 对象，且顶层只能包含 modifiedFileList 字段。"
+                + "filename、plan 和 note 字符串值中的每个双引号都必须使用反斜杠转义。"
+                + "不要返回裸数组、说明文字、注释或 Markdown 代码围栏。";
     }
 
     private String buildAgent3RetryPrompt(
@@ -1601,21 +1567,20 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
             String previousResponse
     ) {
         String safetyStopOption = isSafetyBoundaryFailure(failure)
-                ? "\nThis file crossed a safety boundary. First try a narrower patch that preserves the protected "
-                        + "code. If this file cannot be changed safely, return exactly " + SKIP_FILE_SAFELY
-                        + " and nothing else. FeatX will leave only this file unchanged and continue with the next "
-                        + "planned file. Do not use " + NO_CHANGES_REQUIRED + " for a safety conflict.\n"
+                ? "\n本文件的修改越过了安全边界。请先尝试缩小补丁范围并保留受保护代码。"
+                        + "如果无法安全修改此文件，只返回 " + SKIP_FILE_SAFELY
+                        + "，不要输出其他内容。FeatX 将仅保留此文件不变，并继续处理下一个计划文件。"
+                        + "发生安全冲突时不要使用 " + NO_CHANGES_REQUIRED + "。\n"
                 : "";
-        return originalPrompt + "\n\nRetry " + retryNumber + " of " + MAX_AGENT_RETRIES + ".\n"
-                + "The previous attempt failed for this exact reason:\n"
+        return originalPrompt + "\n\n当前是第 " + retryNumber + "/" + MAX_AGENT_RETRIES + " 次重试。\n"
+                + "上一次尝试失败的具体原因：\n"
                 + safeFailureMessage(failure) + "\n\n"
-                + "Previous response:\n"
+                + "上一次响应：\n"
                 + boundedPromptSection(previousResponse, MAX_RETRY_RESPONSE_CHARS) + "\n\n"
                 + safetyStopOption
-                + "Generate a fresh protocol response against the ORIGINAL target content. Do not apply edits "
-                + "to the previous response. Every REPLACE must differ from SEARCH, and the resulting file must "
-                + "differ from the original. If the requested target state is already present, return exactly "
-                + NO_CHANGES_REQUIRED + ". Correct the reported failure and follow the protocol exactly.";
+                + "请基于目标文件的原始内容重新生成一份协议响应，不要在上一次响应上继续修改。每个 "
+                + "REPLACE 都必须与 SEARCH 不同，修改后的文件也必须与原文件不同。如果请求的目标状态"
+                + "已经存在，只返回 " + NO_CHANGES_REQUIRED + "。请修正报告的问题并严格遵循协议。";
     }
 
     private String agent3RetryMessage(
