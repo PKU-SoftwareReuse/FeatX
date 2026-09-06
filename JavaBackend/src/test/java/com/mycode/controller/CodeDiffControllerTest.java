@@ -11,9 +11,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.junit.jupiter.api.AfterEach;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
@@ -36,6 +38,11 @@ class CodeDiffControllerTest {
 
     @MockitoBean
     private AgentRunRegistry agentRunRegistry;
+
+    @AfterEach
+    void clearProjectModifications() {
+        ProjectState.getInstance().setModifications(Map.of());
+    }
 
     @Test
     void contextByClassReadsTheWholeJavaFileNode(@TempDir Path projectPath) throws Exception {
@@ -95,6 +102,27 @@ class CodeDiffControllerTest {
                         .param("classId", "src.main.java.top.naccl.util.MailUtils")
                         .param("operation", "edit")
                         .param("runId", "run-1"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(candidatePath)));
+
+        verify(candidateCodeService).existingCandidate(candidatePath);
+    }
+
+    @Test
+    void candidateDiffResolvesAResourceCandidateFromAnOldDuplicatePrefix(@TempDir Path projectPath) throws Exception {
+        String candidatePath = "src/main/resources/mapper/BlogMapper.xml";
+        ProjectState.getInstance().setProjectPath(projectPath.toString(), "JAVA");
+        ProjectState.getInstance().setModifications(Map.of(candidatePath, "<mapper/>"));
+
+        CodeFileDiffResult candidate = new CodeFileDiffResult();
+        candidate.setKey(candidatePath);
+        candidate.setPath(candidatePath);
+        when(candidateCodeService.existingCandidate(candidatePath)).thenReturn(Optional.of(candidate));
+
+        mockMvc.perform(get("/code/candidateDiff")
+                        .param("classId", "src/main/java/" + candidatePath)
+                        .param("operation", "edit")
+                        .param("runId", "run-duplicate-resource"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString(candidatePath)));
 

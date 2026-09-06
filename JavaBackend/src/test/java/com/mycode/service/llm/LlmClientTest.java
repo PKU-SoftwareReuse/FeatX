@@ -138,6 +138,33 @@ class LlmClientTest {
         assertEquals(150, result.usage().totalTokens());
     }
 
+    @Test
+    void nonStreamingResultCapturesContentAndUsage() throws Exception {
+        server.enqueue(new MockResponse()
+                .setHeader("Content-Type", "application/json")
+                .setBody("{\"choices\":[{\"message\":{\"content\":\"{\\\"deltaQuery\\\":\\\"cache avatar\\\"}\"}}],"
+                        + "\"usage\":{\"prompt_tokens\":42,\"completion_tokens\":8,\"total_tokens\":50,"
+                        + "\"prompt_tokens_details\":{\"cached_tokens\":12}}}"));
+
+        LlmGenerationResult result = client.generateWithSinglePromptResult(
+                "compare descriptions",
+                "chosen-model"
+        );
+
+        assertEquals("{\"deltaQuery\":\"cache avatar\"}", result.content());
+        assertNotNull(result.usage());
+        assertEquals(42, result.usage().inputTokens());
+        assertEquals(12, result.usage().cachedInputTokens());
+        assertEquals(8, result.usage().outputTokens());
+        assertEquals(50, result.usage().totalTokens());
+
+        RecordedRequest request = server.takeRequest(1, TimeUnit.SECONDS);
+        assertNotNull(request);
+        JsonNode requestBody = OBJECT_MAPPER.readTree(request.getBody().readUtf8());
+        assertEquals("chosen-model", requestBody.path("model").asText());
+        assertTrue(!requestBody.path("stream").asBoolean());
+    }
+
     private void enqueueModels(String... modelIds) {
         StringBuilder body = new StringBuilder("{\"object\":\"list\",\"data\":[");
         for (int index = 0; index < modelIds.length; index++) {

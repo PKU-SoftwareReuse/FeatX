@@ -2,6 +2,7 @@ package com.mycode.controller;
 
 import com.mycode.service.code.AgentLanguage;
 import com.mycode.service.code.AgentRunContext;
+import com.mycode.service.code.AgentRunLogService;
 import com.mycode.service.code.AgentRunMode;
 import com.mycode.service.code.AgentRunRegistry;
 import com.mycode.service.code.JavaAddAgentService;
@@ -26,6 +27,7 @@ import com.mycode.service.JavaGraphContextService;
 import com.mycode.service.JavaStaticDeleteContextService;
 import com.mycode.service.OperationProgressService;
 import com.mycode.service.llm.LlmClient;
+import com.mycode.service.llm.LlmGenerationResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -86,6 +89,9 @@ public class LlmController {
     @Autowired
     private AgentRunRegistry agentRunRegistry;
 
+    @Autowired(required = false)
+    private AgentRunLogService agentRunLogService;
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public AgentRunStartResult modifyFeature(AddOrModifyRequest request)
@@ -126,7 +132,12 @@ public class LlmController {
                     2,
                     8
             );
-            String deltaQuery = buildDeltaQuery(oldRequest, newRequest, request.getModel().trim());
+            String deltaQuery = buildDeltaQuery(
+                    runId,
+                    oldRequest,
+                    newRequest,
+                    request.getModel().trim()
+            );
             FocusGraphContextResult graphContext = javaGraphContextService.buildModifyContext(
                     candidateFeature,
                     oldRequest,
@@ -207,7 +218,12 @@ public class LlmController {
                 2,
                 8
         );
-        String deltaQuery = buildDeltaQuery(oldRequest, newRequest, request.getModel().trim());
+        String deltaQuery = buildDeltaQuery(
+                runId,
+                oldRequest,
+                newRequest,
+                request.getModel().trim()
+        );
 
         FocusGraphContextResult context = focusGraphContextService.buildModifyContext(
                 candidateFeature.getFeatureId(),
@@ -615,7 +631,12 @@ public class LlmController {
         }
     }
 
-    private String buildDeltaQuery(String oldDescription, String newDescription, String model) {
+    private String buildDeltaQuery(
+            String runId,
+            String oldDescription,
+            String newDescription,
+            String model
+    ) {
         String prompt = """
                 比较旧版与新版功能描述，只提取发生变化且需要用于代码检索的需求。
                 仅返回 JSON：
@@ -632,10 +653,44 @@ public class LlmController {
                 新版功能描述：
                 %s
                 """;
-        String response = llmClient.generateWithSinglePrompt(
-                String.format(prompt, oldDescription, newDescription),
-                model
-        );
+        String renderedPrompt = String.format(prompt, oldDescription, newDescription);
+        int callNumber = agentRunRegistry.beginLlmCall(runId);
+        Instant startedAt = Instant.now();
+        if (agentRunLogService != null) {
+            agentRunLogService.startCall(
+                    runId,
+                    callNumber,
+                    "delta-query",
+                    model,
+                    renderedPrompt,
+                    startedAt
+            );
+        }
+
+        LlmGenerationResult generation = null;
+        RuntimeException failure = null;
+        try {
+            generation = llmClient.generateWithSinglePromptResult(renderedPrompt, model);
+            agentRunRegistry.completeLlmCall(runId, generation.usage());
+        } catch (RuntimeException exception) {
+            failure = exception;
+            throw exception;
+        } finally {
+            if (agentRunLogService != null) {
+                agentRunLogService.finishCall(
+                        runId,
+                        callNumber,
+                        "delta-query",
+                        model,
+                        startedAt,
+                        generation == null ? "" : generation.content(),
+                        generation == null ? null : generation.usage(),
+                        failure,
+                        agentRunRegistry.tokenUsage(runId)
+                );
+            }
+        }
+        String response = generation.content();
         try {
             JsonNode root = objectMapper.readTree(extractJsonObject(response));
             String deltaQuery = root.path("deltaQuery").asText("");

@@ -308,6 +308,23 @@ class CandidateCodeServiceTest {
     }
 
     @Test
+    void repositoryRelativeResourceCandidateIsNotPrefixedWithJavaSourceRoot(@TempDir Path projectRoot)
+            throws Exception {
+        Path javaFile = projectRoot.resolve("src/main/java/example/App.java");
+        Files.createDirectories(javaFile.getParent());
+        Files.writeString(javaFile, "package example; class App {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+
+        String resourcePath = "src/main/resources/mapper/BlogMapper.xml";
+        ProjectState.getInstance().setModifications(Map.of(resourcePath, "<mapper/>"));
+
+        assertEquals(
+                java.util.List.of(resourcePath),
+                new CandidateCodeService().allCandidateProjectPaths()
+        );
+    }
+
+    @Test
     void candidateStateDoesNotLeakBetweenRepositories(@TempDir Path first, @TempDir Path second) {
         ProjectState firstProject = ProjectState.selectWorkspace("candidate-a", 301, first.toString(), "JAVA");
         ProjectState secondProject = ProjectState.selectWorkspace("candidate-b", 302, second.toString(), "JAVA");

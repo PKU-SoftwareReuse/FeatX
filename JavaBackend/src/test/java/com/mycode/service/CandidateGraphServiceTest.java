@@ -6,6 +6,7 @@ import com.mycode.dto.result.FeatureGraphResult;
 import com.mycode.dto.result.FocusGraphContextResult;
 import com.mycode.service.code.AgentLanguage;
 import com.mycode.service.code.AgentRunContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,6 +35,11 @@ class CandidateGraphServiceTest {
 
     @Mock
     private JavaImportAnalyzerService javaImportAnalyzerService;
+
+    @AfterEach
+    void clearProjectModifications() {
+        ProjectState.getInstance().setModifications(Map.of());
+    }
 
     @Test
     void buildsFileGraphFromReasoningStageAndCandidateState(@TempDir Path projectRoot) throws Exception {
@@ -183,6 +189,60 @@ class CandidateGraphServiceTest {
                 Set.of("src/main/java/feature/Added.java->src/main/java/dependency/Second.java"),
                 edgeKeys
         );
+    }
+
+    @Test
+    void keepsProjectRelativeResourcePathsInReasoningGraph(@TempDir Path projectRoot) throws Exception {
+        Path javaSource = projectRoot.resolve("src/main/java/example/Existing.java");
+        Files.createDirectories(javaSource.getParent());
+        Files.writeString(javaSource, "package example; class Existing {}\n");
+        ProjectState.getInstance().setProjectPath(projectRoot.toString(), "JAVA");
+        ProjectState.getInstance().setModifications(Map.of());
+
+        String resourcePath = "src/main/resources/mapper/BlogMapper.xml";
+        FocusGraphContextResult.Node resourceNode = node("resource", resourcePath);
+        FocusGraphContextResult.GraphStage reasoningStage = new FocusGraphContextResult.GraphStage();
+        reasoningStage.setId("reasoning");
+        reasoningStage.setNodes(List.of(resourceNode));
+        reasoningStage.setEdges(List.of());
+        AgentRunContext context = new AgentRunContext(
+                "run-resource",
+                "java-modify",
+                "request",
+                "old request",
+                "context",
+                "files",
+                AgentLanguage.EN,
+                projectRoot.resolve("src/main/java").toString(),
+                projectRoot.toString(),
+                3,
+                4,
+                null,
+                List.of(reasoningStage)
+        );
+
+        when(candidateCodeService.pendingCandidateProjectPaths()).thenReturn(List.of());
+        when(candidateCodeService.stagedModificationKeys()).thenReturn(Set.of());
+        when(repoSummaryFileGraphService.getFileAdjacencyEdges(
+                org.mockito.ArgumentMatchers.anyCollection()
+        )).thenReturn(Set.of());
+        when(javaImportAnalyzerService.candidateEdges(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.anyCollection(),
+                org.mockito.ArgumentMatchers.anyMap()
+        )).thenReturn(Set.of());
+
+        FeatureGraphResult graph = new CandidateGraphService(
+                candidateCodeService,
+                repoSummaryFileGraphService,
+                javaImportAnalyzerService
+        ).buildCandidateGraph(context);
+
+        assertEquals(Set.of(resourcePath), graph.getNodes().stream()
+                .map(FeatureGraphResult.Node::getId)
+                .collect(Collectors.toSet()));
     }
 
     private FocusGraphContextResult.Node node(String id, String file) {

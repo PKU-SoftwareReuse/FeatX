@@ -129,6 +129,24 @@ class AgentRunRegistryTest {
     }
 
     @Test
+    void preparationCallsAreIncludedInRunUsage(@TempDir Path projectRoot) {
+        ProjectState project = ProjectState.getInstance();
+        project.setProjectPath(projectRoot.toString(), "JAVA");
+        project.setRepoId(42);
+        AgentRunRegistry registry = new AgentRunRegistry();
+        String runId = registry.reservePreparation();
+
+        assertEquals(1, registry.beginLlmCall(runId));
+        registry.completeLlmCall(runId, new LlmTokenUsage(30, 10, 5, 0, 35));
+
+        AgentTokenUsageResult usage = registry.tokenUsage(runId);
+        assertEquals(1, usage.calls());
+        assertEquals(1, usage.reportedCalls());
+        assertEquals(35, usage.totalTokens());
+        assertTrue(usage.complete());
+    }
+
+    @Test
     void differentRepositoriesCanPrepareConcurrently(@TempDir Path first, @TempDir Path second) {
         ProjectState firstProject = ProjectState.selectWorkspace("workspace-a", 101, first.toString(), "JAVA");
         ProjectState secondProject = ProjectState.selectWorkspace("workspace-b", 102, second.toString(), "JAVA");

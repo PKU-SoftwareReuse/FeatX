@@ -19,6 +19,7 @@ import com.mycode.service.code.AgentRunRegistry;
 import com.mycode.service.code.JavaDeleteAgentService;
 import com.mycode.service.code.PythonDeleteAgentService;
 import com.mycode.service.llm.LlmClient;
+import com.mycode.service.llm.LlmGenerationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -84,8 +85,8 @@ class LlmControllerTest {
                 any(AgentLanguage.class)
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
-                .thenReturn("{\"deltaQuery\":\"print greeting\"}");
+        when(llmClient.generateWithSinglePromptResult(anyString(), eq("selected-model")))
+                .thenReturn(new LlmGenerationResult("{\"deltaQuery\":\"print greeting\"}", null));
 
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(registry, javaGraphService, mock(FocusGraphContextService.class), llmClient);
@@ -106,7 +107,7 @@ class LlmControllerTest {
         assertEquals(List.of("initial"), run.graphStages().stream().map(FocusGraphContextResult.GraphStage::getId).toList());
         verify(javaGraphService).buildModifyContext(feature, "Old feature", "Old feature plus greeting", "print greeting", AgentLanguage.EN);
         ArgumentCaptor<String> deltaPrompt = ArgumentCaptor.forClass(String.class);
-        verify(llmClient).generateWithSinglePrompt(deltaPrompt.capture(), eq("selected-model"));
+        verify(llmClient).generateWithSinglePromptResult(deltaPrompt.capture(), eq("selected-model"));
         assertTrue(deltaPrompt.getValue().contains("比较旧版与新版功能描述"));
     }
 
@@ -135,8 +136,8 @@ class LlmControllerTest {
                 any(AgentLanguage.class)
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
-                .thenReturn("{\"deltaQuery\":\"enable feature\"}");
+        when(llmClient.generateWithSinglePromptResult(anyString(), eq("selected-model")))
+                .thenReturn(new LlmGenerationResult("{\"deltaQuery\":\"enable feature\"}", null));
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
                 registry,
@@ -217,8 +218,8 @@ class LlmControllerTest {
                 anyList()
         )).thenReturn(graphContext);
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
-                .thenReturn("{\"deltaQuery\":\"enable feature\"}");
+        when(llmClient.generateWithSinglePromptResult(anyString(), eq("selected-model")))
+                .thenReturn(new LlmGenerationResult("{\"deltaQuery\":\"enable feature\"}", null));
 
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
@@ -415,8 +416,8 @@ class LlmControllerTest {
             return result;
         });
         LlmClient llmClient = mock(LlmClient.class);
-        when(llmClient.generateWithSinglePrompt(anyString(), eq("selected-model")))
-                .thenReturn("{\"deltaQuery\":\"parallel change\"}");
+        when(llmClient.generateWithSinglePromptResult(anyString(), eq("selected-model")))
+                .thenReturn(new LlmGenerationResult("{\"deltaQuery\":\"parallel change\"}", null));
         AgentRunRegistry registry = new AgentRunRegistry();
         LlmController controller = controller(
                 registry,

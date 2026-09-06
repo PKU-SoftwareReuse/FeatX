@@ -1309,17 +1309,28 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
         String expectedPackage = javaFile ? expectedJavaPackage(context, target.filename).orElse("") : "";
         String packageDeclaration = expectedPackage.isEmpty() ? "" : "package " + expectedPackage + ";\n\n";
         String expectedTypeName = javaFile ? javaTypeName(target.filename) : "";
-        String createExample = javaFile
-                ? packageDeclaration + "public class " + expectedTypeName + " {\n}"
-                : target.filename + " 的完整内容";
-        String outputContract = createMode ? """
-                当前目标是新文件或空文件，因此只能返回一个 CREATE 块：
-                <<<<<<< CREATE
-                %s
-                >>>>>>> CREATE
+        String outputContract;
+        if (createMode && javaFile) {
+            outputContract = """
+                    当前目标是新文件或空文件，因此只能返回一个 CREATE 块：
+                    <<<<<<< CREATE
+                    %s
+                    >>>>>>> CREATE
 
-                只有 CREATE 场景允许生成完整文件。
-                """.formatted(createExample) : """
+                    CREATE 块内必须从第一行开始写真实文件内容，不要写文件名、路径、说明文字或 Markdown 代码围栏。
+                    只有 CREATE 场景允许生成完整文件。
+                    """.formatted(packageDeclaration + "public class " + expectedTypeName + " {\n}");
+        } else if (createMode) {
+            outputContract = """
+                    当前目标是新文件或空文件，因此只能返回一个 CREATE 块。
+                    CREATE 块内必须直接从第一行开始写目标文件的真实完整内容；不要写文件名、路径、说明文字或 Markdown 代码围栏：
+                    <<<<<<< CREATE
+                    >>>>>>> CREATE
+
+                    只有 CREATE 场景允许生成完整文件。
+                    """;
+        } else {
+            outputContract = """
                 如果相关代码本来就不存在，或目标文件已经达到计划要求，请只返回以下标记，不要输出其他内容：
                 NO_CHANGES_REQUIRED
 
@@ -1338,6 +1349,7 @@ abstract class ThreeStageAgentPipelineSupport extends AgentService {
                 - 其他修改（包括 package 或 import 变更）使用额外的块。
                 - 不要使用省略号、行号、正则表达式、解释文字或省略代码的占位符。
                 """;
+        }
         String deleteConstraints = operation.isDeletion() ? """
 
                 删除安全规则：

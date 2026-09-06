@@ -326,14 +326,21 @@ public class AgentRunRegistry {
     }
 
     public synchronized int beginLlmCall(String runId) {
-        RunState state = requireStatus(runId, Status.RUNNING);
+        RunState state = requireRunState(runId);
+        if (state.status != Status.PREPARING && state.status != Status.RUNNING) {
+            throw new IllegalStateException(
+                    "Cannot start an LLM call for Agent run " + runId + " with status " + state.status + "."
+            );
+        }
         state.llmCalls++;
         return state.llmCalls;
     }
 
     public synchronized void completeLlmCall(String runId, LlmTokenUsage usage) {
         RunState state = requireRunState(runId);
-        if (state.status != Status.RUNNING && state.status != Status.COMPLETED) {
+        if (state.status != Status.PREPARING
+                && state.status != Status.RUNNING
+                && state.status != Status.COMPLETED) {
             throw new IllegalStateException(
                     "Cannot record LLM usage for Agent run " + runId + " with status " + state.status + "."
             );

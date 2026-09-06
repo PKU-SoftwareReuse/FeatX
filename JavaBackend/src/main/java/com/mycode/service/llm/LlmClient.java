@@ -116,11 +116,15 @@ public class LlmClient {
     }
 
     public String generateWithSinglePrompt(String prompt, String model) {
-        ArrayNode messages = createUserMessages(prompt);
-        return generateWithMsg(messages, model);
+        return generateWithSinglePromptResult(prompt, model).content();
     }
 
-    private String generateWithMsg(ArrayNode messages, String model) {
+    public LlmGenerationResult generateWithSinglePromptResult(String prompt, String model) {
+        ArrayNode messages = createUserMessages(prompt);
+        return generateWithMsgResult(messages, model);
+    }
+
+    private LlmGenerationResult generateWithMsgResult(ArrayNode messages, String model) {
         try {
             ObjectNode root = createRequestBody(messages, model, false);
             Request request = authorizedRequest(endpoint("chat/completions"))
@@ -136,14 +140,18 @@ public class LlmClient {
                 }
 
                 String responseBody = response.body().string();
-                JsonNode choices = OBJECT_MAPPER.readTree(responseBody).path("choices");
+                JsonNode responseJson = OBJECT_MAPPER.readTree(responseBody);
+                JsonNode choices = responseJson.path("choices");
                 if (choices.isArray() && !choices.isEmpty()) {
-                    return choices.get(0).path("message").path("content").asText();
+                    return new LlmGenerationResult(
+                            choices.get(0).path("message").path("content").asText(),
+                            extractUsage(responseJson)
+                    );
                 }
                 throw new IOException("OpenAI response does not contain choices");
             }
         } catch (Exception e) {
-            return "调用失败：" + e.getMessage();
+            return new LlmGenerationResult("调用失败：" + e.getMessage(), null);
         }
     }
 

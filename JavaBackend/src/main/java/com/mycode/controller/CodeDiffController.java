@@ -268,12 +268,13 @@ public class CodeDiffController {
 
     private String resolveCandidateFilePath(String classOrFileId) {
         Map<String, String> modifications = ProjectState.getInstance().getModifications();
-        if (modifications.containsKey(classOrFileId)) {
-            return ProjectFilePath.normalize(classOrFileId);
+        String modificationKey = matchingModificationKey(classOrFileId, modifications);
+        if (modificationKey != null) {
+            return ProjectFilePath.normalize(modificationKey);
         }
         try {
             String projectPath = ProjectFilePath.normalize(classOrFileId);
-            Path projectRoot = Path.of(ProjectState.getInstance().getProjectPath());
+            Path projectRoot = ProjectPathMapping.projectRoot(ProjectState.getInstance());
             if (Files.isRegularFile(ProjectFilePath.resolve(projectRoot, projectPath))) {
                 return projectPath;
             }
@@ -304,6 +305,41 @@ public class CodeDiffController {
                 ProjectState.getInstance(),
                 javaPath
         );
+    }
+
+    private String matchingModificationKey(String identifier, Map<String, String> modifications) {
+        if (identifier == null || identifier.isBlank() || modifications == null || modifications.isEmpty()) {
+            return null;
+        }
+        String normalizedIdentifier = identifier.trim().replace('\\', '/');
+        for (String key : modifications.keySet()) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            try {
+                String normalizedKey = ProjectFilePath.normalize(key);
+                if (normalizedIdentifier.equals(normalizedKey)) {
+                    return normalizedKey;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed candidate keys and continue with the valid entries.
+            }
+        }
+        for (String key : modifications.keySet()) {
+            if (key == null || key.isBlank()) {
+                continue;
+            }
+            String normalizedKey;
+            try {
+                normalizedKey = ProjectFilePath.normalize(key);
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            if (normalizedIdentifier.endsWith("/" + normalizedKey)) {
+                return normalizedKey;
+            }
+        }
+        return null;
     }
 
 }

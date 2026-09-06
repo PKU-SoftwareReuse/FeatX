@@ -376,30 +376,37 @@ public class RepositoryGitService {
 
     private String runGit(Path workingDirectory, List<String> command, int... acceptedExitCodes)
             throws IOException, InterruptedException {
-        Process process = new ProcessBuilder(command)
-                .directory(workingDirectory.toFile())
-                .redirectErrorStream(true)
-                .start();
-        boolean exited = process.waitFor(120, TimeUnit.SECONDS);
-        if (!exited) {
-            process.destroyForcibly();
-            process.waitFor(10, TimeUnit.SECONDS);
+        Path outputFile = Files.createTempFile("featx-git-", ".log");
+        try {
+            Process process = new ProcessBuilder(command)
+                    .directory(workingDirectory.toFile())
+                    .redirectErrorStream(true)
+                    .redirectOutput(outputFile.toFile())
+                    .start();
+            boolean exited = process.waitFor(120, TimeUnit.SECONDS);
+            if (!exited) {
+                process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+            }
+            String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+            if (!exited) {
+                throw new IOException("Git command timed out.\n" + output);
+            }
+            int exitCode = process.exitValue();
+            if (Arrays.stream(acceptedExitCodes).noneMatch(code -> code == exitCode)) {
+                throw new IOException("Git command failed with exit code " + exitCode + "\n" + output);
+            }
+            return output;
+        } finally {
+            Files.deleteIfExists(outputFile);
         }
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!exited) {
-            throw new IOException("Git command timed out.\n" + output);
-        }
-        int exitCode = process.exitValue();
-        if (Arrays.stream(acceptedExitCodes).noneMatch(code -> code == exitCode)) {
-            throw new IOException("Git command failed with exit code " + exitCode + "\n" + output);
-        }
-        return output;
     }
 
     private int gitExitCode(Path workingDirectory, List<String> command) throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command)
                 .directory(workingDirectory.toFile())
                 .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .start();
         boolean exited = process.waitFor(120, TimeUnit.SECONDS);
         if (!exited) {
@@ -407,7 +414,6 @@ public class RepositoryGitService {
             process.waitFor(10, TimeUnit.SECONDS);
             throw new IOException("Git command timed out.");
         }
-        process.getInputStream().readAllBytes();
         return process.exitValue();
     }
 

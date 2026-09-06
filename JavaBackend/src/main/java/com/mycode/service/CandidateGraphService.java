@@ -9,6 +9,7 @@ import com.mycode.service.code.AgentService;
 import com.mycode.service.code.AgentRunContext;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -140,7 +141,10 @@ public class CandidateGraphService {
             absolute = supplied.normalize();
         } else {
             Path projectCandidate = projectRoot.resolve(supplied).normalize();
-            absolute = projectCandidate.startsWith(sourceRoot)
+            boolean projectRelative = normalized.startsWith("src/")
+                    || sourceRoot.equals(projectRoot)
+                    || Files.exists(projectCandidate);
+            absolute = projectRelative
                     ? projectCandidate
                     : sourceRoot.resolve(supplied).normalize();
         }

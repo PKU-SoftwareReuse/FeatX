@@ -516,21 +516,26 @@ public class CandidateCodeService {
         try {
             ProjectState project = ProjectState.getInstance();
             Path projectFile = ProjectPathMapping.resolveProjectFile(project, key);
-            if (project.isJava()) {
+            if (project.isJava() && isLegacyJavaSourceKey(key, projectFile)) {
                 Path sourceRoot = ProjectPathMapping.sourceRoot(project);
-                if (!projectFile.startsWith(sourceRoot)) {
-                    // Java graph candidates are keyed relative to srcPath, while Git
-                    // status is reported relative to the repository root.
-                    Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
-                    if (sourceFile.startsWith(ProjectPathMapping.projectRoot(project))) {
-                        projectFile = sourceFile;
-                    }
+                // Older Java callers use paths relative to srcPath. Agent files
+                // use repository-relative paths such as src/main/resources/...
+                Path sourceFile = ProjectFilePath.resolve(sourceRoot, key);
+                if (sourceFile.startsWith(ProjectPathMapping.projectRoot(project))) {
+                    projectFile = sourceFile;
                 }
             }
             return Optional.of(projectRelativePath(projectFile));
         } catch (IllegalArgumentException exception) {
             return Optional.empty();
         }
+    }
+
+    private boolean isLegacyJavaSourceKey(String key, Path projectFile) {
+        if (!key.endsWith(".java") || key.startsWith("src/")) {
+            return false;
+        }
+        return !Files.exists(projectFile);
     }
 
     public Optional<String> javaSourceRelativePath(String key) {

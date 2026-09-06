@@ -25,5 +25,12 @@ out/
 /repos/
 /agent-logs/
 
+# Project-local Codex experiment toolchain runtime.
+/tools/
+
 code-workspace/
 experiments/
+output/
+scripts/
+tmp/
+
