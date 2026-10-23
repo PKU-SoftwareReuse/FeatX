@@ -8,34 +8,34 @@ import {useLanguage} from "../../i18n/LanguageContext";
 const GIT_COPY = {
     zh: {
         enterGit: "请输入 Git 仓库地址。",
-        cloneFailed: "克隆代码仓库失败。",
-        previewFirst: "请先预览代码仓库并输入仓库名称。",
-        imported: "代码仓库已导入。",
+        cloneFailed: "Git 地址无效。",
+        previewFirst: "请先检查仓库地址并输入仓库名称。",
+        imported: "项目已登记；请在项目设置中发起分析。",
         importFailed: "导入代码仓库失败。",
-        openButton: "从 Git 仓库克隆",
-        title: "从 Git 仓库克隆 Java 或 Python 项目",
+        openButton: "从 Git 登记项目",
+        title: "登记 Git 项目（不限语言）",
         gitRepository: "Git 地址，例如 Naccl/NBlog、GitLab、GitLink 或 SSH 地址",
         commitId: "提交 ID（选填）",
-        preview: "预览",
+        preview: "检查地址",
         treeReady: "源文件目录已就绪",
-        noSourceFiles: "未找到源文件",
-        fetching: "正在获取代码仓库……",
+        noSourceFiles: "仅登记仓库地址，不克隆或分析源码",
+        fetching: "正在检查仓库地址……",
         repositoryName: "请输入代码仓库名称",
     },
     en: {
         enterGit: "Please enter a Git repository URL.",
-        cloneFailed: "Failed to clone repository.",
-        previewFirst: "Please preview the repository and enter a repo name first.",
-        imported: "Repository imported.",
+        cloneFailed: "Invalid Git URL.",
+        previewFirst: "Check the URL and enter a repository name first.",
+        imported: "Project registered; submit analysis from project settings.",
         importFailed: "Failed to import repository.",
-        openButton: "Clone from Git",
-        title: "Clone a Java or Python project from Git",
+        openButton: "Register from Git",
+        title: "Register a Git project (any language)",
         gitRepository: "Git URL: GitHub shorthand, GitLab, GitLink, or SSH",
         commitId: "Commit id, optional",
-        preview: "Preview",
+        preview: "Check URL",
         treeReady: "Source tree ready",
-        noSourceFiles: "No source files",
-        fetching: "Fetching repository...",
+        noSourceFiles: "Registration only; source cloning and analysis are not performed",
+        fetching: "Checking repository URL...",
         repositoryName: "Please enter repo's name",
     },
 };
@@ -69,7 +69,7 @@ const buildFileTree = (paths) => {
 };
 
 const getErrorMessage = (error, fallback, language) => {
-    if (language !== "en") return fallback;
+    if (error?.message) return error.message;
 
     const data = error?.response?.data;
     if (typeof data === "string" && data.trim()) {

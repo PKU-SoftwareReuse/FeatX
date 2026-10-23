@@ -1423,6 +1423,7 @@ const WorkingPage = () => {
     }
 
     const goDelete = (item) => {
+        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -1452,6 +1453,7 @@ const WorkingPage = () => {
     }
 
     const goEdit = (item) => {
+        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -1630,6 +1632,7 @@ const WorkingPage = () => {
 
     // Add 按钮事件
     const goAdd = (module) => {
+        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -2556,7 +2559,7 @@ const WorkingPage = () => {
                                         onChange={setSelectedModel}
                                         loading={loadingModels}
                                         disabled={loadingModels || models.length === 0 || loadingFeatureList}
-                                        placeholder={loadingModels ? copy.loadingModels : copy.modelUnavailable}
+                                        placeholder={API.capabilities?.agent === false ? (language === "zh" ? "Agent 尚未实现" : "Agent not implemented") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
                                         showSearch
                                         optionFilterProp="label"
                                         popupMatchSelectWidth={false}

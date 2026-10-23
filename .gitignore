@@ -16,7 +16,7 @@ __pycache__/
 
 out/
 
-# Local model weights are packaged into Docker images but are not source files.
+# Historical local model data; not used by the current native framework.
 /models/
 
 /Py
@@ -39,3 +39,8 @@ tmp/
 /codex-workplace/
 /recording/
 /.run/service-recovery-20260910/
+
+# Lightweight demo runtime and local Python environment.
+/data/
+Backend/.venv/
+Frontend/coverage/

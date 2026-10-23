@@ -1,2 +1,1 @@
-"""HTTP API exposed to JavaBackend."""
-
+"""RepoSummary HTTP transport."""

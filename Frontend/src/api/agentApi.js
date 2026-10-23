@@ -1,20 +1,9 @@
-import {BASE_URL, eventSourceQuery, http} from "./client";
-
+import {unavailable, unavailableError, text} from './client';
 const agentApi = {
-    getLlmModels: () => http.get(`${BASE_URL}/llm/models`)
-        .then((response) => response.data),
-    getLlmResponse: (runId, language, model) => {
-        const query = eventSourceQuery({runId});
-        if (language) query.set("language", language);
-        if (model) query.set("model", model);
-        return new EventSource(`${BASE_URL}/llm/get?${query.toString()}`);
-    },
-    getAgentRun: (runId) => http.get(`${BASE_URL}/llm/run`, {params: {runId}})
-        .then((response) => response.data),
-    getLlmProgress: () => http.get(`${BASE_URL}/llm/progress`)
-        .then((response) => response.data),
-    getFocusGraphStages: (runId) => http.get(`${BASE_URL}/llm/focusgraph/stages`, {params: {runId}})
-        .then((response) => response.data),
+    getLlmModels: () => unavailable(text('Agent 模型选择', 'Agent model selection')),
+    getLlmResponse: () => {throw unavailableError('Agent');},
+    getAgentRun: () => unavailable('Agent'),
+    getLlmProgress: () => unavailable('Agent'),
+    getFocusGraphStages: () => unavailable(text('推理图阶段', 'Reasoning graph stages')),
 };
-
 export default agentApi;

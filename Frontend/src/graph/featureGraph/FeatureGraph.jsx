@@ -39,6 +39,7 @@ const displayedMethods = (methods) => {
 const graphStructure = (graphData) => JSON.stringify({
     nodes: (graphData?.nodes || []).map((node) => ({
         id: node.id,
+        displayLabel: node.displayLabel,
         methods: Array.isArray(node.methods) ? node.methods : node.methods || '',
     })),
     edges: (graphData?.edges || []).map((edge) => ({
@@ -69,7 +70,7 @@ const FeatureGraph = ({graphData, onNodeClick, onBackgroundClick, nodeFontSize})
                 const funcList = displayedMethods(node.methods).join('\n');
                 return {
                     id: node.id,
-                    label: `${node.id}\n——————————\n${funcList}`,
+                    label: node.displayLabel || `${node.id}\n——————————\n${funcList}`,
                     color: nodeColor(node.type),
                 };
             });

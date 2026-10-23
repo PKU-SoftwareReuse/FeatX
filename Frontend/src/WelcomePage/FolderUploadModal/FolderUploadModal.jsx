@@ -12,30 +12,30 @@ const SOURCE_TREE_LIMIT = 1000;
 
 const UPLOAD_COPY = {
     zh: {
-        unsupported: "仅支持 Java 和 Python 项目。",
-        incomplete: "请选择 Java 或 Python 项目，并输入代码仓库名称。",
-        succeeded: "上传成功。",
+        unsupported: "请选择包含文件的项目文件夹。",
+        incomplete: "请选择项目文件夹，并输入代码仓库名称。",
+        succeeded: "上传成功；可在项目设置中发起分析。",
         failed: "上传失败。",
         tooLarge: "上传失败：项目超过当前服务器上传大小限制。",
         failedWithReason: (reason) => `上传失败：${reason}`,
         openButton: "上传新代码仓库",
-        title: "上传 Java 或 Python 项目",
-        dragHint: "将项目文件夹拖到此处，或点击选择文件夹",
+        title: "上传项目（不限语言）",
+        dragHint: "将项目文件夹拖到此处，或点击选择文件夹（最多 2000 个文件、100 MiB；请移除密钥）",
         selectedFiles: (count) => `已选择 ${count} 个项目文件`,
         showingFiles: (count) => `仅显示前 ${count} 个文件`,
         reading: "正在读取文件夹……",
         repositoryName: "请输入代码仓库名称",
     },
     en: {
-        unsupported: "Only Java and Python projects are supported.",
-        incomplete: "Please select a Java or Python project and enter a repo name.",
-        succeeded: "Upload succeeded.",
+        unsupported: "Select a project folder containing files.",
+        incomplete: "Please select a project folder and enter a repo name.",
+        succeeded: "Upload succeeded; submit analysis from project settings.",
         failed: "Upload failed.",
         tooLarge: "Upload failed: project is larger than the current server upload limit.",
         failedWithReason: (reason) => `Upload failed: ${reason}`,
         openButton: "Upload New Repo",
-        title: "Upload a Java or Python project",
-        dragHint: "Drag a project folder here or click to select it",
+        title: "Upload a project (any language)",
+        dragHint: "Drag a project folder here or click to select it (2000 files / 100 MiB max; remove secrets first)",
         selectedFiles: (count) => `${count} project files selected`,
         showingFiles: (count) => `Showing first ${count} files`,
         reading: "Reading folder...",
@@ -47,16 +47,11 @@ const normalizePath = (path) => (path || "").replace(/\\/g, "/");
 
 const getRawPath = (file) => normalizePath(file.originFileObj?.webkitRelativePath || file.name);
 
-const isSourceFile = (path, projectType) => {
-    const lowerPath = normalizePath(path).toLowerCase();
-    return projectType === "JAVA" ? lowerPath.endsWith(".java") : lowerPath.endsWith(".py");
-};
-
 const sharedTopLevel = (paths) => {
     if (!paths.length) return "";
     const first = paths[0].split("/")[0];
     if (!first) return "";
-    return paths.every(path => path.split("/")[0] === first) ? first : "";
+    return paths.every(path => path.startsWith(`${first}/`)) ? first : "";
 };
 
 const stripTopLevel = (path, topLevel) => {
@@ -67,37 +62,19 @@ const stripTopLevel = (path, topLevel) => {
 const normalizeProjectPath = (path, topLevel) => {
     return stripTopLevel(normalizePath(path), topLevel)
         .split("/")
-        .filter(part => part && part !== "." && part !== "..")
+        .filter(part => part && part !== ".")
         .join("/");
 };
 
-const detectProjectType = (paths) => {
-    let javaScore = 0;
-    let pythonScore = 0;
-
-    paths.forEach((path) => {
-        const lowerPath = normalizePath(path).toLowerCase();
-        if (lowerPath.endsWith(".java")) javaScore += 3;
-        if (lowerPath.includes("/src/main/java/") || lowerPath.startsWith("src/main/java/")) javaScore += 5;
-        if (lowerPath.endsWith("pom.xml") || lowerPath.endsWith("build.gradle") || lowerPath.endsWith("build.gradle.kts")) javaScore += 2;
-
-        if (lowerPath.endsWith(".py")) pythonScore += 3;
-        if (lowerPath.endsWith("pyproject.toml") || lowerPath.endsWith("setup.py") || lowerPath.endsWith("requirements.txt")) pythonScore += 2;
-    });
-
-    if (javaScore === 0 && pythonScore === 0) return null;
-    return javaScore >= pythonScore ? "JAVA" : "PYTHON";
-};
-
 const buildFileTree = (paths) => {
-    const root = {};
+    const root = Object.create(null);
 
     paths.forEach((path) => {
         const parts = normalizePath(path).split("/").filter(Boolean);
         let current = root;
         parts.forEach((part, index) => {
             if (!current[part]) {
-                current[part] = index === parts.length - 1 ? null : {};
+                current[part] = index === parts.length - 1 ? null : Object.create(null);
             }
             current = current[part];
         });
@@ -120,31 +97,12 @@ const buildFileTree = (paths) => {
 const analyzeFiles = (fileList) => {
     const files = fileList.filter(file => file.originFileObj);
     const rawPaths = files.map(getRawPath);
-    const projectType = detectProjectType(rawPaths);
-
-    if (!projectType) {
-        return {
-            projectType: null,
-            sourceFiles: [],
-            treeData: [],
-            defaultFolderName: sharedTopLevel(rawPaths),
-        };
-    }
-
     const topLevel = sharedTopLevel(rawPaths);
-    const projectFiles = files
-        .map(file => ({
-            file,
-            path: normalizeProjectPath(getRawPath(file), topLevel),
-        }))
+    const projectFiles = files.map(file => ({file, path: normalizeProjectPath(getRawPath(file), topLevel)}))
         .filter(entry => entry.path);
-    const sourceFiles = projectFiles
-        .filter(({file}) => isSourceFile(getRawPath(file), projectType));
-
     return {
-        projectType,
+        projectType: projectFiles.length ? "PROJECT" : null,
         projectFiles,
-        sourceFiles,
         treeData: buildFileTree(projectFiles.slice(0, SOURCE_TREE_LIMIT).map(entry => entry.path)),
         defaultFolderName: topLevel,
     };
@@ -155,7 +113,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
     const copy = UPLOAD_COPY[language];
     const [visible, setVisible] = useState(false);
     const [projectFiles, setProjectFiles] = useState([]);
-    const [sourceFiles, setSourceFiles] = useState([]);
     const [folderName, setFolderName] = useState("");
     const [uploaded, setUploaded] = useState(false);
     const [treeData, setTreeData] = useState([]);
@@ -186,7 +143,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             const analysis = analyzeFiles(fileList);
             setProjectType(analysis.projectType);
             setProjectFiles(analysis.projectFiles || []);
-            setSourceFiles(analysis.sourceFiles);
             setTreeData(analysis.treeData);
 
             if (analysis.defaultFolderName) {
@@ -199,7 +155,13 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                 return;
             }
 
-            setStatus(analysis.sourceFiles.length > 0 ? "ready" : "unsupported");
+            const bytes = analysis.projectFiles.reduce((sum, entry) => sum + entry.file.originFileObj.size, 0);
+            if (analysis.projectFiles.length > 2000 || bytes > 100 * 1024 * 1024) {
+                setStatus("unsupported");
+                message.warning(language === "zh" ? "最多上传 2000 个文件、100 MiB。" : "Maximum 2000 files and 100 MiB.");
+                return;
+            }
+            setStatus("ready");
         }, 300);
     };
 
@@ -222,7 +184,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             return;
         }
 
-        if (!projectFiles.length || !sourceFiles.length || !folderName || !projectType) {
+        if (!projectFiles.length || !folderName.trim() || !projectType || status !== "ready") {
             message.warning(copy.incomplete);
             return;
         }
@@ -233,7 +195,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
             projectData.append("paths", path);
         });
         projectData.append("folderName", folderName);
-        projectData.append("projectType", projectType);
 
         setUploading(true);
         API.uploadProject(projectData).then(() => {
@@ -258,7 +219,6 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         setVisible(false);
         setUploaded(false);
         setProjectFiles([]);
-        setSourceFiles([]);
         setTreeData([]);
         setFolderName("");
         setProjectType(null);
@@ -274,7 +234,9 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
         <>
             <Button icon={<UploadOutlined/>}
                     className={styles.confirmButton}
-                    onClick={() => setVisible(true)}>
+                    onClick={() => API.capabilities?.upload === false
+                        ? API.notifyUnavailable(language === "zh" ? "文件夹上传" : "Folder upload")
+                        : setVisible(true)}>
                 {copy.openButton}
             </Button>
             <Modal
@@ -302,7 +264,7 @@ const FolderUploadModal = ({reloadGetProjectsInfo}) => {
                 <div style={{marginTop: 16, marginBottom: 16}}>
                     {projectType && (
                         <div style={{display: "flex", gap: 8, alignItems: "center", marginBottom: 12}}>
-                            <Tag color={projectType === "JAVA" ? "blue" : "green"}>{projectType}</Tag>
+                            <Tag color="blue">{language === "zh" ? "项目文件" : "Project files"}</Tag>
                             <span>{copy.selectedFiles(projectFiles.length.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>
                             {projectFiles.length > SOURCE_TREE_LIMIT && (
                                 <span>{copy.showingFiles(SOURCE_TREE_LIMIT.toLocaleString(language === "zh" ? "zh-CN" : "en-US"))}</span>

@@ -1,2 +1,1 @@
-"""FeatX Python analysis and model service."""
-
+"""FeatX RepoSummary HTTP contract shell; no analysis implementation."""

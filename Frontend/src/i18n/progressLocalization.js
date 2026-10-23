@@ -181,6 +181,7 @@ export const localizeSummaryStageLabel = (step, language) => {
 };
 
 export const localizeSummaryProgressMessage = (progress, language) => {
+    if (progress?.displayMessage) return progress.displayMessage;
     const lang = normalizedLanguage(language);
     const copy = SUMMARY_COPY[lang];
     const status = String(progress?.status || "").toLowerCase();

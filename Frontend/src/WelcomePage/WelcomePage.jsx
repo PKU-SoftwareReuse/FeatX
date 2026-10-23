@@ -168,6 +168,16 @@ const getGitName = (project, copy) => project.gitName || project.githubName || g
 const isBrowsableGitLink = (link) => /^https?:\/\//i.test(link || "");
 
 const getProjectStats = (project, copy) => {
+    if (project.projectType === "GENERIC") {
+        const zh = copy === WELCOME_COPY.zh;
+        return [
+            [copy.metrics.language, project.language || "—"],
+            [zh ? "功能特征" : "Features", project.featureCount ?? "—"],
+            [zh ? "图节点" : "Graph nodes", project.nodeCount ?? "—"],
+            [zh ? "图关系" : "Graph edges", project.edgeCount ?? "—"],
+            [zh ? "版本" : "Revision", project.source?.revision || "—"],
+        ];
+    }
     if (project.projectType === "PYTHON") {
         return [
             [copy.metrics.language, "Python"],
@@ -228,7 +238,8 @@ const WelcomePage = () => {
             setLoadingConnect(false);
         }).catch(err => {
             console.log(err);
-            testConnect();
+            setLoadingConnect(false);
+            message.error(err.message);
         })
     }
 
@@ -245,7 +256,7 @@ const WelcomePage = () => {
             console.log(err);
             if (!silent) {
                 setLoadingConnect(false);
-                getProjects();
+                message.error(err.message);
             }
         })
     }
@@ -318,11 +329,12 @@ const WelcomePage = () => {
     const handleResummaryButton = (repoId) => {
         setSettingsAction("resummary");
         API.postResummary(repoId).then(() => {
-            message.success(copy.resummaryCompleted);
+            message.success(language === "zh" ? "分析请求已提交。" : "Analysis submitted.");
             setSettingsProject(null);
             getProjects();
         }).catch(error => {
-            message.error(copy.resummaryFailed);
+            message.error(error.message || copy.resummaryFailed);
+            fetchSummaryProgress();
             console.log(error);
         }).finally(() => {
             setSettingsAction(null);
@@ -380,9 +392,7 @@ const WelcomePage = () => {
             message.success(copy.projectUpdated);
         } catch (error) {
             if (error?.errorFields) return;
-            message.error(language === "en"
-                ? error?.response?.data?.message || copy.projectUpdateFailed
-                : copy.projectUpdateFailed);
+            message.error(error.message || copy.projectUpdateFailed);
             console.log(error);
         } finally {
             setSettingsSaving(false);
@@ -560,7 +570,7 @@ const WelcomePage = () => {
                                                 onClick={() => {
                                                     handleConfirmButton(project.id);
                                                 }}
-                                                disabled={!project.summaryFlag}
+                                                disabled={loadingAnalyse}
                                             >
                                                 {copy.open}
                                             </Button>

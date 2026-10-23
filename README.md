@@ -1,232 +1,76 @@
-<p align="center">
-    <img src="/docs/asserts/featx_logo.png" style="height: 10em" alt="FeatX" />
-</p>
+# FeatX · 轻量开发框架
 
-<p align="center">
-  <a href="/README.md">English</a> |
-  <a href="/docs/other_languages/README_CN.md">中文简体</a>
-</p>
-<p align="center">
-    <a href="https://www.java.com/">
-        <img alt="Java" src="https://img.shields.io/badge/Java-17+-ED8B00?logo=java&logoColor=white">
-    </a>
-    <a href="https://spring.io/projects/spring-boot">
-        <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.x-6DB33F?logo=springboot&logoColor=white">
-    </a>
-    <a href="https://react.dev/">
-        <img alt="React" src="https://img.shields.io/badge/React-18+-61DAFB?logo=react&logoColor=black">
-    </a>
-    <a href="https://copyright.princeton.edu/policy">
-        <img alt="License" src="https://img.shields.io/badge/License-MIT-blue">
-    </a>
-</p>
+通过编辑功能特征来编辑软件。本分支已改为语言无关的 Python 主后端：
+不使用数据库、静态分析、模型或 Java 工具链，图的唯一来源是独立 RepoSummary 服务。
 
----
-
-Code and data for the following works:
-
-- <a href="https://arxiv.org/abs/2606.31206">[ASE 2026 Tools and Datasets] FeatX: Editing Software by Editing Features for Repository-Level Code Evolution</a>
-- <a href="https://arxiv.org/abs/2510.11039">RepoSummary: Feature-Oriented Summarization and Documentation Generation for Code Repositories</a>
-
-Archived ASE 2026 artifact: [https://doi.org/10.5281/zenodo.21190519](https://doi.org/10.5281/zenodo.21190519)
-
-## 👋 Overview
-
-FeatX is a feature-oriented interface for LLM-assisted programming. 
-Given *an existing software repository* to be modified, 
-FeatX first summarizes the features of the repository, and then constructs a comprehensive contextual CodeMap. 
-Based on the context, FeatX leverages an LLM to generate code for new feature requirements, highlights the resulting code changes for confirmation, and finally produces *a modified repository*.
-
-<img src="/docs/asserts/FeatX_approach.png">
-<img src="/docs/asserts/FeatX_Pannels.png">
-
-## 🚀 Set Up
-
-This section gives two deployment paths. Docker Compose is the recommended path
-for artifact evaluation and normal local use. Manual deployment is available for
-development or customized environments, but is not recommended for artifact
-evaluation.
-
-### 1. Docker Compose Deployment (Recommended)
-
-Requirements:
-
-*   Docker with Compose v2
-*   Internet access for the first build
-*   A CPU-only x86_64 Linux machine is recommended; no GPU is required
-*   8-16 GiB RAM and at least 20 GB free disk space are recommended
-
-Configuration for this path is in `.env.example` and `docker-compose.yml`.
-Copy `.env.example` to `.env` before starting the stack. The MySQL service runs
-inside Docker Compose, so a host-installed MySQL server is not required.
-
-Start FeatX:
+## 本机开发（不使用 Docker）
 
 ```bash
-cp .env.example .env
-docker compose build
-docker compose up -d
+./dev.sh up       # 启动
+./dev.sh restart  # 重启
+./dev.sh down     # 停止
+./dev.sh logs     # 查看日志
 ```
 
-The Compose configuration builds and starts three services: MySQL, the Spring
-Boot backend with the RepoSummary Python environment, and an Nginx-served React
-frontend. The first build downloads Java, Node, Python, PyTorch CPU, and NLP
-dependencies, so it can take several minutes.
+访问 **http://服务器IP:3010**。React 开发服务器支持前端热更新，
+Python 主后端开启自动重载；修改 RepoSummary 空壳后执行 restart。
+API 文档仍在 `/docs`。API 和 RepoSummary 分别只监听本机 13010、18091，前端统一代理。
 
-After startup, verify the deployment:
+进程由当前用户的 systemd 管理，关闭终端不会停止；没有配置开机自启。
+已有 `data/` 原地使用。旧 Docker 容器和数据卷不动，新 featx-quick 容器已移除。
+这是无鉴权的开发服务，不要作为公网生产环境使用。
 
+首次在新机器准备依赖：
 ```bash
-docker compose ps
-curl -i http://localhost:8080/connect/test
-curl -i http://localhost:3000/
-curl -i http://localhost:3000/api/connect/test
+python3 -m venv Backend/.venv
+Backend/.venv/bin/pip install -r Backend/requirements.txt
+(cd Frontend && npm ci)
 ```
 
-Open the UI at [http://localhost:3000/](http://localhost:3000/).
+## 当前能做什么
 
-If ports `8080` or `3000` are already in use, override the host ports:
+- 登记 Git URL 和可选 revision；也支持原来的文件夹上传（不限语言，保留目录结构）。
+- 上传文件保存至 `data/uploads/`，最多 2000 个文件、100 MiB；删除上传项目会一并删除归档。
+- 用 JSON 文件保存项目、远端任务关联和已完成分析结果，重启仍可读取。
+- 通过 HTTP 提交分析、轮询任务、取回结果，展示特性列表和节点/边图。
+- 图展示不限制语言；实际分析支持哪些语言由 RepoSummary 决定。
+- 编辑、Agent、Diff、Git 仅有未实现接口，原入口提示未实现或保持禁用，不执行写操作。
 
+**附带的 RepoSummary 只是 HTTP 空壳。** 健康接口返回 `businessReady:false`，
+业务接口返回 501；因此默认界面显示待接入，不会产生任务、分析结果或示例图。
+真实闭环需要同门实现 [RepoSummary 接口契约](docs/REPOSUMMARY_API.md)。
+
+## 架构与目录
+
+```text
+Frontend/    React + Ant Design + vis-network，项目页与工作台
+Backend/     FastAPI + Uvicorn，项目/分析/图/扩展接口，JSON 文件存储
+PyBackend/   独立 RepoSummary HTTP 空壳，无第三方运行依赖
+data/        运行时生成 projects/<id>.json，Git 忽略
+dev.sh       本机 systemd 开发服务入口
+```
+
+本机开发服务器在 3010 提供前端，并把 `/api/v1` 和 `/docs` 代理到 Python 后端。不启动数据库、消息队列、分析工具或模型。
+旧 `datasets/`、`models/`、`repos/` 已删除；旧容器和数据卷保留不动。
+`.run/featx-host-nginx.conf` 仍保留给旧容器使用，不能因新框架不使用就直接删除。
+
+## 接入真实 RepoSummary
+
+设置服务地址后重启：
 ```bash
-BACKEND_PORT=28080 FRONTEND_PORT=23000 docker compose up -d
+REPOSUMMARY_HTTP_URL=http://your-service:8091 ./dev.sh restart
 ```
+外部服务需要下载上传归档时，同时设置 `FEATX_DOWNLOAD_BASE_URL` 为它可达的主应用地址，
+例如 `http://本机IP:3010`。服务根地址不带 `/v1`。
 
-Then use [http://localhost:23000/](http://localhost:23000/) and
-`http://localhost:28080/connect/test`.
+## 边界
 
-The Docker package includes seeded NBlog data and its matching source snapshot:
+- 单实例、单 worker、本地 demo；使用进程内锁及原子 JSON 替换，不支持多进程/多副本共享写入。
+- GET 分析状态会轮询远端并保存新状态，没有后台队列；关闭页面不会取消远端任务。
+- 删除项目会删除登记、结果和自有上传归档；不删除外部 Git 仓库、不取消远端任务。
+- 提交超时结果可能不确定，不自动重试；应先核对远端任务后再重新提交。
+- 新接口不兼容旧 Java API，也不读取共享 CSV、旧数据库或模型缓存。
 
-*   `datasets/mysql/featx_seed.sql` initializes the MySQL feature map.
-*   `datasets/repos/12` initializes `/workspace/repos/12` in the backend
-    container.
+最小冒烟：`PYTHONPATH=Backend Backend/.venv/bin/python -m unittest discover -s Backend/tests -v`。
 
-The seeded demo and smoke checks do not require an LLM API key. Full
-LLM-backed feature extraction and code evolution require credentials in `.env`:
-
-```env
-LLM_API_URL=https://api.deepseek.com
-LLM_API_KEY=<reviewer-api-key>
-
-OPENAI_BASE_URL=https://api.deepseek.com
-OPENAI_API_KEY=<reviewer-api-key>
-OPENAI_API_MODEL=deepseek-v4-pro
-```
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-Remove the persistent MySQL and repository-cache volumes only when you want to
-reinitialize the seeded demo:
-
-```bash
-docker compose down -v
-```
-
-### 2. Manual Deployment (Not Recommended for Artifact Evaluation)
-
-Manual deployment runs each component outside Docker Compose. Use it only when
-you need to customize the runtime environment.
-
-Requirements:
-
-*   Java JDK 17 and Maven via `JavaBackend/mvnw`
-*   Node.js 20.x and npm 10.x
-*   Python 3.10 and dependencies from `PyBackend/requirements.txt`
-*   MySQL 8 initialized with
-    `JavaBackend/src/main/java/com/mycode/dao/update-schema.sql`; the
-    backend then applies `JavaBackend/src/main/resources/db/migration` automatically
-*   An OpenAI-compatible LLM API endpoint for full workflows
-*   Nginx or another static server if serving the production frontend build
-
-Configuration files:
-
-*   `JavaBackend/src/main/resources/application.properties` configures repository
-    cache path, MySQL, and Java backend LLM settings. You can also start from
-    `JavaBackend/src/main/resources/example.properties`.
-*   `PyBackend/.env` configures the same repository cache path, MySQL
-    connection, and Python-side LLM settings.
-*   The backend and RepoSummary database/repository-cache settings must point to
-    the same MySQL database and repository directory.
-*   The top-level `.env` file is for Docker Compose. For manual deployment, set
-    the equivalent values in the component-specific files above.
-
-Build and start the backend:
-
-```bash
-cd JavaBackend
-./mvnw -DskipTests package
-java -jar target/*.jar
-```
-
-Build the frontend:
-
-```bash
-cd Frontend
-npm install
-npm run build
-```
-
-Serve `Frontend/build/` with Nginx or another static file server, and proxy
-frontend API requests to the backend at `http://localhost:8080/`.
-
-## 🧪 Artifact Evaluation
-
-For ASE 2026 Artifact Evaluation, see:
-
-- [Artifact_README.md](Artifact_README.md): artifact contents, badge strategy, and quick checks
-- [REQUIREMENTS.txt](REQUIREMENTS.txt): hardware, software, and service requirements
-- [STATUS.txt](STATUS.txt): verified checks and known limitations
-
-The artifact supports the following paper claims and review checks:
-
-*   Tool availability: reviewers can build and run the FeatX web tool with
-    Docker Compose, then open the UI at `http://localhost:3000/`.
-*   Data availability: reviewers can inspect the 38 feature-editing commits in
-    `datasets/commits/dataset.json`.
-*   Case-study inspection: reviewers can inspect the seeded NBlog feature map
-    and matching source snapshot through the Docker deployment.
-*   Component buildability: reviewers can build the frontend and backend and
-    syntax-check the Python module using the commands in `Artifact_README.md`.
-
-The packaged quick checks do not fully rerun every LLM-backed experiment from
-the paper. Full feature extraction and code evolution require a configured
-OpenAI-compatible API key and may incur provider-side cost.
-
-### Agent run logs and token usage
-
-FeatX records every code-evolution Agent prompt, raw model response, call
-metadata, and the run-level token summary. Docker Compose writes these files to
-`agent-logs/<runId>/` on the host. Set `AGENT_LOGS_ENABLED=false` in `.env` to
-disable file logging. Manual deployments default to `JavaBackend/logs/agent-runs`
-when the backend is started from the `JavaBackend` directory; this can be changed
-with `AGENT_LOG_DIR`.
-
-`GET /llm/run?runId=<runId>` includes `tokenUsage` and `agentLogPath`.
-`tokenUsage` reports the number of LLM calls and input, cached input, uncached
-input, output, reasoning output, and total tokens. Providers do not always
-return usage for every streaming call, so compare `reportedCalls` with `calls`;
-the summary is complete when they are equal.
-
-## 💽 Usage
-
-After completing the deployment, open a web browser and navigate to:
-
-👉 [http://localhost:3000/](http://localhost:3000/)
-
-You can then access and interact with FeatX through the web-based interface.
-
-A step-by-step walkthrough of the system, including feature inspection, feature editing, and debloating workflows, is provided in our video demonstration:  
-
-👉 [https://youtu.be/OZqKZ4Ii-yM](https://youtu.be/OZqKZ4Ii-yM)
-
-If you prefer not to deploy the system locally, an online demo is also available at:  
-
-👉 [https://lixutian.github.io/FeatX](https://lixutian.github.io/FeatX)
-
-The online demo showcases the core interaction paradigm of FeatX and can be used for quick exploration and evaluation.
-
-## ✍️ License
-
-This project is licensed under the MIT License. See the [LICENSE.txt](LICENSE.txt) file for details.
+详见 [架构与主 API](docs/ARCHITECTURE.md) 和 [RepoSummary 交接文档](docs/REPOSUMMARY_API.md)。

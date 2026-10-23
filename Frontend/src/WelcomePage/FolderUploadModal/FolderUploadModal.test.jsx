@@ -8,7 +8,7 @@ jest.mock("../../api", () => ({
     uploadProject: jest.fn(),
 }));
 
-test("enables confirmation after selecting a Java project folder", async () => {
+test("enables confirmation after selecting a Rust project folder", async () => {
     render(
         <LanguageProvider>
             <FolderUploadModal reloadGetProjectsInfo={jest.fn()}/>
@@ -17,9 +17,9 @@ test("enables confirmation after selecting a Java project folder", async () => {
 
     fireEvent.click(screen.getByRole("button", {name: /upload new repo/i}));
     const input = document.querySelector("input[type=file]");
-    const file = new File(["class Main {}"], "Main.java", {type: "text/plain"});
+    const file = new File(["fn main() {}"], "main.rs", {type: "text/plain"});
     Object.defineProperty(file, "webkitRelativePath", {
-        value: "demo/src/main/java/Main.java",
+        value: "demo/src/main.rs",
     });
     fireEvent.change(input, {target: {files: [file]}});
 
@@ -41,10 +41,10 @@ test("submits non-source project files with their original relative paths", asyn
 
     fireEvent.click(screen.getByRole("button", {name: /upload new repo/i}));
     const input = document.querySelector("input[type=file]");
-    const javaFile = new File(["class Main {}"], "Main.java", {type: "text/plain"});
+    const javaFile = new File(["fn main() {}"], "main.rs", {type: "text/plain"});
     const pomFile = new File(["<project/>"] , "pom.xml", {type: "application/xml"});
     Object.defineProperty(javaFile, "webkitRelativePath", {
-        value: "demo/src/main/java/Main.java",
+        value: "demo/src/main.rs",
     });
     Object.defineProperty(pomFile, "webkitRelativePath", {
         value: "demo/pom.xml",
@@ -61,6 +61,6 @@ test("submits non-source project files with their original relative paths", asyn
 
     await waitFor(() => expect(API.uploadProject).toHaveBeenCalled());
     const formData = API.uploadProject.mock.calls[0][0];
-    expect(formData.getAll("paths")).toEqual(["src/main/java/Main.java", "pom.xml"]);
+    expect(formData.getAll("paths")).toEqual(["src/main.rs", "pom.xml"]);
     expect(formData.getAll("files")).toHaveLength(2);
 });

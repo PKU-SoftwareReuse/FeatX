@@ -1,5 +1,5 @@
 {
-  "name": "gdshow",
+  "name": "featx-frontend",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -35,7 +35,8 @@
     "sanitize.css": "^13.0.0",
     "vis-data": "^7.1.9",
     "vis-network": "^9.1.9",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^2.1.4",
+    "http-proxy-middleware": "2.0.10"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -60,5 +61,6 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  }
+  },
+  "proxy": "http://127.0.0.1:13010"
 }
