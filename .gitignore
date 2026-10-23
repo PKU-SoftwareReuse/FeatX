@@ -34,3 +34,8 @@ output/
 scripts/
 tmp/
 
+
+# Local experiment workspaces and service recovery artifacts.
+/codex-workplace/
+/recording/
+/.run/service-recovery-20260910/
