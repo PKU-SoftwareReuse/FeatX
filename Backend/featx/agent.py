@@ -564,7 +564,7 @@ class AgentManager:
             if run and run['status'] == 'COMPLETED':
                 self.check_head(run)
                 run['changedPaths'] = self.changed_paths(run)
-                actual_staged = git(self.workspace(run), 'diff', '--cached', '--name-only', '-z', run['baseCommit']).decode().split('\0')
+                actual_staged = git(self.workspace(run), 'diff', '--cached', '--no-renames', '--name-only', '-z', run['baseCommit']).decode().split('\0')
                 unstaged = set(git(self.workspace(run), 'diff', '--name-only', '-z').decode().split('\0'))
                 run['stagedPaths'] = [p for p in actual_staged if p in run['changedPaths'] and p not in unstaged]
                 run['metadataOnlyEligible'] = not run['changedPaths']
@@ -695,9 +695,15 @@ class AgentManager:
         if digest(summary_path) != run['summaryHash']:
             raise AppError(409, 'SUMMARY_CHANGED', '项目摘要已经变化，不能覆盖，请先处理后再确认')
         current_paths = self.changed_paths(run)
-        staged = [p for p in git(source, 'diff', '--cached', '--name-only', '-z', run['baseCommit']).decode().split('\0') if p]
-        if set(current_paths) != set(staged) or git(source, 'diff', '--name-only').strip():
-            raise AppError(409, 'CONFIRM_ALL_REQUIRED', '请先暂存全部修改；暂存后再次编辑的文件需要重新暂存')
+        staged = [p for p in git(source, 'diff', '--cached', '--no-renames', '--name-only', '-z', run['baseCommit']).decode().split('\0') if p]
+        if current_paths and not staged:
+            raise AppError(409, 'NO_SELECTED_FILES', '请先选择至少一个要保留的文件，或使用全部保留并提交')
+        unstaged = set(git(source, 'diff', '--no-renames', '--name-only', '-z').decode().split('\0'))
+        if set(staged).intersection(unstaged):
+            raise AppError(409, 'SELECTION_CHANGED', '已选择的文件又发生变化，请重新审阅并选择保留')
+        if set(current_paths) != set(run['changedPaths']):
+            raise AppError(409, 'CHANGES_CHANGED', '修改文件列表发生变化，请刷新后重新确认提交')
+        remaining = [path for path in current_paths if path not in set(staged)]
         summary = json.loads(summary_path.read_text())
         epic = next(e for e in summary['epics'] if e['id'] == run['moduleId'])
         proposal = self.feature_proposal(run)
@@ -708,6 +714,13 @@ class AgentManager:
         else:
             epic['features'] = [proposal if f['id'] == run['featureId'] else f for f in epic['features']]
         ProjectSummary.model_validate(summary)
+        if remaining:
+            # The confirmation dialog explicitly authorizes discarding unselected files.
+            # Revert only those paths; selected index entries remain untouched.
+            self.rollback(run, remaining)
+            run['discardedPaths'] = list(dict.fromkeys([*run.get('discardedPaths', []), *remaining]))
+            run['changedPaths'] = self.changed_paths(run)
+            self.save(run)
         committed = None
         try:
             git(source, 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'FeatX: ' + run['operation'] + ' ' + run['request'][:80])
@@ -721,9 +734,11 @@ class AgentManager:
         project = self.app.state.store.read(project_id)
         project.setdefault('git', {})['commit'] = committed
         self.app.state.store.write(project)
-        run.update(status='COMMITTED', acceptedAt=now(), requiresCleanup=False)
+        run.update(status='COMMITTED', acceptedAt=now(), requiresCleanup=False, committedPaths=staged)
         self.save(run)
-        return {'featureId': run['featureId'], 'commitScope': 'COMPLETE' if current_paths else 'METADATA_ONLY',
+        return {'featureId': run['featureId'],
+                'commitScope': 'PARTIAL' if run.get('discardedPaths') else 'COMPLETE' if current_paths else 'METADATA_ONLY',
+                'committedPaths': staged, 'discardedPaths': run.get('discardedPaths', []),
                 'status': self.status(project_id)}
 
     def shutdown(self):

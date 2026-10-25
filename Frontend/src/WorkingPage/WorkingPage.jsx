@@ -2,17 +2,16 @@
 
 import usePageNavigation from "../utils/usePageNavigation";
 import styles from './WorkingPage.module.css';
-import {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {cloneElement, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {Alert, Dropdown, Segmented, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
     ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-    CloseOutlined,
+    CloseOutlined, DownOutlined,
     ExclamationCircleOutlined,
     SearchOutlined,
     ApartmentOutlined,
     CheckOutlined,
-    CheckCircleOutlined,
-    CheckSquareOutlined,
+    CheckCircleOutlined, CarryOutOutlined,
     UndoOutlined
 } from '@ant-design/icons';
 import classNames from "classnames";
@@ -313,13 +312,13 @@ const WORKING_PAGE_COPY = {
         saveBeforeApply: "请先保存编辑，再确认提交。",
         saveBeforeClose: "当前编辑尚未保存。",
         gitGeneratedDiff: "Git 生成的差异",
-        confirmFile: "暂存文件",
-        stagingFile: "正在暂存……",
-        fileStaged: "此文件已暂存",
+        confirmFile: "选择保留",
+        stagingFile: "正在选择……",
+        fileStaged: "已选择，待提交",
         candidateStaged: "文件已暂存，等待确认提交。",
         failedStageCandidate: "暂存修改文件失败。",
-        unstageFile: "取消暂存",
-        unstagingFile: "正在取消暂存……",
+        unstageFile: "取消选择",
+        unstagingFile: "正在取消选择……",
         candidateUnstaged: "已取消暂存，文件内容保持不变。",
         failedUnstageCandidate: "取消暂存失败。",
         noCandidateChanges: "当前文件没有可暂存的修改。",
@@ -327,15 +326,15 @@ const WORKING_PAGE_COPY = {
         revertingFile: "正在撤销……",
         candidateReverted: "此文件已还原到本次任务开始前。",
         failedRevertCandidate: "撤销修改文件失败。",
-        commitChanges: "提交已暂存文件",
-        noStagedFiles: "请先在 Diff Panel 中暂存至少一个文件。",
+        commitChanges: "确认提交所选文件",
+        noStagedFiles: "请先在差异面板选择保留至少一个文件。",
         partialCommitTitle: "确认部分提交",
         completeCommitTitle: "确认全部提交",
         metadataCommitTitle: "确认功能项变更",
-        partialCommitDescription: "请先审阅并暂存全部修改，再确认本次功能变更。",
-        completeCommitDescription: "所有修改文件均已暂存；确认后创建 Git 提交，并保存本次功能项描述。不会重新分析代码关联。",
+        partialCommitDescription: "只提交已选择的文件；未选择的修改会回退，本次新增但未选择的文件会删除。本次功能操作随后结束，不能继续提交被放弃的部分。",
+        completeCommitDescription: "所有修改文件均已选择保留；确认后创建 Git 提交，并保存本次功能项描述。",
         metadataCommitDescription: "本次没有源码差异；确认后创建一条 Git 记录，并保存功能项的新增、修改或删除。",
-        partialCommitSuccess: "已提交确认的修改。",
+        partialCommitSuccess: "所选文件已提交，其余修改已放弃。",
         completeCommitSuccess: "全部修改已提交。",
         metadataCommitSuccess: "功能项变更已保存。",
         failedCommitChanges: "提交代码变更失败。",
@@ -346,7 +345,7 @@ const WORKING_PAGE_COPY = {
         failedDiscardChanges: "放弃未提交修改失败。",
         committingChanges: "正在提交并更新项目数据……",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
-        confirmAllChanges: "确认全部修改",
+        confirmAllChanges: "全部保留并提交",
         reviewAllChanges: "将暂存并提交本次全部修改，并保存功能项描述。请先确认图谱中的文件差异符合预期。",
         confirmApply: "接受并提交全部",
         decline: "取消",
@@ -399,6 +398,7 @@ export const FeatureListItem = ({
     submitEnabled,
     selectedModel,
     selectedModelLabel,
+    reviewReady,
     editedText,
     setEditedText,
     copy,
@@ -447,7 +447,7 @@ export const FeatureListItem = ({
                             <span>{editedText.length} 字符</span>
                         </div>
                         <div className={styles.editFooter}>
-                            {!submitEnabled && <p>当前修改正在处理，请在智能体输出中查看进度。</p>}
+                            {!submitEnabled && <p>{reviewReady ? '修改已生成，请在右侧审阅并提交。' : '智能体正在执行，请在输出视图查看进度。'}</p>}
                             <div>
                                 <Button disabled={!submitEnabled} onClick={() => onCancelEdit?.(item)}>取消</Button>
                                 <Tooltip title={!selectedModel ? '请先在顶部选择模型' : !editedText.trim() ? '请填写功能描述' : !descriptionChanged ? '请先修改功能描述' : ''}>
@@ -2242,10 +2242,6 @@ const WorkingPage = () => {
         }
 
         const complete = status.commitScope === 'COMPLETE';
-        if (!complete && !metadataOnly) {
-            message.warning('请先暂存全部修改文件，或使用“确认全部修改”。');
-            return;
-        }
         const partial = !metadataOnly && !complete;
         const remainingCount = status.unstagedCandidatePaths?.length || 0;
         modal.confirm({
@@ -2269,7 +2265,7 @@ const WorkingPage = () => {
                     )}
                     {!metadataOnly && (
                         <p>
-                            {`本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个修改文件未确认` : ''}。`}
+                            {`本次提交 ${stagedCount} 个已选文件${remainingCount ? `，放弃其余 ${remainingCount} 个文件的修改` : ''}。`}
                         </p>
                     )}
                 </div>
@@ -2309,7 +2305,6 @@ const WorkingPage = () => {
                 </div>
             ),
             okText: copy.confirmApply,
-            okButtonProps: {danger: true},
             cancelText: copy.decline,
             onOk: () => performConfirmAllChanges(status),
         });
@@ -2541,6 +2536,7 @@ const WorkingPage = () => {
                                                                 selectedFeatureItem={selectedFeatureItem}
                                                                 submitEnabled={submitEnabled}
                                                                 selectedModel={selectedModel}
+                                                                reviewReady={confirmEnabled}
                                                                 selectedModelLabel={modelOptions.find(option => option.value === selectedModel)?.label}
                                                                 editedText={editedText}
                                                                 setEditedText={updateEditedText}
@@ -2573,7 +2569,6 @@ const WorkingPage = () => {
                             <Card
                                 className={classNames(styles.panelCard, {
                                     [styles.graphPanelCardCompact]: graphPanelCompact,
-                                    [styles.graphPanelCardGitActions]: showGitOperationActions,
                                 })}
                                 title={
                                     <div className={styles.card_title}>
@@ -2584,65 +2579,6 @@ const WorkingPage = () => {
                                             </div>
                                         </div>
                                         <div className={styles.panelActions}>
-                                            {showGitOperationActions && (
-                                                <>
-                                                    <Tooltip title={stagedFileCount || metadataOnlyDeleteReady
-                                                        ? copy.commitChanges
-                                                        : copy.noStagedFiles}>
-                                                        <Button
-                                                            type="primary"
-                                                            size="small"
-                                                            icon={<CheckCircleOutlined/>}
-                                                            disabled={(!stagedFileCount && !metadataOnlyDeleteReady)
-                                                                || candidateDirty || savingCandidate || stagingCandidate}
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                requestFeatureCommit();
-                                                            }}
-                                                            className={styles.gitCommitButton}
-                                                            aria-label={copy.commitChanges}
-                                                        >
-                                                            确认修改 {stagedFileCount > 0 ? stagedFileCount : null}
-                                                        </Button>
-                                                    </Tooltip>
-                                                    <Tooltip title={copy.confirmAllChanges}>
-                                                        <Button
-                                                            type="primary"
-                                                            danger
-                                                            size="small"
-                                                            icon={<CheckSquareOutlined/>}
-                                                            disabled={!unstagedCandidateCount
-                                                                || !confirmEnabled
-                                                                || loadingConfirm
-                                                                || candidateDirty
-                                                                || savingCandidate
-                                                                || stagingCandidate}
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                requestConfirmAllChanges();
-                                                            }}
-                                                            className={styles.gitCommitButton}
-                                                            aria-label={copy.confirmAllChanges}
-                                                        >
-                                                            {unstagedCandidateCount || null}
-                                                        </Button>
-                                                    </Tooltip>
-                                                    <Tooltip title={copy.discardAllChanges}>
-                                                        <Button
-                                                            type="text"
-                                                            danger
-                                                            icon={<UndoOutlined/>}
-                                                            disabled={loadingConfirm}
-                                                            onClick={(event) => {
-                                                                event.stopPropagation();
-                                                                requestDiscardCurrentOperation();
-                                                            }}
-                                                            className={styles.icon}
-                                                            aria-label={copy.discardAllChanges}
-                                                        >放弃修改</Button>
-                                                    </Tooltip>
-                                                </>
-                                            )}
                                             <Tooltip
                                                 title={hasFocusGraphStages ? copy.focusGraphReady : copy.focusGraphPending}
                                             >
@@ -2665,6 +2601,34 @@ const WorkingPage = () => {
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
                                 {agentNotice && <Alert type="info" showIcon message={agentNotice} style={{borderRadius:0,fontSize:12}}/>}
+                                {showGitOperationActions && <div className={styles.reviewBar}>
+                                    <div className={styles.reviewStatus}>
+                                        <span className={styles.reviewStatusIcon}><CheckCircleOutlined/></span>
+                                        <div><strong>{gitStatus.requiresCleanup ? '工作区需要处理' : metadataOnlyDeleteReady ? '功能项变更待提交' : `已选择 ${stagedFileCount} / ${gitStatus.candidatePaths?.length || 0} 个文件`}</strong>
+                                            <small>{gitStatus.requiresCleanup ? '请先处理本次修改，再开始新任务' : metadataOnlyDeleteReady ? '本次没有源码差异' : unstagedCandidateCount ? `部分提交时，将放弃其余 ${unstagedCandidateCount} 个文件的修改` : '所有文件已选择保留，尚未提交'}</small>
+                                        </div>
+                                    </div>
+                                    <div className={styles.reviewButtons}>
+                                        <Button className={styles.discardButton} icon={<UndoOutlined/>} disabled={loadingConfirm || savingCandidate || stagingCandidate || unstagingCandidate} onClick={requestDiscardCurrentOperation}>放弃修改</Button>
+                                        {unstagedCandidateCount > 0 ? (
+                                            <Dropdown.Button type="primary" className={styles.submitReviewGroup} icon={<DownOutlined/>}
+                                                disabled={!confirmEnabled || gitStatus.requiresCleanup || candidateDirty || savingCandidate || stagingCandidate || unstagingCandidate || loadingConfirm}
+                                                loading={loadingConfirm}
+                                                onClick={requestFeatureCommit}
+                                                menu={{items:[{key:'all',label:'全部保留并提交',icon:<CarryOutOutlined/>}],onClick:requestConfirmAllChanges}}
+                                                buttonsRender={([submit, menu]) => [
+                                                    cloneElement(submit, {disabled:!stagedFileCount || !confirmEnabled || gitStatus.requiresCleanup || candidateDirty || savingCandidate || stagingCandidate || unstagingCandidate || loadingConfirm}),
+                                                    cloneElement(menu, {'aria-label':'更多提交方式'}),
+                                                ]}>
+                                                提交已选 ({stagedFileCount})
+                                            </Dropdown.Button>
+                                        ) : (
+                                            <Button type="primary" className={styles.submitReviewButton} icon={<CheckOutlined/>} loading={loadingConfirm}
+                                                disabled={!confirmEnabled || gitStatus.requiresCleanup || candidateDirty || savingCandidate || stagingCandidate || unstagingCandidate}
+                                                onClick={requestFeatureCommit}>确认提交</Button>
+                                        )}
+                                    </div>
+                                </div>}
                                 <div className={styles.featureContext}>
                                     <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
                                     <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
@@ -2696,6 +2660,7 @@ const WorkingPage = () => {
                                             onNodeClick={getCodeDiff}
                                             onBackgroundClick={handleGraphBackgroundClick}
                                             searchQuery={fileQuery}
+                                            reviewMode={confirmEnabled}
                                             viewportKey={`${diffDrawerOpen}-${diffDrawerWidth}-${sidebarCollapsed}-${graphLayoutRevision}`}
                                         />
                                     </Spin>

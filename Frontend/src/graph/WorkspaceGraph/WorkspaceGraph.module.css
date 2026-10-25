@@ -18,3 +18,11 @@
 @media(max-width:650px){.canvas :global(.react-flow__minimap){display:none;}}
 
 .viewport {position:absolute;top:0;left:0;overflow:hidden;}
+
+.stateStrip {display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:33px;padding:0 13px;background:#f5f8fc;border-bottom:1px solid #e8eef6;}
+.stateLabel {display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#8d9db1;white-space:nowrap;}
+.pendingStrip {background:#fff5e6;border-bottom-color:#f5dfb9;}.pendingStrip .stateLabel {color:#ad680e;}
+.confirmedStrip {background:#eaf7ef;border-bottom-color:#cce8d8;}.confirmedStrip .stateLabel {color:#25825a;}
+.viewing {display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#3c83df;margin-left:auto;white-space:nowrap;}
+.node.modified {border-color:#dca751;}.node.staged {border-color:#66ae88;}
+.node.selected {outline:2px solid #4b95f4;outline-offset:3px;box-shadow:0 6px 18px #3d83d112;}

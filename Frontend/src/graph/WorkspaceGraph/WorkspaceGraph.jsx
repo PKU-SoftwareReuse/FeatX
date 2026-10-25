@@ -1,6 +1,6 @@
 import {memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ReactFlow, Background, Controls, ControlButton, Handle, MarkerType, MiniMap, Panel, Position, ReactFlowProvider, useReactFlow, useNodesState, useViewport} from '@xyflow/react';
-import {AppstoreOutlined, FileTextOutlined} from '@ant-design/icons';
+import {AppstoreOutlined, FileTextOutlined, CheckCircleOutlined, ClockCircleOutlined, EyeOutlined} from '@ant-design/icons';
 import '@xyflow/react/dist/style.css';
 import styles from './WorkspaceGraph.module.css';
 import {iconForFile} from '../../utils/fileIcon';
@@ -12,13 +12,19 @@ const FileNode = memo(({data, selected}) => {
     const elements = data.elements;
     return <article className={`${styles.node} ${selected ? styles.selected : ''} ${data.state === 'Modify' ? styles.modified : ''} ${data.state === 'Staged' ? styles.staged : ''}`}>
         {data.connected && <><Handle type="target" position={Position.Left} isConnectable={false}/><Handle type="source" position={Position.Right} isConnectable={false}/></>}
+        {(data.reviewMode || selected) && <div className={`${styles.stateStrip} ${data.state === 'Staged' ? styles.confirmedStrip : data.state === 'Modify' ? styles.pendingStrip : ''}`}>
+            {data.reviewMode && <span className={styles.stateLabel} title={data.state === 'Staged' ? '已选择保留，尚未创建 Git 提交' : data.state === 'Modify' ? '尚未选择保留；部分提交时会放弃该修改' : '此文件没有待选择修改'}>
+                {data.state === 'Staged' ? <><CheckCircleOutlined/>已选择 · 待提交</> : data.state === 'Modify' ? <><ClockCircleOutlined/>待选择修改</> : '未修改'}
+            </span>}
+            {selected && <span className={styles.viewing}><EyeOutlined/>正在查看</span>}
+        </div>}
         <header><img className={styles.fileIcon} src={iconForFile(path)} alt="" draggable={false}/><div><strong title={path}>{path.slice(slash + 1)}</strong><small title={`摘要提供的相对路径：${path}`}>{slash < 0 ? '项目根目录' : path.slice(0, slash + 1)}</small></div></header>
         <div className={`${styles.elements} nowheel`} style={expanded ? {maxHeight:270, overflowY:'auto'} : undefined}>
             {(expanded ? elements : elements.slice(0, 5)).map((element, index) => <div key={`${element}-${index}`} title={element}><i/><code>{element}</code></div>)}
             {!elements.length && <span className={styles.muted}>未提供关联元素</span>}
         </div>
         {elements.length > 5 && <button className={`${styles.expand} nodrag nopan`} onClick={event => {event.stopPropagation(); setExpanded(value => !value);}}>{expanded ? '收起元素' : `展开其余 ${elements.length - 5} 个元素`}</button>}
-        <footer>{elements.length} 个关联元素 <span>点击查看源码</span></footer>
+        <footer>{elements.length} 个关联元素 <span>{data.reviewMode ? "点击审阅差异" : "点击查看源码"}</span></footer>
     </article>;
 });
 const nodeTypes = {file: FileNode};
@@ -47,7 +53,7 @@ function positions(nodes, edges) {
     }));
 }
 
-function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey}) {
+function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false}) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const host = useRef(null);
     const [frameSize, setFrameSize] = useState({width:0,height:0});
@@ -123,7 +129,7 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     };
     const clear = () => setNodes(current => current.map(n => ({...n,selected:false})));
     const query = searchQuery.trim().toLowerCase();
-    const shownNodes = nodes.map(n => ({...n, style:{opacity:!query || `${n.data.path} ${n.data.elements.join(' ')}`.toLowerCase().includes(query) ? 1 : 0.28}}));
+    const shownNodes = nodes.map(n => ({...n, data:{...n.data, reviewMode}, style:{opacity:!query || `${n.data.path} ${n.data.elements.join(' ')}`.toLowerCase().includes(query) ? 1 : 0.28}}));
     return <div ref={host} className={styles.canvas}>
         <div className={styles.viewport} style={frameSize}>
         {frameSize.width > 0 && frameSize.height > 0 && <ReactFlow proOptions={{hideAttribution:true}} nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}

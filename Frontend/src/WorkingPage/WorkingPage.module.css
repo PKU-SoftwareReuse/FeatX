@@ -905,3 +905,16 @@
 .featureEditor :global(textarea.ant-input:focus) {border-color:#81b6f5;box-shadow:0 0 0 3px #3288f310;}
 .editMeta {display:flex;justify-content:space-between;gap:10px;font-size:10px;font-weight:400;color:#93a3b8;}.editMeta > span:first-child {min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}.editMeta > span:last-child {flex-shrink:0;}
 .editFooter {border-top:1px solid #e4edf8;padding-top:11px;}.editFooter p {font-size:10px;font-weight:400;line-height:1.65;color:#8498b2;margin:0 0 10px;}.editFooter > div {display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}.editFooter :global(.ant-btn) {height:33px;padding:0 12px;font-size:11px;border-radius:7px;}.editFooter :global(.ant-btn-primary) {box-shadow:0 3px 8px #3788ed16;}
+
+.reviewBar {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 16px;background:#f8fbff;border-bottom:1px solid #e2ecf8;flex-shrink:0;}
+.reviewStatus {display:flex;align-items:center;gap:10px;min-width:0;}.reviewStatusIcon {display:grid;place-items:center;width:33px;height:33px;border-radius:9px;background:#e9f2ff;color:#4f8bda;font-size:18px;flex-shrink:0;}
+.reviewStatus strong {display:block;font-size:12px;font-weight:600;color:#3d587a;}.reviewStatus small {display:block;font-size:10px;color:#91a2b9;margin-top:3px;}
+.reviewButtons {display:flex;align-items:center;gap:9px;margin-left:auto;}.reviewButtons :global(.ant-btn) {height:35px;border-radius:8px;padding:0 12px;font-size:12px;}
+.reviewButtons .discardButton {background:#fff;border-color:#e5dce0;color:#a0787f;box-shadow:none;}.reviewButtons .discardButton:not(:disabled):hover {background:#fff7f7;border-color:#ddb5bb;color:#b35c6a;}
+.reviewButtons .submitReviewButton {box-shadow:0 3px 9px #2e80e71c;}
+.graphPanelCardCompact .card_title {padding-right:0;flex-wrap:wrap;gap:8px;padding-top:8px;padding-bottom:8px;}
+@media(max-width:600px){.reviewBar{padding:10px;}.reviewButtons{gap:6px;}.reviewButtons :global(.ant-btn){font-size:11px;padding:0 9px;}}
+
+.reviewButtons .submitReviewGroup {width:auto;}
+.reviewButtons .submitReviewGroup :global(.ant-btn:first-child) {border-radius:8px 0 0 8px;}
+.reviewButtons .submitReviewGroup :global(.ant-btn:last-child) {border-radius:0 8px 8px 0;padding:0 9px;}
