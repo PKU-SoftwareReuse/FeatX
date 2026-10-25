@@ -500,8 +500,10 @@ const WorkingPage = () => {
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
     const [loadingCode, setLoadingCode] = useState(false);
     const [models, setModels] = useState([]);
+    const [modelOptions, setModelOptions] = useState([]);
     const [selectedModel, setSelectedModel] = useState(null);
     const [loadingModels, setLoadingModels] = useState(true);
+    const [codexNotice, setCodexNotice] = useState("");
     const [currentProject, setCurrentProject] = useState(null);
     const [operationProgress, setOperationProgress] = useState(null);
     const [focusGraphStages, setFocusGraphStages] = useState([]);
@@ -510,7 +512,6 @@ const WorkingPage = () => {
     const expectedProgressOperationRef = useRef(null);
     const graphRefreshTimerRef = useRef(null);
     const eventSourceRef = useRef(null);
-    const isPythonProject = currentProject?.projectType === "PYTHON";
 
     const clearPostAgentTimers = () => {
         if (eventSourceRef.current) {
@@ -533,12 +534,14 @@ const WorkingPage = () => {
 
         API.getLlmModels()
             .then((catalog) => {
+                if (active) setCodexNotice(catalog.message || "");
                 if (!active) return;
                 const availableModels = Array.isArray(catalog.models) ? catalog.models : [];
                 const sortedModels = [...availableModels].sort(
                     new Intl.Collator('zh-CN', {numeric: true, sensitivity: 'base'}).compare
                 );
                 setModels(sortedModels);
+                setModelOptions(catalog.modelOptions || sortedModels.map(model => ({value:model,label:model === 'default' ? 'Codex 默认模型' : model})));
                 setSelectedModel(
                     sortedModels.includes(catalog.defaultModel)
                         ? catalog.defaultModel
@@ -549,6 +552,8 @@ const WorkingPage = () => {
                 if (!active) return;
                 console.error("Error fetching LLM models:", error);
                 setModels([]);
+                setModelOptions([]);
+                setCodexNotice(error.message || '无法读取 Codex 配置');
                 setSelectedModel(null);
             })
             .finally(() => {
@@ -577,10 +582,14 @@ const WorkingPage = () => {
             const res = await getFeatureData()
             if (!active) return
             const repositoryId = project?.repositoryId ?? project?.repoId
-            const restoredRunId = await resolveActiveRunIdForRepository(
+            let restoredRunId = await resolveActiveRunIdForRepository(
                 repositoryId,
                 API.getAgentRun
             )
+            if (!restoredRunId && project?.agentRunId) {
+                const latest = await API.getAgentRun(project.agentRunId).catch(() => null);
+                if (['PREPARED', 'RUNNING', 'COMPLETED'].includes(latest?.status)) restoredRunId = latest.runId;
+            }
             if (!active) return
             setActiveRunId(restoredRunId)
             setActiveRunStorageReady(repositoryId != null)
@@ -724,7 +733,7 @@ const WorkingPage = () => {
     const [viewportWidth, setViewportWidth] = useState(() => (
         typeof window === "undefined" ? 1440 : window.innerWidth
     ));
-    const [featurePanelSize, setFeaturePanelSize] = useState(300);
+    const [featurePanelSize, setFeaturePanelSize] = useState(480);
     const [graphLayoutRevision, setGraphLayoutRevision] = useState(0);
     const panelResizeFrame = useRef(null);
     const pendingPanelWidth = useRef(null);
@@ -1271,16 +1280,11 @@ const WorkingPage = () => {
     }
 
     const handleDelete = (item) => {
-        if (selectedType === "delete" && selectedFeatureItem?.featureId === item.featureId) {
-            return;
-        }
-        if (hasPendingFeatureOperation()) {
-            confirmDiscardAndRun(() => {
-                goDelete(item)
-            });
-        } else {
-            goDelete(item)
-        }
+        modal.confirm({title:'删除功能项', content:'将调用 Codex 生成删除此功能所需的代码修改；审阅并确认后才会应用。',
+            okText:'生成删除修改', cancelText:'取消', onOk:() => {
+                if (hasPendingFeatureOperation()) confirmDiscardAndRun(() => goDelete(item));
+                else goDelete(item);
+            }});
     }
 
     const goDelete = (item) => {
@@ -1539,7 +1543,7 @@ const WorkingPage = () => {
         setMetadataOnlyEligible(false)
         setChatMode(true)
         setModeTrans(true)
-        const progressOperation = `${isPythonProject ? "python" : "java"}-${
+        const progressOperation = `feature-${
             operationType === 'add' ? "add" : operationType === 'delete' ? "delete" : "modify"
         }`
         setOperationProgress({
@@ -1547,8 +1551,8 @@ const WorkingPage = () => {
             stage: "agent-stream",
             messageKey: "progress.operation.agent-stream",
             messageArgs: {restoring},
-            currentStep: 8,
-            totalSteps: 8,
+            currentStep: null,
+            totalSteps: null,
             running: true,
             failed: false
         })
@@ -1582,8 +1586,8 @@ const WorkingPage = () => {
                 stage: "generation-complete",
                 messageKey: "progress.operation.generation-complete",
                 messageArgs: {},
-                currentStep: 8,
-                totalSteps: 8,
+                currentStep: null,
+                totalSteps: null,
                 running: false,
                 failed: false
             })
@@ -1639,7 +1643,7 @@ const WorkingPage = () => {
             API.getAgentRun(runId)
                 .then((snapshot) => {
                     checkingConnection = false
-                    if (snapshot?.status === 'FAILED') {
+                    if (['FAILED', 'DISCARDED'].includes(snapshot?.status)) {
                         finishFailure(null, snapshot.failureMessage || copy.codeGenerationFailed)
                     }
                     // PREPARED/RUNNING/COMPLETED runs remain recoverable. EventSource
@@ -1668,6 +1672,10 @@ const WorkingPage = () => {
 
         API.getAgentRun(activeRunId)
             .then(async (snapshot) => {
+                if (['COMMITTED', 'DISCARDED'].includes(snapshot.status)) {
+                    setActiveRunId(null); setLoadingFeatureList(false); setSubmitEnabled(true);
+                    restoreSelectedFeature(featureData, null); return;
+                }
                 const operationType = snapshot.mode?.endsWith('-delete')
                     ? 'delete'
                     : snapshot.mode?.endsWith('-add') ? 'add' : 'edit'
@@ -1872,7 +1880,8 @@ const WorkingPage = () => {
     }
 
     const isFeatureModifyProgress = () => {
-        return operationProgress?.operation === "python-modify"
+        return operationProgress?.operation?.startsWith("feature-")
+            || operationProgress?.operation === "python-modify"
             || operationProgress?.operation === "python-add"
             || operationProgress?.operation === "python-delete"
             || operationProgress?.operation === "java-modify"
@@ -1891,12 +1900,12 @@ const WorkingPage = () => {
                 <div className={styles.featureListProgressMessage}>
                     {localizeOperationProgressMessage(operationProgress)}
                 </div>
-                <Progress
+                {operationProgress?.totalSteps > 0 && <Progress
                     percent={progressPercent()}
                     size="small"
                     status={operationProgress?.failed ? "exception" : "active"}
                     showInfo
-                />
+                />}
             </div>
         );
     }
@@ -1969,14 +1978,14 @@ const WorkingPage = () => {
         setSubmitEnabled(false)
         setConfirmEnabled(false)
         clearFocusGraphStages()
-        const expectedOperation = `${isPythonProject ? "python" : "java"}-delete`;
+        const expectedOperation = `feature-delete`;
         setOperationProgress({
             operation: expectedOperation,
             stage: "submit",
             messageKey: "progress.operation.submit",
             messageArgs: {},
-            currentStep: 0,
-            totalSteps: 8,
+            currentStep: null,
+            totalSteps: null,
             running: true,
             failed: false
         })
@@ -1984,7 +1993,7 @@ const WorkingPage = () => {
         API.deleteFeature({
             featureId: item.featureId,
             featureDescription: item.featureDescription,
-
+            model: selectedModel,
         })
             .then(async (result) => {
                 const runId = result?.runId
@@ -2008,7 +2017,7 @@ const WorkingPage = () => {
                     messageKey: "progress.operation.failed",
                     messageArgs: {},
                     currentStep: operationProgress?.currentStep || 0,
-                    totalSteps: operationProgress?.totalSteps || 8,
+                    totalSteps: null,
                     running: false,
                     failed: true,
                 })
@@ -2022,7 +2031,7 @@ const WorkingPage = () => {
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         clearFocusGraphStages()
-        const expectedOperation = `${isPythonProject ? "python" : "java"}-${
+        const expectedOperation = `feature-${
             operation === 'add' ? "add" : "modify"
         }`;
         setOperationProgress({
@@ -2030,8 +2039,8 @@ const WorkingPage = () => {
             stage: "submit",
             messageKey: "progress.operation.submit",
             messageArgs: {},
-            currentStep: 0,
-            totalSteps: 8,
+            currentStep: null,
+            totalSteps: null,
             running: true,
             failed: false
         })
@@ -2039,7 +2048,7 @@ const WorkingPage = () => {
 
         if (operation == 'edit') {
             // console.log(editedText);
-            API.modifyFeature(description, selectedModel)
+            API.modifyFeature(description, selectedModel, item.featureId)
                 .then(async (data) => {
                     const runId = data?.runId
                     restoredRunRef.current = runId
@@ -2059,7 +2068,7 @@ const WorkingPage = () => {
                         messageKey: "progress.operation.failed",
                         messageArgs: {},
                         currentStep: operationProgress?.currentStep || 0,
-                        totalSteps: operationProgress?.totalSteps || 8,
+                        totalSteps: null,
                         running: false,
                         failed: true,
                     })
@@ -2096,7 +2105,7 @@ const WorkingPage = () => {
                         messageKey: "progress.operation.failed",
                         messageArgs: {},
                         currentStep: operationProgress?.currentStep || 0,
-                        totalSteps: operationProgress?.totalSteps || 8,
+                        totalSteps: null,
                         running: false,
                         failed: true,
                     })
@@ -2198,8 +2207,7 @@ const WorkingPage = () => {
         }
         const status = await refreshGitStatus();
         const stagedCount = status.stagedPaths?.length || 0;
-        const metadataOnly = selectedType === 'delete'
-            && confirmEnabled
+        const metadataOnly = confirmEnabled
             && metadataOnlyEligible
             && !stagedCount
             && !(status.candidatePaths?.length || 0)
@@ -2210,6 +2218,10 @@ const WorkingPage = () => {
         }
 
         const complete = status.commitScope === 'COMPLETE';
+        if (!complete && !metadataOnly) {
+            message.warning('请先确认全部候选文件，或使用“确认全部修改”。');
+            return;
+        }
         const partial = !metadataOnly && !complete;
         const remainingCount = status.unstagedCandidatePaths?.length || 0;
         modal.confirm({
@@ -2288,7 +2300,6 @@ const WorkingPage = () => {
         activeRunId
         && confirmEnabled
         && metadataOnlyEligible
-        && selectedType === 'delete'
         && !stagedFileCount
         && !(gitStatus.candidatePaths?.length || 0)
         && !(gitStatus.pendingCandidatePaths?.length || 0)
@@ -2333,7 +2344,7 @@ const WorkingPage = () => {
     const splitterLayoutCondensed = featurePanelCondensed && diffDrawerLayoutSettled;
     const featurePanelDrawerSize = Math.round(Math.max(
         FEATURE_PANEL_MINIMAL_WIDTH,
-        Math.min(280, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
+        Math.min(420, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
     ));
     const openAddFeature = (epicId = null) => {
         const open = () => {setAddEpic(epicId || activeKey || featureData[0]?.moduleId || null); setAddDescription(''); setAddOpen(true);};
@@ -2383,7 +2394,7 @@ const WorkingPage = () => {
                                         aria-label={copy.model}
                                         className={styles.modelSelect}
                                         value={selectedModel}
-                                        options={models.map((model) => ({value: model, label: model}))}
+                                        options={modelOptions}
                                         onChange={setSelectedModel}
                                         loading={loadingModels}
                                         disabled={loadingModels || models.length === 0 || loadingFeatureList || operationProgress?.running}
@@ -2626,6 +2637,7 @@ const WorkingPage = () => {
                                 bordered={false}
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
+                                {codexNotice && <Alert type="info" showIcon message={codexNotice} style={{borderRadius:0,fontSize:12}}/>}
                                 <div className={styles.featureContext}>
                                     <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
                                     <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
@@ -2818,7 +2830,7 @@ const WorkingPage = () => {
                 <div className={styles.addFeatureForm}>
                     <label>所属 Epic</label><Select aria-label="所属 Epic" value={addEpic} onChange={setAddEpic} options={featureData.map(epic => ({value:epic.moduleId,label:getModuleDescription(epic)}))}/>
                     <label>功能描述</label><TextArea aria-label="功能描述" value={addDescription} onChange={event => setAddDescription(event.target.value)} autoSize={{minRows:4,maxRows:8}} placeholder="描述希望新增的功能及预期行为"/>
-                    <small>使用模型：{selectedModel || '暂无可用模型'}。{API.capabilities?.agent === false ? '智能体服务尚未接入，暂不能执行修改。' : '提交后将自动调用智能体。'}</small>
+                    <small>使用模型：{modelOptions.find(option => option.value === selectedModel)?.label || '暂无可用模型'}。{API.capabilities?.agent === false ? '智能体服务尚未接入，暂不能执行修改。' : '提交后将自动调用智能体。'}</small>
                 </div>
             </Modal>
             <FocusGraphStageModal

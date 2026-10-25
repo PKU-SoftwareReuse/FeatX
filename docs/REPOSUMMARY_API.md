@@ -167,7 +167,7 @@ RepoSummary 必须实际使用约定的提示；不支持的参数不能默默�
 - overallPercent：整个任务的百分比，只使用同门提供的值；无法可靠量化时为 null，
   不把不同阶段视作等权重而自行计算。
 - elapsedMs：同门提供的任务已用毫秒数；尚无法提供时可为 null。
-- error：正常时 null，任务失败时返回原因。
+- error：正常时 null，任务失败时返回原因字符串，或 `{ "code": "SUMMARY_FAILED", "message": "失败原因" }` 对象；主系统统一转换为可展示的错误文字。
 
 任务刚接收、阶段计划尚未确定时，可返回 totalStages:null、currentStageIndex:null、stages:[]。
 阶段计划一旦确定，应提供完整列表；若确实需要调整，必须同步返回一致的数量、列表和当前位置。

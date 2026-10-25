@@ -79,6 +79,7 @@ def delete_project(project_id: str, request: Request):
     store = request.app.state.store
     with store.lock:
         from .analyses import refresh_task
+        request.app.state.agent.assert_idle(project_id)
         project = store.read(project_id)
         task = refresh_task(request.app, project)
         if task and task['status'] in ('queued', 'running'):

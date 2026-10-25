@@ -29,6 +29,8 @@ def refresh_task(app, project):
 def start_summary(app, project_id, hints=None):
     store = app.state.store
     with store.lock:
+        if hasattr(app.state, 'agent'):
+            app.state.agent.assert_idle(project_id)
         project = store.read(project_id)
         task = refresh_task(app, project)
         if task and task['status'] in ('queued', 'running'):

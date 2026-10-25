@@ -1,0 +1,11 @@
+# 实际配置位于 data/codex-home/config.toml。
+# 取消下面一行注释并填写你有权限使用的模型；不指定时由 Codex 决定。
+# model = "模型ID"
+model_reasoning_effort = "medium"
+
+# 按要求使用全权限、无交互审批；命令可能访问候选工作区以外的文件。
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+
+# 服务商、base_url、认证及其他设置使用 Codex 原生配置，不使用 FeatX 自定义字段。
+# 工作台直接读取 Codex 原生模型列表，无需为了切换模型创建额外配置文件。

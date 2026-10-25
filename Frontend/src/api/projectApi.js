@@ -16,7 +16,7 @@ export function normalizeGitUrl(value) {
     return url;
 }
 const projectApi = {
-    capabilities: {edits: false, agent: false, diff: false, git: false, upload: true},
+    capabilities: {edits: true, agent: true, diff: true, git: true, upload: true},
     notifyUnavailable,
     getSelectedRepositoryId,
     testConnect: () => http.get('/health'),

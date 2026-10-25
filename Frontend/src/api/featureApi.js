@@ -16,8 +16,8 @@ export async function loadResult() {
 const edit = body => http.post(`${projectPath()}/edits`, body).then(response => response.data);
 const featureApi = {
     getFeatures: async () => featureView(await loadResult()),
-    deleteFeature: body => edit({operation: 'delete', ...body}),
-    modifyFeature: (description, model) => edit({operation: 'modify', description, model}),
-    addFeature: body => edit({operation: 'add', ...body}),
+    deleteFeature: body => edit({operation: 'delete', featureId: body.featureId, description: body.featureDescription, model: body.model}),
+    modifyFeature: (description, model, featureId) => edit({operation: 'modify', description, model, featureId}),
+    addFeature: body => edit({operation: 'add', epicId: body.moduleId, description: body.featureDescription, model: body.model}),
 };
 export default featureApi;

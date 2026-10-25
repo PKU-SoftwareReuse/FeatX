@@ -1,10 +1,9 @@
 import {useEffect, useRef, useState} from 'react';
 import {Button, Tooltip} from 'antd';
 import {SearchOutlined, AlignLeftOutlined, LockOutlined} from '@ant-design/icons';
-import {Editor, loader} from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
+import {Editor} from '@monaco-editor/react';
+import '../editor/monaco';
 import styles from './SourcePreview.module.css';
-loader.config({monaco});
 
 function registerTheme(instance) {
     instance.editor.defineTheme('featx-source', {

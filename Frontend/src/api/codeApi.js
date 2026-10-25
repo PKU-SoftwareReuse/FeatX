@@ -1,11 +1,11 @@
-import {http, projectPath, unavailable} from './client';
-const diff = () => http.get(`${projectPath()}/diff`).then(response => response.data);
+import {http, projectPath} from './client';
+const diff = (path, _mode, runId) => http.get(`${projectPath()}/diff`, {params:{path, runId}}).then(response => response.data);
 const codeApi = {
     getSourceFile: path => http.get(`${projectPath()}/files/content`, {params: {path}}).then(response => response.data),
-    getDeleteDiffByClass: diff,
-    getContextByClass: () => unavailable('源码内容查看'),
+    getDeleteDiffByClass: (path, mode, runId) => diff(path, mode, runId).then(result => result.diff),
+    getContextByClass: path => http.get(`${projectPath()}/files/content`, {params:{path}}).then(response => response.data.content),
     getCandidateDiff: diff,
     getManualCandidate: diff,
-    updateCandidateDiff: () => unavailable('代码编辑'),
+    updateCandidateDiff: (path, _mode, content, runId) => http.put(`${projectPath()}/diff`, {path, content, runId}).then(response => response.data),
 };
 export default codeApi;

@@ -478,7 +478,7 @@ const WelcomePage = () => {
                                     <div className={styles.cardFooter}>
                                         <span className={styles.createdAt}>{project.createdAt ? new Date(project.createdAt).toLocaleDateString("zh-CN") : ""}</span>
                                         <div className={styles.buttonContainer}>
-                                            {(!project.summaryFlag || pending || failed) && <Popover title={copy.summaryProgressTitle} content={renderSummaryProgress(project)} trigger="click"><Button type="text" size="small">进度详情</Button></Popover>}
+                                            {(!project.summaryFlag || pending || failed) && <Popover title={copy.summaryProgressTitle} content={renderSummaryProgress(project)} trigger="click"><Button type="text">进度详情</Button></Popover>}
                                             <Tooltip title={!project.summaryFlag ? summaryTooltip(project) : ""}><Button type="primary" disabled={!project.summaryFlag || loadingAnalyse} onClick={() => handleConfirmButton(project.id)}>打开项目 <ArrowRightOutlined/></Button></Tooltip>
                                         </div>
                                     </div>

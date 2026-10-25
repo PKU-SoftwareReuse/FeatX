@@ -12,10 +12,9 @@ jest.mock("@monaco-editor/react", () => ({
     loader: {config: jest.fn()},
 }));
 
-jest.mock("monaco-editor", () => ({
-    KeyCode: {KeyS: 49},
-    KeyMod: {CtrlCmd: 2048},
-}), {virtual: true});
+jest.mock("../../editor/monaco", () => ({
+    monaco: {KeyCode: {KeyS: 49}, KeyMod: {CtrlCmd: 2048}},
+}));
 
 const file = {
     language: "java",

@@ -1,9 +1,9 @@
 import {loadResult} from './featureApi';
 import {graphView} from './viewModels';
-import {unavailable} from './client';
+import {http, projectPath} from './client';
 const graphApi = {
     getInitialGraphData: async featureId => graphView(await loadResult(), featureId),
-    getMinGraphData: () => unavailable('删除结果图'),
-    getCandidateGraphData: () => unavailable('候选修改图'),
+    getMinGraphData: async featureId => graphView(await loadResult(), featureId),
+    getCandidateGraphData: runId => http.get(`${projectPath()}/agent/runs/${encodeURIComponent(runId)}/graph`).then(response => response.data),
 };
 export default graphApi;

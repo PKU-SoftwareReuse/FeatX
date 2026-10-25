@@ -1,9 +1,10 @@
-import {unavailable, unavailableError} from './client';
+import {http, projectPath, BASE_URL} from './client';
 const agentApi = {
-    getLlmModels: () => unavailable('Agent 模型选择'),
-    getLlmResponse: () => {throw unavailableError('Agent');},
-    getAgentRun: () => unavailable('Agent'),
-    getLlmProgress: () => unavailable('Agent'),
-    getFocusGraphStages: () => unavailable('推理图阶段'),
+    getLlmModels: () => http.get('/agent/models').then(response => response.data),
+    getLlmResponse: runId => new EventSource(`${BASE_URL}${projectPath()}/agent/runs/${encodeURIComponent(runId)}/events`),
+    getAgentRun: runId => http.get(`${projectPath()}/agent/runs/${encodeURIComponent(runId)}`).then(response => response.data),
+    getLlmProgress: () => http.get(`${projectPath()}/agent/progress`).then(response => response.data),
+    // Codex supplies execution events, not the legacy multi-stage reasoning graphs.
+    getFocusGraphStages: () => Promise.resolve([]),
 };
 export default agentApi;

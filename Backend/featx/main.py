@@ -6,6 +6,7 @@ from . import projects, analyses, graphs, operations, uploads, files
 from .errors import AppError
 from .reposummary import RepoSummaryClient
 from .store import Store
+from .agent import AgentManager
 from .shared import SharedProjects
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,7 +16,15 @@ def create_app(data_dir=None, reposummary_url=None, shared_dir=None):
     app = FastAPI(title='FeatX API', version='1.0.0', description='项目管理、功能摘要和文件存储接口。')
     app.state.store = Store(data_dir or os.getenv('FEATX_DATA_DIR', str(ROOT / 'data')))
     app.state.shared = SharedProjects(shared_dir)
-    app.state.reposummary = RepoSummaryClient(reposummary_url or os.getenv('REPOSUMMARY_HTTP_URL', 'http://127.0.0.1:18091'))
+    summary_url = (reposummary_url if reposummary_url is not None
+                   else os.getenv('REPOSUMMARY_HTTP_URL', '')).strip()
+    app.state.reposummary = RepoSummaryClient(summary_url or 'http://127.0.0.1:18091')
+
+    app.state.agent = AgentManager(app)
+
+    @app.on_event('shutdown')
+    def stop_agent():
+        app.state.agent.shutdown()
 
     @app.exception_handler(AppError)
     async def handle_error(_request: Request, exc: AppError):

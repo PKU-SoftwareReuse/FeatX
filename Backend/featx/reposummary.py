@@ -38,6 +38,15 @@ class RepoSummaryClient:
 
     def parse_task(self, data, project_id=None, run_id=None):
         try:
+            # Providers may return either a plain error message or {code, message}.
+            # Normalize at the HTTP boundary; task identity/status validation remains strict.
+            error = data.get('error')
+            if isinstance(error, dict) and isinstance(error.get('message'), str):
+                code = error.get('code')
+                message = error['message']
+                if isinstance(code, str) and code:
+                    message = f'{code}: {message}'
+                data = {**data, 'error': message}
             task = Task.model_validate(data).model_dump(mode='json')
             if (project_id and task['projectId'] != project_id) or (run_id and task['runId'] != run_id):
                 raise ValueError('task identity mismatch')

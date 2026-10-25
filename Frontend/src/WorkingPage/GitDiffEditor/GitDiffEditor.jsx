@@ -1,10 +1,9 @@
 import React, {useEffect, useRef} from "react";
-import {DiffEditor, loader} from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
+import {DiffEditor} from "@monaco-editor/react";
+import {monaco} from "../../editor/monaco";
 
 import styles from "./GitDiffEditor.module.css";
 
-loader.config({monaco});
 
 const GitDiffEditor = ({file, value, onChange, onSave, readOnly = false}) => {
     const changeSubscriptionRef = useRef(null);
