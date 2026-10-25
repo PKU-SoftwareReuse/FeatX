@@ -4,7 +4,7 @@ import base64
 import json
 from typing import Literal
 
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Header, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,6 +65,8 @@ def events(project_id: str, run_id: str, request: Request, last_event_id: str | 
             batch, status = await asyncio.to_thread(agent.events, run_id, project_id, cursor)
             for event in batch:
                 cursor = event['id']
+                if event['event'] == 'delta':
+                    continue  # Legacy verbose output is available only via the log endpoint.
                 text = base64.b64encode(event['text'].encode()).decode()
                 yield f"id: {cursor}\nevent: {event['event']}\ndata: {text}\n\n"
             if status in {'COMPLETED', 'FAILED', 'COMMITTED', 'DISCARDED'}:
@@ -75,6 +77,17 @@ def events(project_id: str, run_id: str, request: Request, last_event_id: str | 
             await asyncio.sleep(0.4)
     return StreamingResponse(stream(), media_type='text/event-stream',
                              headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
+
+
+@router.get('/projects/{project_id}/agent/runs/{run_id}/activities')
+def activities(project_id: str, run_id: str, request: Request):
+    return request.app.state.agent.activity_history(project_id, run_id)
+
+
+@router.get('/projects/{project_id}/agent/runs/{run_id}/logs')
+def logs(project_id: str, run_id: str, request: Request, cursor: int = Query(default=0, ge=0)):
+    with request.app.state.agent.lock:
+        return request.app.state.agent.detail_page(project_id, run_id, cursor)
 
 
 @router.get('/projects/{project_id}/agent/progress')

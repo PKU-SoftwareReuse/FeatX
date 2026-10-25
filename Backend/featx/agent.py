@@ -1,6 +1,7 @@
 """Run the agent in the project worktree; review, commit or revert with Git."""
 from __future__ import annotations
 
+import codecs
 import difflib
 import hashlib
 import json
@@ -17,6 +18,7 @@ from uuid import uuid4
 
 from .errors import AppError
 from .codex_catalog import list_models
+from .agent_activity import project_event
 from .models import Feature, ProjectSummary
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -241,6 +243,79 @@ class AgentManager:
                 stream.write(json.dumps({'id': run['eventCount'], 'event': event, 'text': text}, ensure_ascii=False) + '\n')
             self.save(run)
 
+    def append_detail(self, run_id, text):
+        if text:
+            with self.lock:
+                with (self.directory(run_id) / 'details.log').open('a', encoding='utf-8') as stream:
+                    stream.write(self.redact(text))
+
+    def activity_history(self, project_id, run_id):
+        run = self.read(run_id, project_id)
+        directory = self.directory(run_id)
+        records = {}
+        if run.get('activityVersion'):
+            path = directory / 'events.jsonl'
+            if path.exists():
+                with path.open(encoding='utf-8') as stream:
+                    for line in stream:
+                        try:
+                            event = json.loads(line)
+                            if event.get('event') == 'activity':
+                                item = json.loads(event['text'])
+                                records[item['id']] = item
+                        except (ValueError, KeyError):
+                            continue
+        else:
+            # Reconstruct historical activities from native events, not model prose.
+            # Original per-operation timestamps are unavailable: do not invent durations.
+            path = directory / 'stdout.jsonl'
+            starts = {}
+            if path.exists():
+                with path.open(encoding='utf-8', errors='replace') as stream:
+                    for line in stream:
+                        try:
+                            item, _ = project_event(json.loads(line), starts)
+                            if item:
+                                item.update(startedAt=None, updatedAt=None, elapsedMs=None)
+                                records[item['id']] = item
+                        except (ValueError, KeyError, TypeError):
+                            continue
+        return {'items': list(records.values())}
+
+    def detail_page(self, project_id, run_id, cursor=0):
+        run = self.read(run_id, project_id)
+        directory = self.directory(run_id)
+        path = directory / 'details.log'
+        if not path.exists():
+            # Historical runs retain readable Markdown in events.jsonl.
+            # Convert lazily once; do not touch their result/worktree or re-run anything.
+            history = directory / 'events.jsonl'
+            with self.lock:
+                if not path.exists():
+                    with path.open('w', encoding='utf-8') as target:
+                        if history.exists():
+                            with history.open(encoding='utf-8') as source:
+                                for line in source:
+                                    try:
+                                        event = json.loads(line)
+                                        if event.get('event') != 'activity':
+                                            target.write(self.redact(event.get('text', '')))
+                                    except ValueError:
+                                        continue
+        limit = 48 * 1024
+        with path.open('rb') as stream:
+            size = stream.seek(0, os.SEEK_END)
+            if cursor < 0 or cursor > size:
+                raise AppError(400, 'INVALID_CURSOR', '日志位置已失效，请重新打开日志')
+            stream.seek(cursor)
+            raw = stream.read(limit)
+            decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+            text = decoder.decode(raw, final=cursor + len(raw) >= size)
+            remaining, _ = decoder.getstate()
+            next_cursor = cursor + len(raw) - len(remaining)
+        return {'cursor': cursor, 'nextCursor': next_cursor, 'hasMore': next_cursor < size,
+                'running': run['status'] in ('PREPARED', 'RUNNING'), 'text': text}
+
     def events(self, run_id, project_id, after=0):
         with self.lock:
             run = self.read(run_id, project_id)
@@ -286,7 +361,7 @@ class AgentManager:
                    'request': body.description.strip() or (feature or {}).get('description', ''),
                    'model': model, 'modelLabel': selection['label'], 'codexProfile': selection['profile'],
                    'modelOverride': selection.get('model') if selection.get('overrideModel') else None,
-                   'configuredModel': selection['model'], 'executionMode': 'direct', 'requiresCleanup': False,
+                   'configuredModel': selection['model'], 'executionMode': 'direct', 'activityVersion': 1, 'requiresCleanup': False,
                    'initialUntracked': [name for name in git(source, 'ls-files', '--others', '-z').decode().split('\0') if name],
                    'status': 'PREPARED', 'createdAt': now(), 'eventCount': 0,
                    'baseCommit': git(source, 'rev-parse', 'HEAD').decode().strip(),
@@ -393,6 +468,7 @@ class AgentManager:
                 self.processes[run_id] = process
                 latest['executorPid'] = process.pid
                 self.save(latest)
+            self.append_detail(run_id, '智能体开始执行\n模型：' + run.get('modelLabel', '') + '\n')
             self.emit(run_id, 'status', '### 智能体执行中\n\n模型：' + run.get('modelLabel', '智能体默认模型') + '\n\n')
             timeout = RUN_TIMEOUT_SECONDS
             def timeout_run():
@@ -404,35 +480,32 @@ class AgentManager:
             process.stdin.close()
             turn_complete = False
             failure = None
+            activities = {}
             with (directory / 'stdout.jsonl').open('wb') as raw:
                 for line in process.stdout:
                     raw.write(line)
                     try:
                         event = json.loads(line)
                     except (ValueError, UnicodeDecodeError):
+                        self.append_detail(run_id, line.decode('utf-8', errors='replace'))
                         continue
+                    activity, detail = project_event(event, activities)
+                    self.append_detail(run_id, detail)
+                    if activity:
+                        self.emit(run_id, 'activity', json.dumps(activity, ensure_ascii=False))
                     kind = event.get('type')
-                    item = event.get('item', {})
                     if kind == 'turn.completed':
                         turn_complete = True
                         failure = None
                     elif kind in {'turn.failed', 'error'}:
                         detail = event.get('error') or event.get('message') or '智能体执行失败'
                         failure = detail.get('message', str(detail)) if isinstance(detail, dict) else str(detail)
-                    elif kind == 'item.started' and item.get('type') == 'command_execution':
-                        self.emit(run_id, 'delta', '\n**执行命令**\n```sh\n' + item.get('command', '')[:4000] + '\n```\n')
-                    elif kind == 'item.completed':
-                        if item.get('type') == 'agent_message':
-                            text = item.get('text', '')
-                            self.emit(run_id, 'delta', '\n' + text + '\n\n')
-                        elif item.get('type') == 'command_execution':
-                            output = item.get('aggregated_output', '')
-                            if output:
-                                self.emit(run_id, 'delta', '\n```text\n' + output[-6000:] + '\n```\n')
-                        elif item.get('type') == 'file_change':
-                            changes = item.get('changes', [])
-                            self.emit(run_id, 'delta', '\n**文件修改**\n' + '\n'.join('- ' + str(c.get('path', '')) for c in changes) + '\n\n')
             code = process.wait()
+            diagnostic = directory / 'stderr.log'
+            if diagnostic.exists():
+                with diagnostic.open(encoding='utf-8', errors='replace') as stream:
+                    for line in stream:
+                        self.append_detail(run_id, line)
             with self.lock:
                 if self.read(run_id)['status'] == 'DISCARDED':
                     return
@@ -474,6 +547,7 @@ class AgentManager:
                     run.update(status='FAILED', failureMessage=detail + ' ' + note, finishedAt=now(), requiresCleanup=cleanup,
                                changedPaths=[], stagedPaths=[])
                     self.save(run)
+                    self.append_detail(run_id, '\n执行失败：' + detail + '\n' + note + '\n')
                     self.emit(run_id, 'failed', '\n执行失败：' + detail + '\n\n' + note + '\n')
 
         finally:

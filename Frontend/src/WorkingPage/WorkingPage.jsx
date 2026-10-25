@@ -21,7 +21,7 @@ import {iconForFile} from "../utils/fileIcon";
 import {EpicIcon, FeatureIcon, FeatureCatalogIcon, GraphViewIcon, AgentViewIcon} from "../components/FeatureIcons";
 import FeatureGraph from "../graph/WorkspaceGraph/WorkspaceGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
-import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
+import AgentOutputPanel from "./AgentOutputPanel/AgentOutputPanel";
 import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
 import {getDisplayField} from "../utils/text";
 import {localizeOperationProgressMessage} from "../utils/progressText";
@@ -1544,25 +1544,37 @@ const WorkingPage = () => {
     };
 
     const [chatMode, setChatMode] = useState(false)
-    const [chatContent, setChatContent] = useState("")
+    const [agentViewRunId, setAgentViewRunId] = useState(null);
+    const [agentActivities, setAgentActivities] = useState([]);
+    const [agentSnapshot, setAgentSnapshot] = useState(null);
+    const [agentConnectionError, setAgentConnectionError] = useState('');
+    const agentViewRunRef = useRef(null);
     const containerRef = useRef(null);
+    const agentSnapshotRequest = useRef(0);
+    const loadAgentSnapshot = (runId) => {
+        const request = ++agentSnapshotRequest.current;
+        return API.getAgentRun(runId).then(snapshot => {
+            if (agentViewRunRef.current === runId && request === agentSnapshotRequest.current) {
+                setAgentSnapshot(snapshot); setAgentConnectionError('');
+                if (!snapshot.activityVersion) API.getAgentActivities(runId).then(history => {
+                    if (agentViewRunRef.current === runId) setAgentActivities(current => current.length ? current : history.items || []);
+                }).catch(() => {});
+            }
+            return snapshot;
+        }).catch(error => {
+            if (agentViewRunRef.current === runId && request === agentSnapshotRequest.current) setAgentConnectionError(error.message || '无法读取任务状态');
+        });
+    };
     const [, setModeTrans] = useState(false)
-
-    useEffect(() => {
-        if (containerRef.current) {
-            requestAnimationFrame(() => {
-                containerRef.current.scrollTop = containerRef.current.scrollHeight;
-            });
-        }
-    }, [chatContent]);
-
 
     const handleChat = (eventSource, runId, operationType = selectedType, restoring = false) => {
         clearPostAgentTimers()
         eventSourceRef.current = eventSource
         let settled = false
         let checkingConnection = false
-        setChatContent("");
+        agentViewRunRef.current = runId;
+        setAgentViewRunId(runId); setAgentActivities([]); setAgentSnapshot(null); setAgentConnectionError('');
+        loadAgentSnapshot(runId);
         setMetadataOnlyEligible(false)
         setChatMode(true)
         setModeTrans(true)
@@ -1591,12 +1603,22 @@ const WorkingPage = () => {
         }
         const appendEvent = (event) => {
             const decoded = decodeEvent(event)
-            setChatContent(prev => prev + decoded);
+            setAgentConnectionError('');
             return decoded
         }
-        const resetReplay = () => {
-            setChatContent("")
-        }
+        const resetReplay = () => {setAgentActivities([]);};
+        const recordActivity = event => {
+            try {
+                const item = JSON.parse(decodeEvent(event));
+                if (!item.id || !item.title) return;
+                setAgentConnectionError('');
+                setAgentActivities(current => {
+                    const index = current.findIndex(previous => previous.id === item.id);
+                    if (index < 0) return [...current, item];
+                    const next = [...current]; next[index] = item; return next;
+                });
+            } catch (_) { /* Raw logs remain available if an activity record is malformed. */ }
+        };
         const finishSuccess = (event) => {
             if (settled) return
             settled = true
@@ -1616,7 +1638,8 @@ const WorkingPage = () => {
             })
             setLoadingFeatureList(false)
             setConfirmEnabled(true)
-            API.getAgentRun(runId)
+            setAgentSnapshot(current => ({...current,status:'COMPLETED'}));
+            loadAgentSnapshot(runId)
                 .then((snapshot) => setMetadataOnlyEligible(Boolean(snapshot?.metadataOnlyEligible)))
                 .catch(() => setMetadataOnlyEligible(false))
             setRequestDraftDirty(false)
@@ -1632,6 +1655,7 @@ const WorkingPage = () => {
             if (settled) return
             settled = true
             const detail = event ? appendEvent(event) : fallbackDetail
+            setAgentSnapshot(current => ({...current,status:current?.status === 'DISCARDED' ? 'DISCARDED' : 'FAILED',failureMessage:detail || copy.codeGenerationFailed}));
             eventSource.close()
             eventSourceRef.current = null
             stopProgressPolling()
@@ -1651,13 +1675,14 @@ const WorkingPage = () => {
                 running: false,
                 failed: true,
             }))
+            loadAgentSnapshot(runId);
             refreshGitStatus();
-            message.error(detail || copy.codeGenerationFailed)
+            message.error('智能体任务未完成，请查看执行结果中的原因。')
         }
 
         eventSource.addEventListener('reset', resetReplay)
-        eventSource.addEventListener('status', appendEvent)
-        eventSource.addEventListener('delta', appendEvent)
+        eventSource.addEventListener('status', event => {appendEvent(event); loadAgentSnapshot(runId);})
+        eventSource.addEventListener('activity', recordActivity)
         eventSource.addEventListener('completed', finishSuccess)
         eventSource.addEventListener('failed', finishFailure)
         eventSource.onmessage = appendEvent
@@ -1675,7 +1700,7 @@ const WorkingPage = () => {
                 })
                 .catch((error) => {
                     checkingConnection = false
-                    finishFailure(null, errorMessage(error, copy.failedRestoreAgentRun))
+                    setAgentConnectionError(errorMessage(error, copy.failedRestoreAgentRun));
                 })
         }
         return () => {
@@ -1805,6 +1830,7 @@ const WorkingPage = () => {
         try {
             const discardedRunId = activeRunId;
             const status = await API.discardFeatureChanges();
+            if (agentViewRunRef.current) loadAgentSnapshot(agentViewRunRef.current);
             setGitStatus(status || EMPTY_GIT_STATUS);
             eventSourceRef.current?.close()
             eventSourceRef.current = null
@@ -2158,6 +2184,7 @@ const WorkingPage = () => {
 
     const commitPreparedFeatureChanges = async () => {
         const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
+        if (agentViewRunRef.current) loadAgentSnapshot(agentViewRunRef.current);
         setGitStatus(result.status || EMPTY_GIT_STATUS);
         resetGraphDiffDrawer();
         await finishFeatureCommit(result);
@@ -2640,7 +2667,10 @@ const WorkingPage = () => {
                                     [styles.panelViewHidden]: !chatMode,
                                 })}>
                                     <div ref={containerRef} className={styles.scrollContainer}>
-                                        {chatContent ? <MarkdownRendererComponent content={chatContent.replace(/^### Codex 执行中$/gm, "### 智能体执行中")}/> : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
+                                        {agentViewRunId ? <AgentOutputPanel key={agentViewRunId} runId={agentViewRunId} isVisible={chatMode} snapshot={agentSnapshot} activities={agentActivities} connectionError={agentConnectionError}
+                                            onShowGraph={() => setChatMode(false)}
+                                            onOpenFile={path => getCodeDiff(path, graphData?.nodes?.find(node => node.id === path) || {id:path,funcFile:path,type:'Modify',methods:[]})}/>
+                                            : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
                                     </div>
                                 </div>
                                 <div
