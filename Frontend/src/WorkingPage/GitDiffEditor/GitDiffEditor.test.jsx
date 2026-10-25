@@ -94,3 +94,21 @@ test("does not report a controlled value reset as a user edit", () => {
     changeListener();
     expect(onChange).toHaveBeenCalledWith(editorValue);
 });
+
+test("detaches the diff model before disposing its text buffers", () => {
+    const order = [];
+    const original = {isDisposed: () => false, dispose: () => order.push('dispose-original')};
+    const modified = {isDisposed: () => false, dispose: () => order.push('dispose-modified')};
+    const {unmount} = render(<GitDiffEditor file={file} readOnly={false}/>);
+    diffEditorProps.onMount({
+        getModel: () => ({original, modified}),
+        setModel: (model) => {expect(model).toBeNull(); order.push('detach');},
+        getOriginalEditor: () => ({updateOptions: jest.fn(), getDomNode: () => ({style:{}})}),
+        getModifiedEditor: () => ({updateOptions: jest.fn(), addCommand: jest.fn(),
+            onDidChangeModelContent: () => ({dispose: () => order.push('unsubscribe')})}),
+    });
+    expect(diffEditorProps.keepCurrentOriginalModel).toBe(true);
+    expect(diffEditorProps.keepCurrentModifiedModel).toBe(true);
+    unmount();
+    expect(order).toEqual(['unsubscribe', 'detach', 'dispose-original', 'dispose-modified']);
+});

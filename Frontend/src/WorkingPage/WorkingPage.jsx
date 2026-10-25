@@ -306,18 +306,18 @@ const WORKING_PAGE_COPY = {
         resizeChangesPanel: "调整代码变更面板宽度，双击恢复默认宽度",
         closeChangesPanel: "关闭代码变更",
         fetchingCode: "正在获取代码详情。",
-        candidateDiff: "候选代码 Git Diff",
-        failedFetchCandidateDiff: "获取候选代码 Git Diff 失败。",
-        candidateSaved: "候选代码已保存。",
-        failedSaveCandidate: "保存候选代码失败。",
-        saveBeforeApply: "请先保存编辑，再确认应用。",
+        candidateDiff: "未提交代码差异",
+        failedFetchCandidateDiff: "获取未提交代码差异 失败。",
+        candidateSaved: "项目文件已保存，尚未提交。",
+        failedSaveCandidate: "保存项目文件失败。",
+        saveBeforeApply: "请先保存编辑，再确认提交。",
         saveBeforeClose: "当前编辑尚未保存。",
         gitGeneratedDiff: "Git 生成的差异",
         confirmFile: "暂存文件",
         stagingFile: "正在暂存……",
         fileStaged: "此文件已暂存",
-        candidateStaged: "文件已写入项目并暂存。",
-        failedStageCandidate: "暂存候选文件失败。",
+        candidateStaged: "文件已暂存，等待确认提交。",
+        failedStageCandidate: "暂存修改文件失败。",
         unstageFile: "取消暂存",
         unstagingFile: "正在取消暂存……",
         candidateUnstaged: "已取消暂存，文件内容保持不变。",
@@ -325,33 +325,33 @@ const WORKING_PAGE_COPY = {
         noCandidateChanges: "当前文件没有可暂存的修改。",
         revertFile: "撤销此文件",
         revertingFile: "正在撤销……",
-        candidateReverted: "此文件的候选修改已撤销。",
-        failedRevertCandidate: "撤销候选文件失败。",
+        candidateReverted: "此文件已还原到本次任务开始前。",
+        failedRevertCandidate: "撤销修改文件失败。",
         commitChanges: "提交已暂存文件",
         noStagedFiles: "请先在 Diff Panel 中暂存至少一个文件。",
         partialCommitTitle: "确认部分提交",
         completeCommitTitle: "确认全部提交",
-        metadataCommitTitle: "确认同步过期功能数据",
-        partialCommitDescription: "这是选择性确认：本次只保留并提交已暂存文件；其余候选修改将被永久放弃，操作结束后不能继续提交。系统仍会完成本次功能确认，并同步更新功能数据、CodeMap 和静态分析。",
-        completeCommitDescription: "所有候选文件均已确认；本次将提交剩余修改，并同步更新功能数据、CodeMap 和静态分析结果。",
-        metadataCommitDescription: "源码已经处于目标状态，本次不会修改文件；系统将创建一条可审计的空提交，并清理过期的 Feature 和 CodeMap 数据。",
-        partialCommitSuccess: "已提交确认的文件，其余候选修改已放弃。",
-        completeCommitSuccess: "全部候选修改已提交。",
-        metadataCommitSuccess: "源码无需修改，过期的功能数据已同步清理。",
+        metadataCommitTitle: "确认功能项变更",
+        partialCommitDescription: "请先审阅并暂存全部修改，再确认本次功能变更。",
+        completeCommitDescription: "所有修改文件均已暂存；确认后创建 Git 提交，并保存本次功能项描述。不会重新分析代码关联。",
+        metadataCommitDescription: "本次没有源码差异；确认后创建一条 Git 记录，并保存功能项的新增、修改或删除。",
+        partialCommitSuccess: "已提交确认的修改。",
+        completeCommitSuccess: "全部修改已提交。",
+        metadataCommitSuccess: "功能项变更已保存。",
         failedCommitChanges: "提交代码变更失败。",
         discardAllChanges: "放弃全部未提交修改",
         discardAllTitle: "放弃全部未提交修改？",
-        discardAllDescription: "将恢复暂存区和工作区到最近一次提交，并删除非忽略的未跟踪文件；已经完成的提交和预处理输出会保留。",
+        discardAllDescription: "将停止本次任务，还原本次修改的已跟踪文件，并删除本次新增文件。已有提交和任务开始前的忽略文件不会被清理；执行期间请勿在项目中并行手工修改。",
         discardSuccess: "未提交修改已放弃，已有提交保持不变。",
         failedDiscardChanges: "放弃未提交修改失败。",
         committingChanges: "正在提交并更新项目数据……",
         noSubmittedChanges: "您尚未提交任何修改，请先提交。",
-        confirmAllChanges: "确认全部候选变更",
-        reviewAllChanges: "系统将自动接受所有尚未确认的 Agent 候选文件，不再要求逐文件暂存，并立即提交全部候选变更。请只在确认可以完整采用本次 Agent 输出时继续。",
+        confirmAllChanges: "确认全部修改",
+        reviewAllChanges: "将暂存并提交本次全部修改，并保存功能项描述。请先确认图谱中的文件差异符合预期。",
         confirmApply: "接受并提交全部",
         decline: "取消",
-        failedConfirmAllChanges: "确认全部候选变更失败。",
-        incompleteConfirmAllChanges: "仍有候选文件无法自动确认，请逐文件检查后重试。",
+        failedConfirmAllChanges: "确认全部修改失败。",
+        incompleteConfirmAllChanges: "仍有修改文件无法自动确认，请逐文件检查后重试。",
         submittingFeatureDeletion: "正在提交功能删除。",
         submittingFeatureAddition: "正在提交新增功能。",
         submittingFeatureModification: "正在提交功能修改。",
@@ -359,14 +359,14 @@ const WORKING_PAGE_COPY = {
         streamingPythonAgent: "正在流式生成 Python 代码。",
         streamingAgent: "正在执行三阶段 Agent 代码生成。",
         codeGenerationFinished: "代码生成已完成。请检查差异后确认或放弃。",
-        codeGenerationFailed: "代码生成失败，未创建可确认的候选修改。",
+        codeGenerationFailed: "代码生成失败，请查看智能体输出中的原因和回退结果。",
         restoringAgentRun: "正在恢复刷新前的 Agent 任务……",
         failedRestoreAgentRun: "无法恢复刷新前的 Agent 任务，请重新提交需求。",
         focusGraphReady: "查看代码检索的初始图、扩展图和推理图。",
         focusGraphPending: "Java/Python 新增或修改提交后可查看三阶段图。",
         failedFetchFeatureSummary: "获取功能摘要失败。",
         failedFetchCodeMap: "获取代码图谱失败。",
-        failedFetchCandidateGraph: "获取候选图失败。",
+        failedFetchCandidateGraph: "获取修改图谱失败。",
         failedFetchCodeDiff: "获取代码差异失败。",
         failedFetchCodeContext: "获取代码上下文失败。",
         failedPrepareDeletion: "准备删除上下文失败。",
@@ -398,6 +398,7 @@ export const FeatureListItem = ({
     selectedFeatureItem,
     submitEnabled,
     selectedModel,
+    selectedModelLabel,
     editedText,
     setEditedText,
     copy,
@@ -405,11 +406,14 @@ export const FeatureListItem = ({
     submitEdit,
     handleDelete,
     handleEdit,
+    onCancelEdit,
     compressed,
     minimal,
 }) => {
     const isSelected = selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId;
     const isEditing = (selectedType === "edit" || selectedType === "add") && isSelected;
+    const descriptionChanged = selectedType === 'add' || editedText.trim() !== description.trim();
+    const canSubmit = submitEnabled && Boolean(selectedModel) && Boolean(editedText.trim()) && descriptionChanged;
     return (
         <List.Item
             onClick={() => onClickItem(item)}
@@ -425,26 +429,33 @@ export const FeatureListItem = ({
         >
             <div className={styles.featureContent}>
                 {isEditing ? (
-                    <Tooltip title={!submitEnabled ? copy.pendingChanges : ""}>
-                        <div className={styles.featureEditor}>
-                            <FeatureIcon className={styles.featureGlyph}/>
-                            <TextArea
-                                value={editedText}
-                                onChange={(event) => setEditedText(event.target.value)}
-                                onClick={(event) => event.stopPropagation()}
-                                size="middle"
-                                autoSize={{minRows: 2, maxRows: 5}}
-                                disabled={!submitEnabled || !selectedModel}
-                            />
-                            <Button
-                                type="primary"
-                                onClick={() => submitEdit(item)}
-                                disabled={!submitEnabled || !selectedModel}
-                            >
-                                {copy.submit}
-                            </Button>
+                    <div className={styles.featureEditor} onClick={event => event.stopPropagation()}>
+                        <div className={styles.editHeading}>
+                            <span className={styles.editHeadingIcon}><FeatureIcon/></span>
+                            <div><strong>{selectedType === 'add' ? '新增功能项' : '编辑功能描述'}</strong><span>描述期望的功能与行为变化</span></div>
                         </div>
-                    </Tooltip>
+                        <TextArea
+                            aria-label="功能描述"
+                            value={editedText}
+                            onChange={event => setEditedText(event.target.value)}
+                            autoSize={{minRows:4,maxRows:10}}
+                            placeholder="描述这个功能应该做什么，以及需要调整的行为…"
+                            disabled={!submitEnabled}
+                        />
+                        <div className={styles.editMeta}>
+                            <span title={selectedModelLabel || selectedModel || '请在顶部选择模型'}>模型：{selectedModelLabel || selectedModel || '未选择'}</span>
+                            <span>{editedText.length} 字符</span>
+                        </div>
+                        <div className={styles.editFooter}>
+                            {!submitEnabled && <p>当前修改正在处理，请在智能体输出中查看进度。</p>}
+                            <div>
+                                <Button disabled={!submitEnabled} onClick={() => onCancelEdit?.(item)}>取消</Button>
+                                <Tooltip title={!selectedModel ? '请先在顶部选择模型' : !editedText.trim() ? '请填写功能描述' : !descriptionChanged ? '请先修改功能描述' : ''}>
+                                    <Button type="primary" icon={<CheckOutlined/>} onClick={() => submitEdit(item)} disabled={!canSubmit}>提交并调用智能体</Button>
+                                </Tooltip>
+                            </div>
+                        </div>
+                    </div>
                 ) : minimal ? (
                     <FeatureIcon className={styles.featureGlyph}/>
                 ) : compressed ? (
@@ -459,7 +470,7 @@ export const FeatureListItem = ({
                     </div>
                 )}
             </div>
-            <div className={classNames(styles.featureActions, {
+            {!isEditing && <div className={classNames(styles.featureActions, {
                 [styles.featureActionsSingleLine]: true,
                 [styles.featureActionsMinimal]: minimal,
             })}>
@@ -478,7 +489,7 @@ export const FeatureListItem = ({
                         [styles.selectedIcon]: isSelected && (selectedType === "edit" || selectedType === "add"),
                     })}
                 />
-            </div>
+            </div>}
         </List.Item>
     );
 };
@@ -503,7 +514,7 @@ const WorkingPage = () => {
     const [modelOptions, setModelOptions] = useState([]);
     const [selectedModel, setSelectedModel] = useState(null);
     const [loadingModels, setLoadingModels] = useState(true);
-    const [codexNotice, setCodexNotice] = useState("");
+    const [agentNotice, setAgentNotice] = useState("");
     const [currentProject, setCurrentProject] = useState(null);
     const [operationProgress, setOperationProgress] = useState(null);
     const [focusGraphStages, setFocusGraphStages] = useState([]);
@@ -529,40 +540,38 @@ const WorkingPage = () => {
         setFocusGraphModalOpen(false);
     };
 
+    const modelRefreshBusy = useRef(false);
+    modelRefreshBusy.current = Boolean(operationProgress?.running || loadingFeatureList);
     useEffect(() => {
         let active = true;
-
-        API.getLlmModels()
-            .then((catalog) => {
-                if (active) setCodexNotice(catalog.message || "");
+        let pending = false;
+        let lastFetched = 0;
+        const refreshModels = async () => {
+            if (pending || modelRefreshBusy.current) return;
+            pending = true;
+            try {
+                const catalog = await API.getLlmModels();
                 if (!active) return;
                 const availableModels = Array.isArray(catalog.models) ? catalog.models : [];
-                const sortedModels = [...availableModels].sort(
-                    new Intl.Collator('zh-CN', {numeric: true, sensitivity: 'base'}).compare
-                );
+                const sortedModels = [...availableModels].sort(new Intl.Collator('zh-CN', {numeric:true,sensitivity:'base'}).compare);
                 setModels(sortedModels);
-                setModelOptions(catalog.modelOptions || sortedModels.map(model => ({value:model,label:model === 'default' ? 'Codex 默认模型' : model})));
-                setSelectedModel(
-                    sortedModels.includes(catalog.defaultModel)
-                        ? catalog.defaultModel
-                        : sortedModels[0] || null
-                );
-            })
-            .catch((error) => {
-                if (!active) return;
-                console.error("Error fetching LLM models:", error);
-                setModels([]);
-                setModelOptions([]);
-                setCodexNotice(error.message || '无法读取 Codex 配置');
-                setSelectedModel(null);
-            })
-            .finally(() => {
+                setModelOptions(catalog.modelOptions || sortedModels.map(model => ({value:model,label:model === 'default' ? '智能体默认模型' : model})));
+                setSelectedModel(current => sortedModels.includes(current) ? current
+                    : sortedModels.includes(catalog.defaultModel) ? catalog.defaultModel : sortedModels[0] || null);
+                setAgentNotice(catalog.message || '');
+                lastFetched = Date.now();
+            } catch (error) {
+                if (active) setAgentNotice(error.message || '无法更新模型列表，保留当前选择');
+            } finally {
+                pending = false;
                 if (active) setLoadingModels(false);
-            });
-
-        return () => {
-            active = false;
+            }
         };
+        refreshModels();
+        const timer = setInterval(refreshModels, 15 * 60 * 1000);
+        const onFocus = () => {if (Date.now() - lastFetched > 60000) refreshModels();};
+        window.addEventListener('focus', onFocus);
+        return () => {active = false; clearInterval(timer); window.removeEventListener('focus', onFocus);};
     }, []);
 
     useEffect(() => {
@@ -1280,7 +1289,7 @@ const WorkingPage = () => {
     }
 
     const handleDelete = (item) => {
-        modal.confirm({title:'删除功能项', content:'将调用 Codex 生成删除此功能所需的代码修改；审阅并确认后才会应用。',
+        modal.confirm({title:'删除功能项', content:'智能体将直接修改项目文件以删除此功能；完成后可审阅并提交，或放弃回退。',
             okText:'生成删除修改', cancelText:'取消', onOk:() => {
                 if (hasPendingFeatureOperation()) confirmDiscardAndRun(() => goDelete(item));
                 else goDelete(item);
@@ -1335,6 +1344,20 @@ const WorkingPage = () => {
         setEditedText(getFeatureDescription(item))
         getFeatureGraphData(item.featureId, "edit")
     }
+
+    const cancelFeatureEdit = (item) => {
+        if (!submitEnabled || operationProgress?.running || confirmEnabled) return;
+        setRequestDraftDirty(false);
+        clearFeatureRequestDraft();
+        if (item.isNew) {
+            clearLocalDraftFeature();
+            setSelectedFeatureItem(null); setSelectedType(null); setEditedText('');
+            setSubmitEnabled(false); setGraphData(null);
+        } else {
+            setEditedText(getFeatureDescription(item));
+            goSelect(item);
+        }
+    };
 
     const [editedText, setEditedText] = useState('')
     const updateEditedText = (value) => {
@@ -1628,6 +1651,7 @@ const WorkingPage = () => {
                 running: false,
                 failed: true,
             }))
+            refreshGitStatus();
             message.error(detail || copy.codeGenerationFailed)
         }
 
@@ -2219,7 +2243,7 @@ const WorkingPage = () => {
 
         const complete = status.commitScope === 'COMPLETE';
         if (!complete && !metadataOnly) {
-            message.warning('请先确认全部候选文件，或使用“确认全部修改”。');
+            message.warning('请先暂存全部修改文件，或使用“确认全部修改”。');
             return;
         }
         const partial = !metadataOnly && !complete;
@@ -2245,7 +2269,7 @@ const WorkingPage = () => {
                     )}
                     {!metadataOnly && (
                         <p>
-                            {`本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`}
+                            {`本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个修改文件未确认` : ''}。`}
                         </p>
                     )}
                 </div>
@@ -2281,7 +2305,7 @@ const WorkingPage = () => {
                         message={copy.confirmAllChanges}
                         description={copy.reviewAllChanges}
                     />
-                    <p>{`将确认并提交全部 ${totalCount} 个候选文件，其中 ${remainingCount} 个尚未逐文件确认。`}</p>
+                    <p>{`将确认并提交全部 ${totalCount} 个修改文件，其中 ${remainingCount} 个尚未逐文件确认。`}</p>
                 </div>
             ),
             okText: copy.confirmApply,
@@ -2333,7 +2357,8 @@ const WorkingPage = () => {
     const showGitOperationActions = hasPendingFeatureOperation()
         && (confirmEnabled
             || stagedFileCount > 0
-            || (gitStatus.pendingCandidatePaths?.length || 0) > 0);
+            || (gitStatus.pendingCandidatePaths?.length || 0) > 0
+            || gitStatus.requiresCleanup);
 
     const workspaceContainerWidth = getWorkspaceContainerWidth(viewportWidth);
     const workspaceWidthWithDrawer = viewportWidth <= DIFF_DRAWER_OVERLAY_BREAKPOINT
@@ -2479,7 +2504,7 @@ const WorkingPage = () => {
                                                     <div className={styles.moduleTitle}>
                                                         <div className={styles.moduleHeading}>
                                                             <EpicIcon className={styles.epicIcon}/>
-                                                            <span className={styles.moduleDescription}>
+                                                            <span className={styles.moduleDescription} title={getModuleDescription(module)}>
                                                                 {getModuleDescription(module)}
                                                             </span>
                                                         </div>
@@ -2516,6 +2541,7 @@ const WorkingPage = () => {
                                                                 selectedFeatureItem={selectedFeatureItem}
                                                                 submitEnabled={submitEnabled}
                                                                 selectedModel={selectedModel}
+                                                                selectedModelLabel={modelOptions.find(option => option.value === selectedModel)?.label}
                                                                 editedText={editedText}
                                                                 setEditedText={updateEditedText}
                                                                 copy={copy}
@@ -2523,6 +2549,7 @@ const WorkingPage = () => {
                                                                 submitEdit={submitEdit}
                                                                 handleDelete={handleDelete}
                                                                 handleEdit={handleEdit}
+                                                                onCancelEdit={cancelFeatureEdit}
                                                                 compressed={featurePanelCondensed}
                                                                 minimal={featurePanelMinimal}
                                                             />
@@ -2637,7 +2664,7 @@ const WorkingPage = () => {
                                 bordered={false}
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
-                                {codexNotice && <Alert type="info" showIcon message={codexNotice} style={{borderRadius:0,fontSize:12}}/>}
+                                {agentNotice && <Alert type="info" showIcon message={agentNotice} style={{borderRadius:0,fontSize:12}}/>}
                                 <div className={styles.featureContext}>
                                     <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
                                     <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
@@ -2649,7 +2676,7 @@ const WorkingPage = () => {
                                     [styles.panelViewHidden]: !chatMode,
                                 })}>
                                     <div ref={containerRef} className={styles.scrollContainer}>
-                                        {chatContent ? <MarkdownRendererComponent content={chatContent}/> : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
+                                        {chatContent ? <MarkdownRendererComponent content={chatContent.replace(/^### Codex 执行中$/gm, "### 智能体执行中")}/> : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
                                     </div>
                                 </div>
                                 <div

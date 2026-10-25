@@ -1,4 +1,4 @@
-"""Feature edits and candidate code review, backed by the local Codex executor."""
+"""Feature edits in the project worktree with Git review and explicit commit."""
 import asyncio
 import base64
 import json
@@ -87,8 +87,8 @@ def progress(project_id: str, request: Request):
         status = run['status']
         return {'operation': run['mode'], 'stage': 'agent-stream', 'running': status in {'PREPARED', 'RUNNING'},
                 'failed': status == 'FAILED', 'currentStep': None, 'totalSteps': None,
-                'message': {'PREPARED': '正在组织上下文', 'RUNNING': 'Codex 正在执行，请在智能体输出中查看过程',
-                            'COMPLETED': '候选修改已生成，等待确认', 'COMMITTED': '修改已确认', 'DISCARDED': '任务已放弃',
+                'message': {'PREPARED': '正在组织上下文', 'RUNNING': '智能体正在执行，请在智能体输出中查看过程',
+                            'COMPLETED': '项目修改已生成，等待审阅提交', 'COMMITTED': '修改已确认', 'DISCARDED': '任务已放弃',
                             'FAILED': run.get('failureMessage')}.get(status, status)}
 
 

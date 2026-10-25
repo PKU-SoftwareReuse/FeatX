@@ -6,7 +6,8 @@ from . import projects, analyses, graphs, operations, uploads, files
 from .errors import AppError
 from .reposummary import RepoSummaryClient
 from .store import Store
-from .agent import AgentManager
+from .agent import AgentManager, CODEX_HOME
+from .model_discovery import ModelDiscovery
 from .shared import SharedProjects
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,8 +23,17 @@ def create_app(data_dir=None, reposummary_url=None, shared_dir=None):
 
     app.state.agent = AgentManager(app)
 
+    app.state.model_discovery = ModelDiscovery(CODEX_HOME, app.state.agent.invalidate_models)
+
+    @app.on_event('startup')
+    def start_model_discovery():
+        # Explicit isolated data directories must not overwrite the shared development catalog.
+        if data_dir is None:
+            app.state.model_discovery.start()
+
     @app.on_event('shutdown')
     def stop_agent():
+        app.state.model_discovery.stop()
         app.state.agent.shutdown()
 
     @app.exception_handler(AppError)

@@ -884,3 +884,24 @@
 
 /* Resizing must not let child intrinsic widths resize the enclosing splitter. */
 .background_area > .main_area,.panelShell,.panelCard {min-width:0;}
+
+/* Epic descriptions can wrap without forcing the sidebar wider. */
+.moduleCollapse :global(.ant-collapse-header-text) {min-width:0;}
+.moduleCollapse :global(.ant-collapse-header) {align-items:flex-start!important;}
+.moduleTitle {min-width:0;width:100%;align-items:flex-start;}
+.moduleHeading {align-items:flex-start;white-space:normal;text-overflow:clip;}
+.moduleDescription {display:block;flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere;text-overflow:clip;line-height:1.65;}
+.moduleHeading .epicIcon {margin-top:1px;}
+.iconContainer {flex:0 0 auto;align-self:flex-start;margin-top:1px;}
+.featurePanelBody .scrollContainer {overflow-x:hidden;}
+.featureDescription > span:last-child {min-width:0;overflow-wrap:anywhere;}
+
+/* Editing uses the full row instead of sharing space with hover actions. */
+.item.featureItemEditing {display:block!important;padding:0!important;margin:8px 0 12px;border:1px solid #ccdef5!important;border-radius:11px;background:#f7faff;box-shadow:0 4px 14px #447bb60a;overflow:visible;height:auto;max-height:none;}
+.item.featureItemEditing::before {display:none;}
+.featureEditor {display:flex;flex-direction:column;gap:12px;padding:14px;box-sizing:border-box;width:100%;}
+.editHeading {display:flex;align-items:center;gap:10px;}.editHeadingIcon {display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:#e9f2ff;flex-shrink:0;}.editHeading strong {display:block;font-size:13px;font-weight:600;color:#355477;}.editHeading > div > span {display:block;margin-top:3px;font-size:10px;font-weight:400;color:#8b9fb8;}
+.featureEditor :global(textarea.ant-input) {padding:11px 12px;border:1px solid #dce7f5;border-radius:8px;font-size:13px;font-weight:400;line-height:1.85;color:#3e5571;background:#fff;resize:none;}
+.featureEditor :global(textarea.ant-input:focus) {border-color:#81b6f5;box-shadow:0 0 0 3px #3288f310;}
+.editMeta {display:flex;justify-content:space-between;gap:10px;font-size:10px;font-weight:400;color:#93a3b8;}.editMeta > span:first-child {min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}.editMeta > span:last-child {flex-shrink:0;}
+.editFooter {border-top:1px solid #e4edf8;padding-top:11px;}.editFooter p {font-size:10px;font-weight:400;line-height:1.65;color:#8498b2;margin:0 0 10px;}.editFooter > div {display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}.editFooter :global(.ant-btn) {height:33px;padding:0 12px;font-size:11px;border-radius:7px;}.editFooter :global(.ant-btn-primary) {box-shadow:0 3px 8px #3788ed16;}

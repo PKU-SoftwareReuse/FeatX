@@ -1,6 +1,7 @@
-"""Pinned Codex executor. Candidate repositories, JSONL output, and explicit acceptance."""
+"""Run the agent in the project worktree; review, commit or revert with Git."""
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -25,12 +26,6 @@ VERSION = json.loads((ROOT / 'tools/codex/package.json').read_text())['dependenc
 CODEX_HOME = ROOT / 'data/codex-home'
 RUN_TIMEOUT_SECONDS = 1800
 ACTIVE = {'PREPARED', 'RUNNING', 'COMPLETED'}
-SCHEMA = {
-    'type': 'object', 'additionalProperties': False,
-    'properties': {'summary': {'type': 'string'}, 'description': {'type': 'string'},
-                   'codeElements': {'type': 'array', 'items': {'type': 'string'}}},
-    'required': ['summary', 'description', 'codeElements'],
-}
 
 
 def now():
@@ -61,7 +56,7 @@ def safe_file(root, name):
         raise AppError(400, 'INVALID_PATH', '无效的项目文件路径')
     target = root / name
     if not target.resolve().is_relative_to(root.resolve()):
-        raise AppError(400, 'INVALID_PATH', '不能访问候选项目之外的文件')
+        raise AppError(400, 'INVALID_PATH', '不能访问项目之外的文件')
     return target
 
 
@@ -74,7 +69,7 @@ def git(root, *args, input=None, check=True):
                                  '-c', 'user.name=FeatX', '-c', 'user.email=featx@localhost',
                                  *args], cwd=root, env=env, input=input, capture_output=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise AppError(500, 'AGENT_GIT_FAILED', '候选仓库操作失败或超时') from exc
+        raise AppError(500, 'AGENT_GIT_FAILED', '项目 Git 操作失败或超时') from exc
     if check and result.returncode:
         raise AppError(409, 'AGENT_GIT_FAILED', result.stderr.decode(errors='replace')[-1500:])
     return result.stdout
@@ -106,7 +101,9 @@ class AgentManager:
         for path in self.root.glob('*/run.json'):
             run = json.loads(path.read_text())
             if run['status'] in {'PREPARED', 'RUNNING'}:
-                run.update(status='FAILED', failureMessage='主后端已重启，本次执行被中断；候选内容未应用。')
+                direct = run.get('executionMode') == 'direct'
+                run.update(status='FAILED', requiresCleanup=direct, failureMessage=
+                           '主后端已重启，请检查并放弃本次未提交修改后重试。' if direct else '主后端已重启，本次执行被中断；旧候选内容未应用。')
                 self.save(run)
                 self.emit(run['runId'], 'failed', run['failureMessage'])
 
@@ -133,7 +130,7 @@ class AgentManager:
 
     def assert_idle(self, project_id):
         run = self.current(project_id)
-        if run and run['status'] in ACTIVE:
+        if run and (run['status'] in ACTIVE or run.get('requiresCleanup')):
             raise AppError(409, 'AGENT_PENDING', '该项目仍有智能体任务或待确认修改，请先确认或放弃')
 
     def environment(self):
@@ -155,6 +152,10 @@ class AgentManager:
             if key in config and (not isinstance(config[key], str) or not config[key].strip()):
                 raise AppError(400, 'INVALID_CODEX_CONFIG', f'{path.name} 中的 {key} 必须是非空字符串')
         return config
+
+    def invalidate_models(self):
+        with self.model_cache_lock:
+            self.model_cache = None
 
     def native_models(self):
         files = [CODEX_HOME / 'config.toml', CODEX_HOME / 'auth.json']
@@ -178,9 +179,9 @@ class AgentManager:
 
     def catalog(self):
         base = self.read_config(CODEX_HOME / 'config.toml')
-        options = [{'value': 'default', 'label': (base['model'] + '（配置默认）') if base.get('model') else 'Codex 默认模型',
+        options = [{'value': 'default', 'label': (base['model'] + '（配置默认）') if base.get('model') else '智能体默认模型',
                     'model': base.get('model'), 'profile': None, 'provider': base.get('model_provider', 'openai')}]
-        native, model_error = self.native_models() if self.binary.is_file() else ([], 'Codex 尚未安装')
+        native, model_error = self.native_models() if self.binary.is_file() else ([], '智能体执行器尚未安装')
         seen = set()
         for item in native:
             model = item.get('model') or item.get('id')
@@ -196,7 +197,7 @@ class AgentManager:
                 continue
             profile = self.read_config(path)
             model = profile.get('model', base.get('model'))
-            options.append({'value': 'profile:' + name, 'label': f"{name} · {model or 'Codex 默认模型'}",
+            options.append({'value': 'profile:' + name, 'label': f"{name} · {model or '智能体默认模型'}",
                             'model': model, 'profile': name,
                             'provider': profile.get('model_provider', base.get('model_provider', 'openai'))})
         env = self.environment()
@@ -207,10 +208,14 @@ class AgentManager:
         custom_provider = any(option['provider'] != 'openai' for option in options)
         # This is a hint only. Authentication, including custom provider credentials,
         # is owned and validated by Codex, never guessed from auth.json alone.
-        notice = '' if configured or custom_provider else '尚未检测到登录信息：请运行 tools/codex/codex login --device-auth，或在 config.toml 中配置服务商。'
+        notice = '' if configured or custom_provider else '尚未检测到智能体认证信息，请配置服务商或完成执行器登录。'
         if model_error:
             notice = (notice + ' ' if notice else '') + model_error + '；暂仅显示本地配置，请稍后重试。'
-        return {'models': [option['value'] for option in options], 'modelOptions': options,
+        scanner = getattr(self.app.state, 'model_discovery', None)
+        sync = scanner.snapshot() if scanner else None
+        if sync and sync.get('message'):
+            notice = (notice + ' ' if notice else '') + sync['message']
+        return {'models': [option['value'] for option in options], 'modelOptions': options, 'modelSync': sync,
                 'defaultModel': 'default', 'version': VERSION, 'installed': self.binary.is_file(),
                 'authConfigured': configured, 'message': notice}
 
@@ -251,7 +256,7 @@ class AgentManager:
                 raise AppError(409, 'SUMMARY_RUNNING', '请等待项目总结完成')
             info = self.catalog()
             if not info['installed']:
-                raise AppError(503, 'CODEX_NOT_INSTALLED', '请运行 npm ci --prefix tools/codex 安装固定版本')
+                raise AppError(503, 'CODEX_NOT_INSTALLED', '智能体执行器未安装，请先安装项目运行依赖')
             model = body.model or info['defaultModel']
             if model not in info['models']:
                 raise AppError(400, 'INVALID_MODEL', '所选配置已不存在，请刷新工作台模型列表')
@@ -281,16 +286,17 @@ class AgentManager:
                    'request': body.description.strip() or (feature or {}).get('description', ''),
                    'model': model, 'modelLabel': selection['label'], 'codexProfile': selection['profile'],
                    'modelOverride': selection.get('model') if selection.get('overrideModel') else None,
-                   'configuredModel': selection['model'], 'status': 'PREPARED', 'createdAt': now(), 'eventCount': 0,
+                   'configuredModel': selection['model'], 'executionMode': 'direct', 'requiresCleanup': False,
+                   'initialUntracked': [name for name in git(source, 'ls-files', '--others', '-z').decode().split('\0') if name],
+                   'status': 'PREPARED', 'createdAt': now(), 'eventCount': 0,
                    'baseCommit': git(source, 'rev-parse', 'HEAD').decode().strip(),
                    'summaryHash': digest(source.parent / 'summary.json'), 'stagedPaths': [],
                    'changedPaths': [], 'metadataOnlyEligible': False, 'failureMessage': None}
             atomic_json(directory / 'base-summary.json', summary)
-            atomic_json(directory / 'schema.json', SCHEMA)
             self.save(run)
             project['agentRunId'] = run_id
             self.app.state.store.write(project)
-            self.emit(run_id, 'status', '### 正在准备功能变更\n\n正在创建独立候选工作区，项目源码暂不修改。\n\n')
+            self.emit(run_id, 'status', '### 正在准备功能变更\n\n已记录 Git 起点，将直接修改项目工作区；完成后请审阅并提交，或放弃回退。\n\n')
             threading.Thread(target=self.execute, args=(run_id,), daemon=True).start()
             return self.read(run_id)
 
@@ -324,12 +330,25 @@ class AgentManager:
                    'operation': run['operation'], 'request': run['request'], 'epic': {'id': epic['id'], 'description': epic['description']},
                    'featureBefore': feature, 'targetFeatureId': run['featureId'],
                    'otherFeatures': [{'epic': e['description'], 'features': [{'id': f['id'], 'description': f['description']} for f in e['features']]} for e in base['epics']],
-                   'files': snippets, 'note': '文件片段可能截断，必要时读取当前候选仓库中的完整文件。'}
+                   'files': snippets, 'note': '文件片段可能截断，必要时读取当前项目中的完整文件。'}
         return (Path(__file__).parent / 'prompts/feature_edit.md').read_text() + json.dumps(context, ensure_ascii=False, indent=2)
 
     def stop_process(self, run_id):
         process = self.processes.get(run_id)
-        if process and process.poll() is None:
+        if process is None:
+            run = self.read(run_id)
+            pid = run.get('executorPid')
+            if isinstance(pid, int) and pid > 1:
+                try:
+                    command = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
+                    marker = str(self.directory(run_id) / 'final-message.md').encode()
+                    # Never signal a reused PID unless it is the exact executor command for this run.
+                    if str(self.binary).encode() in command and marker in command:
+                        os.killpg(pid, signal.SIGKILL)
+                except (FileNotFoundError, ProcessLookupError):
+                    pass
+            return
+        if process.poll() is None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
                 process.wait(timeout=3)
@@ -348,9 +367,7 @@ class AgentManager:
         try:
             run = self.read(run_id)
             source = self.app.state.shared.directory(run['projectId']) / 'source'
-            workspace = directory / 'workspace'
-            git(directory, 'clone', '--local', '--no-hardlinks', '--', str(source), str(workspace))
-            git(workspace, 'remote', 'remove', 'origin')
+            workspace = source
             if git(workspace, 'rev-parse', 'HEAD').decode().strip() != run['baseCommit']:
                 raise AppError(409, 'SOURCE_CHANGED', '项目版本已变化，请重新提交任务')
             prompt = self.prompt(run, workspace)
@@ -358,7 +375,7 @@ class AgentManager:
             env = self.environment()
             command = [str(self.binary), 'exec', '--json', '--ephemeral',
                        '--color', 'never', '-C', str(workspace),
-                       '--output-schema', str(directory / 'schema.json'), '-o', str(directory / 'result.json')]
+                       '-o', str(directory / 'final-message.md')]
             if run.get('codexProfile'):
                 command += ['--profile', run['codexProfile']]
             if run.get('modelOverride'):
@@ -374,7 +391,9 @@ class AgentManager:
                     process = subprocess.Popen(command, cwd=workspace, env=env, stdin=subprocess.PIPE,
                                                stdout=subprocess.PIPE, stderr=errors, start_new_session=True)
                 self.processes[run_id] = process
-            self.emit(run_id, 'status', '### Codex 执行中\n\n模型：' + run.get('modelLabel', 'Codex 默认模型') + '\n\n')
+                latest['executorPid'] = process.pid
+                self.save(latest)
+            self.emit(run_id, 'status', '### 智能体执行中\n\n模型：' + run.get('modelLabel', '智能体默认模型') + '\n\n')
             timeout = RUN_TIMEOUT_SECONDS
             def timeout_run():
                 timed_out.set()
@@ -398,17 +417,13 @@ class AgentManager:
                         turn_complete = True
                         failure = None
                     elif kind in {'turn.failed', 'error'}:
-                        detail = event.get('error') or event.get('message') or 'Codex 执行失败'
+                        detail = event.get('error') or event.get('message') or '智能体执行失败'
                         failure = detail.get('message', str(detail)) if isinstance(detail, dict) else str(detail)
                     elif kind == 'item.started' and item.get('type') == 'command_execution':
                         self.emit(run_id, 'delta', '\n**执行命令**\n```sh\n' + item.get('command', '')[:4000] + '\n```\n')
                     elif kind == 'item.completed':
                         if item.get('type') == 'agent_message':
                             text = item.get('text', '')
-                            try:
-                                text = json.loads(text).get('summary', text)
-                            except (ValueError, AttributeError):
-                                pass
                             self.emit(run_id, 'delta', '\n' + text + '\n\n')
                         elif item.get('type') == 'command_execution':
                             output = item.get('aggregated_output', '')
@@ -422,77 +437,138 @@ class AgentManager:
                 if self.read(run_id)['status'] == 'DISCARDED':
                     return
             if timed_out.is_set():
-                raise AppError(504, 'CODEX_TIMEOUT', 'Codex 执行超时，已停止；项目源码没有改变。')
+                raise AppError(504, 'CODEX_TIMEOUT', '智能体执行超时，已停止。')
             if code or failure or not turn_complete:
                 detail = (directory / 'stderr.log').read_text(errors='replace')[-1800:]
                 for secret in (env.get('CODEX_API_KEY'), env.get('OPENAI_API_KEY')):
                     if secret:
                         detail = detail.replace(secret, '[已隐藏]')
-                raise AppError(502, 'CODEX_FAILED', failure or detail or f'Codex 异常退出：{code}')
+                raise AppError(502, 'CODEX_FAILED', failure or detail or f'智能体异常退出：{code}')
             if git(workspace, 'rev-parse', 'HEAD').decode().strip() != run['baseCommit']:
-                raise AppError(409, 'CANDIDATE_HEAD_CHANGED', 'Codex 修改了 Git 提交历史，拒绝自动采用结果')
-            result = json.loads((directory / 'result.json').read_text())
-            proposal = self.validate_proposal(run, result)
-            atomic_json(directory / 'proposal.json', proposal)
+                raise AppError(409, 'CANDIDATE_HEAD_CHANGED', '智能体修改了 Git 提交历史，需要人工检查；不会覆盖已有提交')
+            final_message = directory / 'final-message.md'
+            result_text = final_message.read_text(encoding='utf-8') if final_message.exists() else ''
             paths = self.changed_paths(run)
             with self.lock:
                 latest = self.read(run_id)
                 if latest['status'] == 'DISCARDED':
                     return
                 latest.update(status='COMPLETED', finishedAt=now(), changedPaths=paths,
-                              metadataOnlyEligible=not paths, resultSummary=result['summary'])
+                              metadataOnlyEligible=not paths, resultSummary=result_text, requiresCleanup=False)
                 self.save(latest)
-                self.emit(run_id, 'completed', '\n### 执行完成\n\n候选修改已准备好，请审阅后确认；项目源码尚未改变。\n')
+                self.emit(run_id, 'completed', '\n### 执行完成\n\n项目工作区的修改已生成、尚未提交。请查看差异后确认提交，或放弃回退。\n')
         except Exception as exc:
+            # Stop all writes before restoring a failed direct execution.
+            self.stop_process(run_id)
             with self.lock:
                 run = self.read(run_id)
                 if run['status'] != 'DISCARDED':
                     detail = self.redact(exc.message if isinstance(exc, AppError) else str(exc))
-                    run.update(status='FAILED', failureMessage=detail, finishedAt=now())
+                    cleanup = False
+                    try:
+                        self.rollback(run)
+                        note = '本次未提交修改已回退到任务开始前。'
+                    except Exception as restore_error:
+                        cleanup = True
+                        note = '自动回退未完成，请先处理工作区：' + self.redact(restore_error.message if isinstance(restore_error, AppError) else str(restore_error))
+                    run.update(status='FAILED', failureMessage=detail + ' ' + note, finishedAt=now(), requiresCleanup=cleanup,
+                               changedPaths=[], stagedPaths=[])
                     self.save(run)
-                    self.emit(run_id, 'failed', '\n执行失败：' + detail + '\n\n候选修改未应用到项目。\n')
+                    self.emit(run_id, 'failed', '\n执行失败：' + detail + '\n\n' + note + '\n')
+
         finally:
             if timer:
                 timer.cancel()
             self.stop_process(run_id)
             self.processes.pop(run_id, None)
 
-    def validate_proposal(self, run, result):
-        if not isinstance(result, dict) or not isinstance(result.get('summary'), str):
-            raise AppError(502, 'INVALID_AGENT_RESULT', 'Codex 未返回约定的结果 JSON')
+    def workspace(self, run):
+        if run.get('executionMode') == 'direct':
+            return self.app.state.shared.directory(run['projectId']) / 'source'
+        return self.directory(run['runId']) / 'workspace'
+
+    def check_head(self, run):
+        if git(self.workspace(run), 'rev-parse', 'HEAD').decode().strip() != run['baseCommit']:
+            raise AppError(409, 'SOURCE_CHANGED', '项目已有新的 Git 提交，请先人工处理；不会覆盖提交历史')
+
+    def feature_proposal(self, run):
         if run['operation'] == 'delete':
             return None
-        feature = Feature.model_validate({'id': run['featureId'], 'description': result['description'],
-                                          'codeElements': result['codeElements']}).model_dump()
-        if not feature['description'].strip():
-            raise AppError(502, 'INVALID_AGENT_RESULT', '功能描述不能为空')
-        workspace = self.directory(run['runId']) / 'workspace'
-        for element in feature['codeElements']:
-            path, sep, name = element.partition('::')
-            if not sep or not name.strip() or not safe_file(workspace, path).is_file():
-                raise AppError(502, 'INVALID_AGENT_RESULT', '关联元素必须使用真实文件路径::元素名称')
-        return feature
+        base = json.loads((self.directory(run['runId']) / 'base-summary.json').read_text())
+        before = next((f for e in base['epics'] for f in e['features'] if f['id'] == run['featureId']), {})
+        return Feature.model_validate({'id': run['featureId'], 'description': run['request'],
+                                       'codeElements': before.get('codeElements', [])}).model_dump()
+
+    def dirty_paths(self, run):
+        workspace = self.workspace(run)
+        tracked = git(workspace, 'diff', '--no-renames', '--name-only', '-z', run['baseCommit']).decode().split('\0')
+        untracked = git(workspace, 'ls-files', '--others', '--exclude-standard', '-z').decode().split('\0')
+        return list(dict.fromkeys(p for p in [*tracked, *untracked] if p))
 
     def changed_paths(self, run):
-        workspace = self.directory(run['runId']) / 'workspace'
-        git(workspace, 'add', '-N', '--all', '--', '.')
-        paths = git(workspace, 'diff', '--name-only', '-z', run['baseCommit']).decode().split('\0')
-        paths = [p for p in paths if p]
+        workspace = self.workspace(run)
+        paths = self.dirty_paths(run)
+        protected = set(run.get('initialUntracked', []))
         for path in paths:
+            if path in protected:
+                raise AppError(409, 'PREEXISTING_FILE_CHANGED', '任务触及原有的忽略文件，请人工处理：' + path)
             target = safe_file(workspace, path)
             if target.is_symlink():
-                raise AppError(415, 'SYMLINK_CHANGE', '暂不支持应用符号链接变更')
+                raise AppError(415, 'SYMLINK_CHANGE', '暂不支持审阅符号链接变更')
         return paths
+
+    def rollback(self, run, paths=None):
+        if run.get('executionMode') != 'direct':
+            return
+        self.check_head(run)
+        workspace = self.workspace(run)
+        changed = self.dirty_paths(run) if paths is None else paths
+        protected = set(run.get('initialUntracked', []))
+        if protected.intersection(changed):
+            raise AppError(409, 'PREEXISTING_FILE_CHANGED', '原有忽略文件已发生变化，保留文件并等待人工处理')
+        tracked = set(git(workspace, 'ls-tree', '-r', '--name-only', '-z', run['baseCommit']).decode().split('\0'))
+        # Remove only new files of this clean-start run, never git clean -x or all untracked data.
+        for path in changed:
+            if path in tracked:
+                continue
+            target = workspace / path
+            if not target.parent.resolve().is_relative_to(workspace.resolve()):
+                raise AppError(409, 'INVALID_PATH', '无法安全回退项目外部路径')
+            if target.is_dir() and not target.is_symlink():
+                raise AppError(409, 'UNSUPPORTED_CHANGE', '请先人工处理目录类型变更：' + path)
+            target.unlink(missing_ok=True)
+            git(workspace, 'reset', '--', path)
+            parent = target.parent
+            while parent != workspace:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
+        restore = [path for path in changed if path in tracked]
+        for path in restore:
+            if not (workspace / path).parent.resolve().is_relative_to(workspace.resolve()):
+                raise AppError(409, 'INVALID_PATH', '无法安全回退项目外部路径')
+        if restore:
+            git(workspace, 'restore', '--source=' + run['baseCommit'], '--staged', '--worktree', '--', *restore)
 
     def ready(self, project_id, run_id=None):
         run = self.read(run_id, project_id) if run_id else self.current(project_id)
         if not run or run['status'] != 'COMPLETED':
-            raise AppError(409, 'CANDIDATE_NOT_READY', '候选修改尚未准备好')
+            raise AppError(409, 'CANDIDATE_NOT_READY', '本次修改尚未准备好')
         return run
 
     def status(self, project_id):
         with self.lock:
             run = self.current(project_id)
+            if run and run['status'] == 'COMPLETED':
+                self.check_head(run)
+                run['changedPaths'] = self.changed_paths(run)
+                actual_staged = git(self.workspace(run), 'diff', '--cached', '--name-only', '-z', run['baseCommit']).decode().split('\0')
+                unstaged = set(git(self.workspace(run), 'diff', '--name-only', '-z').decode().split('\0'))
+                run['stagedPaths'] = [p for p in actual_staged if p in run['changedPaths'] and p not in unstaged]
+                run['metadataOnlyEligible'] = not run['changedPaths']
+                self.save(run)
             paths = run.get('changedPaths', []) if run and run['status'] == 'COMPLETED' else []
             staged = [p for p in (run or {}).get('stagedPaths', []) if p in paths]
             remaining = [p for p in paths if p not in staged]
@@ -500,12 +576,12 @@ class AgentManager:
                     'commitScope': 'COMPLETE' if paths and not remaining else 'METADATA_ONLY' if run and run['status'] == 'COMPLETED' and not paths else 'NONE',
                     'stagedPaths': staged, 'unstagedPaths': remaining, 'untrackedPaths': [],
                     'candidatePaths': paths, 'pendingCandidatePaths': paths, 'committedCandidatePaths': [],
-                    'unstagedCandidatePaths': remaining}
+                    'unstagedCandidatePaths': remaining, 'requiresCleanup': bool(run and run.get('requiresCleanup'))}
 
     def candidate(self, project_id, path, run_id=None):
         with self.lock:
             run = self.ready(project_id, run_id)
-            workspace = self.directory(run['runId']) / 'workspace'
+            workspace = self.workspace(run)
             target = safe_file(workspace, path)
             original = git(workspace, 'show', run['baseCommit'] + ':' + path, check=False)
             if len(original) > 1024 * 1024 or b'\0' in original:
@@ -516,9 +592,9 @@ class AgentManager:
                 raise AppError(415, 'PREVIEW_UNSUPPORTED', '二进制文件无法在线编辑') from exc
             content = read_text(target)
             return {'key': path, 'path': path, 'originalContent': original_text, 'modifiedContent': content,
-                    'staged': path in run['stagedPaths'], 'stagedContent': content if path in run['stagedPaths'] else None,
+                    'staged': path in run['stagedPaths'], 'stagedContent': git(workspace, 'show', ':' + path, check=False).decode('utf-8') if path in run['stagedPaths'] else None,
                     'newFile': not bool(git(workspace, 'ls-tree', '--name-only', run['baseCommit'], '--', path)),
-                    'deleted': not target.is_file(), 'diff': git(workspace, 'diff', run['baseCommit'], '--', path).decode(errors='replace')}
+                    'deleted': not target.is_file(), 'diff': ''.join(difflib.unified_diff(original_text.splitlines(keepends=True), content.splitlines(keepends=True), fromfile='a/' + path, tofile='b/' + path))}
 
     def graph(self, project_id, run_id=None):
         with self.lock:
@@ -526,7 +602,7 @@ class AgentManager:
             directory = self.directory(run['runId'])
             base = json.loads((directory / 'base-summary.json').read_text())
             feature = next((f for e in base['epics'] for f in e['features'] if f['id'] == run['featureId']), {})
-            proposal = json.loads((directory / 'proposal.json').read_text())
+            proposal = self.feature_proposal(run)
             elements = (proposal or feature).get('codeElements', [])
             grouped = {}
             for value in elements:
@@ -542,13 +618,15 @@ class AgentManager:
     def update_candidate(self, project_id, path, content, run_id=None):
         with self.lock:
             run = self.ready(project_id, run_id)
-            target = safe_file(self.directory(run['runId']) / 'workspace', path)
-            if path not in run['changedPaths'] and not git(self.directory(run['runId']) / 'workspace', 'ls-tree', '--name-only', run['baseCommit'], '--', path):
-                raise AppError(400, 'NOT_CANDIDATE', '只能编辑本次候选仓库中的已有文件')
+            self.check_head(run)
+            target = safe_file(self.workspace(run), path)
+            if path not in run['changedPaths'] and not git(self.workspace(run), 'ls-tree', '--name-only', run['baseCommit'], '--', path):
+                raise AppError(400, 'NOT_CANDIDATE', '只能编辑当前项目中已有或本次新增的文件')
             if len(content.encode()) > 1024 * 1024:
                 raise AppError(413, 'FILE_TOO_LARGE', '内容超过 1 MiB')
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding='utf-8')
+            git(self.workspace(run), 'reset', '--', path)
             run['stagedPaths'] = [p for p in run['stagedPaths'] if p != path]
             run['changedPaths'] = self.changed_paths(run)
             run['metadataOnlyEligible'] = not run['changedPaths']
@@ -564,84 +642,88 @@ class AgentManager:
                 if operation == 'discard':
                     return self.status(project_id)
                 raise AppError(409, 'NO_AGENT_RUN', '没有待处理的智能体任务')
+            if self.current(project_id)['runId'] != run['runId']:
+                raise AppError(409, 'STALE_RUN', '不能操作历史任务，请刷新项目')
             if operation == 'discard':
                 if run['status'] == 'COMMITTED':
-                    raise AppError(409, 'ALREADY_COMMITTED', '修改已确认，不能作为候选任务放弃')
-                run.update(status='DISCARDED', finishedAt=now())
-                self.save(run)
+                    raise AppError(409, 'ALREADY_COMMITTED', '修改已经提交，不能按未提交任务放弃')
+                if run['status'] == 'DISCARDED':
+                    return self.status(project_id)
                 self.stop_process(run['runId'])
-                self.emit(run['runId'], 'failed', '任务已放弃，项目源码没有改变。')
+                try:
+                    if run['status'] != 'FAILED' or run.get('requiresCleanup'):
+                        self.rollback(run)
+                except Exception:
+                    run.update(status='FAILED', requiresCleanup=True, failureMessage='回退未完成，请处理工作区后重试')
+                    self.save(run)
+                    raise
+                run.update(status='DISCARDED', finishedAt=now(), requiresCleanup=False, changedPaths=[], stagedPaths=[])
+                self.save(run)
+                self.emit(run['runId'], 'failed', '任务已放弃，本次未提交修改已回退。')
                 return self.status(project_id)
             run = self.ready(project_id, run['runId'])
+            if run.get('executionMode') != 'direct':
+                raise AppError(409, 'LEGACY_RUN', '这是旧执行方式的任务，请放弃后重新生成')
+            self.check_head(run)
             if operation == 'commit':
                 return self.accept(run)
+            run['changedPaths'] = self.changed_paths(run)
             if path not in run['changedPaths']:
-                raise AppError(400, 'NOT_CANDIDATE', '文件不属于本次候选修改')
+                raise AppError(400, 'NOT_CANDIDATE', '文件不属于本次未提交修改')
+            workspace = self.workspace(run)
             if operation == 'stage':
+                git(workspace, 'add', '--all', '--', path)
                 run['stagedPaths'] = list(dict.fromkeys([*run['stagedPaths'], path]))
             elif operation == 'unstage':
+                git(workspace, 'reset', '--', path)
                 run['stagedPaths'] = [p for p in run['stagedPaths'] if p != path]
             elif operation == 'revert':
-                workspace = self.directory(run['runId']) / 'workspace'
-                target = safe_file(workspace, path)
-                exists = git(workspace, 'ls-tree', '--name-only', run['baseCommit'], '--', path)
-                if exists:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(git(workspace, 'show', run['baseCommit'] + ':' + path))
-                else:
-                    target.unlink(missing_ok=True)
-                git(workspace, 'reset', '--', path)
+                self.rollback(run, [path])
                 run['changedPaths'] = self.changed_paths(run)
                 run['stagedPaths'] = [p for p in run['stagedPaths'] if p != path]
                 run['metadataOnlyEligible'] = not run['changedPaths']
             else:
-                raise AppError(400, 'UNKNOWN_OPERATION', '不支持的候选修改操作')
+                raise AppError(400, 'UNKNOWN_OPERATION', '不支持的修改操作')
             self.save(run)
             return self.status(project_id)
 
     def accept(self, run):
         project_id = run['projectId']
-        source = self.app.state.shared.directory(project_id) / 'source'
+        source = self.workspace(run)
         summary_path = source.parent / 'summary.json'
-        if git(source, 'status', '--porcelain').strip() or git(source, 'rev-parse', 'HEAD').decode().strip() != run['baseCommit']:
-            raise AppError(409, 'SOURCE_CHANGED', '项目源码已经变化，不能应用旧候选修改')
+        self.check_head(run)
         if digest(summary_path) != run['summaryHash']:
-            raise AppError(409, 'SUMMARY_CHANGED', '项目摘要已经变化，不能应用旧候选修改')
-        directory = self.directory(run['runId'])
+            raise AppError(409, 'SUMMARY_CHANGED', '项目摘要已经变化，不能覆盖，请先处理后再确认')
         current_paths = self.changed_paths(run)
-        if set(current_paths) != set(run['changedPaths']):
-            raise AppError(409, 'CANDIDATE_CHANGED', '候选文件已经变化，请刷新后重新确认')
-        if set(current_paths) != set(run['stagedPaths']):
-            raise AppError(409, 'CONFIRM_ALL_REQUIRED', '请先确认全部候选文件，再应用本次功能变更')
-        result = json.loads((directory / 'result.json').read_text())
-        proposal = self.validate_proposal(run, result)
+        staged = [p for p in git(source, 'diff', '--cached', '--name-only', '-z', run['baseCommit']).decode().split('\0') if p]
+        if set(current_paths) != set(staged) or git(source, 'diff', '--name-only').strip():
+            raise AppError(409, 'CONFIRM_ALL_REQUIRED', '请先暂存全部修改；暂存后再次编辑的文件需要重新暂存')
         summary = json.loads(summary_path.read_text())
         epic = next(e for e in summary['epics'] if e['id'] == run['moduleId'])
+        proposal = self.feature_proposal(run)
         if run['operation'] == 'delete':
             epic['features'] = [f for f in epic['features'] if f['id'] != run['featureId']]
         elif run['operation'] == 'add':
             epic['features'].append(proposal)
         else:
             epic['features'] = [proposal if f['id'] == run['featureId'] else f for f in epic['features']]
-        summary = ProjectSummary.model_validate(summary).model_dump()
-        patch = git(directory / 'workspace', 'diff', '--binary', run['baseCommit'])
-        if patch:
-            git(source, 'apply', '--check', '--index', '-', input=patch)
+        ProjectSummary.model_validate(summary)
+        committed = None
         try:
-            if patch:
-                git(source, 'apply', '--index', '-', input=patch)
             git(source, 'commit', '--allow-empty', '--no-gpg-sign', '-m', 'FeatX: ' + run['operation'] + ' ' + run['request'][:80])
+            committed = git(source, 'rev-parse', 'HEAD').decode().strip()
             atomic_json(summary_path, summary)
         except Exception:
-            # Only our own just-applied transaction exists: source was required clean above.
-            git(source, 'reset', '--hard', run['baseCommit'])
+            # Undo only the commit just made here, preserving all worktree/index changes for retry.
+            if committed and git(source, 'rev-parse', 'HEAD').decode().strip() == committed:
+                git(source, 'reset', '--soft', run['baseCommit'])
             raise
         project = self.app.state.store.read(project_id)
-        project.setdefault('git', {})['commit'] = git(source, 'rev-parse', 'HEAD').decode().strip()
+        project.setdefault('git', {})['commit'] = committed
         self.app.state.store.write(project)
-        run.update(status='COMMITTED', acceptedAt=now())
+        run.update(status='COMMITTED', acceptedAt=now(), requiresCleanup=False)
         self.save(run)
-        return {'featureId': run['featureId'], 'commitScope': 'COMPLETE' if patch else 'METADATA_ONLY',
+        return {'featureId': run['featureId'], 'commitScope': 'COMPLETE' if current_paths else 'METADATA_ONLY',
                 'status': self.status(project_id)}
 
     def shutdown(self):

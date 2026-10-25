@@ -41,15 +41,15 @@
 | GET | /projects/{id}/summary | 读取共享摘要文件 |
 
 功能编辑使用项目内固定版 Codex，后台线程运行 `codex exec --json`，通过 SSE 转发执行输出。
-- `POST /projects/{id}/edits`：提交 add / modify / delete，创建独立候选仓库并组织 Prompt。
+- `POST /projects/{id}/edits`：提交 add / modify / delete，记录 Git 起点并组织 Prompt，直接在项目工作区执行。
 - `GET /agent/models`：读取模型配置及副本安装/认证配置状态。
 - `GET /projects/{id}/agent/runs/{runId}`、`.../events`：任务快照、支持事件 ID 续传的 SSE。
 - `GET /projects/{id}/agent/progress`：执行状态，不虚构百分比。
-- `GET /projects/{id}/agent/runs/{runId}/graph`：候选文件节点。
-- `GET / PUT /projects/{id}/diff`：读取、修改候选文件内容。
-- `POST /projects/{id}/git/operations`：候选文件确认、取消确认、恢复、整体应用或放弃。
+- `GET /projects/{id}/agent/runs/{runId}/graph`：未提交修改文件节点。
+- `GET / PUT /projects/{id}/diff`：读取、修改项目工作区文件内容。
+- `POST /projects/{id}/git/operations`：文件暂存、取消暂存、恢复、整体提交或放弃回退。
 
-`data/agent-runs/` 保存任务、Prompt、JSONL 日志与候选工作区；`data/codex-home/` 保存原生 `config.toml`、可选的 `<名称>.config.toml` 和独立登录状态。模型下拉框通过 Codex 的 `model/list` 读取，`config.toml` 指定默认模型；不再维护 `.env` 模型列表，也不要求每个模型创建一个 profile。
+`data/agent-runs/` 保存任务起点、Prompt、JSONL 日志和普通文本结果（不再创建候选工作区）；`data/codex-home/` 保存原生 `config.toml`、可选的 `<名称>.config.toml` 和独立登录状态。模型下拉框通过 Codex 的 `model/list` 读取，`config.toml` 指定默认模型；不再维护 `.env` 模型列表，也不要求每个模型创建一个 profile。
 正式源码和 summary.json 只在用户确认后更新；Git 仅作本地版本管理，不推送远程。
 错误返回 `{error:{code,message}}`；参数校验失败返回 422。
 

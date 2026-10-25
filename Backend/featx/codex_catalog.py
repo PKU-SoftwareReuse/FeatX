@@ -35,18 +35,18 @@ def list_models(binary, home, env):
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('读取 Codex 模型列表超时')
+                raise TimeoutError('读取智能体模型列表超时')
             try:
                 message = messages.get(timeout=remaining)
             except queue.Empty as exc:
-                raise TimeoutError('读取 Codex 模型列表超时') from exc
+                raise TimeoutError('读取智能体模型列表超时') from exc
             if message is None:
-                raise RuntimeError('Codex 模型目录进程已退出，请检查原生配置')
+                raise RuntimeError('智能体模型目录进程已退出，请检查原生配置')
             if not isinstance(message, dict):
                 continue
             if message.get('id') == request_id:
                 if 'error' in message:
-                    raise RuntimeError('Codex 无法读取模型目录，请检查配置或登录状态')
+                    raise RuntimeError('智能体无法读取模型目录，请检查配置或登录状态')
                 return message['result']
 
     try:
@@ -66,7 +66,7 @@ def list_models(binary, home, env):
             if not cursor:
                 return result
             if cursor in seen:
-                raise RuntimeError('Codex 模型目录返回了重复分页标记')
+                raise RuntimeError('智能体模型目录返回了重复分页标记')
             seen.add(cursor)
             request_id += 1
     finally:
