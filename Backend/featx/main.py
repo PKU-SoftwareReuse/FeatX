@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from . import projects, analyses, graphs, operations, uploads
+from . import projects, analyses, graphs, operations, uploads, files
 from .errors import AppError
 from .reposummary import RepoSummaryClient
 from .store import Store
@@ -29,7 +29,7 @@ def create_app(data_dir=None, reposummary_url=None, shared_dir=None):
     def dependency_health():
         return app.state.reposummary.health()
 
-    for router in (uploads.router, projects.router, analyses.router, graphs.router, operations.router):
+    for router in (uploads.router, projects.router, analyses.router, graphs.router, operations.router, files.router):
         app.include_router(router, prefix='/api')
 
     return app

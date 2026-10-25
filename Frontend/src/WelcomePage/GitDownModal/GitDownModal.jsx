@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from "react";
 import {Alert, Button, Input, message, Modal, Tag} from "antd";
-import {ArrowRightOutlined, CheckOutlined, GithubOutlined, LinkOutlined, LoadingOutlined} from "@ant-design/icons";
+import {ArrowRightOutlined, CheckOutlined, ForkOutlined, LinkOutlined, LoadingOutlined} from "@ant-design/icons";
 import API from "../../api";
 import welcomeStyles from "../WelcomePage.module.css";
 import styles from "./GitDownModal.module.css";
@@ -84,10 +84,10 @@ export default function GitDownModal({reloadGetProjectsInfo}) {
 
     const refLabel = verified?.refType === "tag" ? "标签" : "分支";
     return <>
-        <Button icon={<GithubOutlined/>} className={welcomeStyles.confirmButton} onClick={() => {reset(); setVisible(true);}}>Git 导入</Button>
+        <Button icon={<ForkOutlined/>} className={welcomeStyles.confirmButton} onClick={() => {reset(); setVisible(true);}}>Git 导入</Button>
         <Modal open={visible} onCancel={close} width={600} centered maskClosable={false} keyboard={!importing}
             closable={!importing} className={styles.modal} afterOpenChange={open => {if (open) urlInput.current?.focus();}}
-            title={<div className={styles.title}><span className={styles.titleIcon}><GithubOutlined/></span><div><h2>从 Git 导入项目</h2><p>连接你的代码仓库，开始整理功能摘要</p></div></div>}
+            title={<div className={styles.title}><span className={styles.titleIcon}><ForkOutlined/></span><div><h2>从 Git 导入项目</h2><p>支持 GitHub、GitLab、GitLink 等 Git 仓库</p></div></div>}
             footer={<div className={styles.footer}>
                 <span>{importing ? "导入完成后将自动生成摘要" : verified ? "确认后才会下载仓库" : "验证链接不会下载项目"}</span>
                 <div><Button onClick={close} disabled={importing}>取消</Button>

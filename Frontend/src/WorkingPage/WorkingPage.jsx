@@ -1,16 +1,14 @@
 // WorkingPage.jsx
 
+import usePageNavigation from "../utils/usePageNavigation";
 import styles from './WorkingPage.module.css';
-import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
+import {lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {Alert, Dropdown, Segmented, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
+    ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
     CloseOutlined,
-    DeleteTwoTone,
-    EditTwoTone,
-    PlusSquareTwoTone,
     ExclamationCircleOutlined,
     SearchOutlined,
-    SwapOutlined,
     ApartmentOutlined,
     CheckOutlined,
     CheckCircleOutlined,
@@ -20,13 +18,15 @@ import {
 import classNames from "classnames";
 
 import API from "../api";
-import FeatureGraph from "../graph/featureGraph/FeatureGraph";
+import {EpicIcon, FeatureIcon, FeatureCatalogIcon, GraphViewIcon, AgentViewIcon} from "../components/FeatureIcons";
+import FeatureGraph from "../graph/WorkspaceGraph/WorkspaceGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
 import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
 import {getDisplayField} from "../utils/text";
 import {localizeOperationProgressMessage} from "../utils/progressText";
 
+const SourcePreview = lazy(() => import("./SourcePreview"));
 const {Panel} = Collapse;
 const {TextArea} = Input;
 const loadGitDiffEditor = () => import("./GitDiffEditor/GitDiffEditor");
@@ -407,83 +407,8 @@ export const FeatureListItem = ({
     compressed,
     minimal,
 }) => {
-    const descriptionRef = useRef(null);
-    const featureContentRef = useRef(null);
-    const [singleLine, setSingleLine] = useState(false);
-    const [preservedHeight, setPreservedHeight] = useState(null);
-    const [preservedLineCount, setPreservedLineCount] = useState(1);
-    const isSelected = selectedFeatureItem != null
-        && item.featureId === selectedFeatureItem.featureId;
+    const isSelected = selectedFeatureItem != null && item.featureId === selectedFeatureItem.featureId;
     const isEditing = (selectedType === "edit" || selectedType === "add") && isSelected;
-
-    useEffect(() => {
-        if (compressed || !featureContentRef.current) return undefined;
-
-        const itemElement = featureContentRef.current.closest("[data-feature-id]");
-        if (!itemElement) return undefined;
-
-        const measureHeight = () => {
-            const height = Math.ceil(itemElement.getBoundingClientRect().height);
-            if (height > 0) {
-                setPreservedHeight((current) => current === height ? current : height);
-            }
-        };
-
-        const frameId = window.requestAnimationFrame(measureHeight);
-        if (typeof ResizeObserver === "undefined") {
-            window.addEventListener("resize", measureHeight);
-            return () => {
-                window.cancelAnimationFrame(frameId);
-                window.removeEventListener("resize", measureHeight);
-            };
-        }
-
-        const observer = new ResizeObserver(measureHeight);
-        observer.observe(itemElement);
-        return () => {
-            window.cancelAnimationFrame(frameId);
-            observer.disconnect();
-        };
-    }, [compressed, description, isEditing, itemNumber]);
-
-    useEffect(() => {
-        if (compressed) return undefined;
-        if (isEditing || !descriptionRef.current) {
-            setSingleLine(false);
-            return undefined;
-        }
-
-        const descriptionElement = descriptionRef.current;
-        const measureLineCount = () => {
-            const computedStyle = window.getComputedStyle(descriptionElement);
-            const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight);
-            const fontSize = Number.parseFloat(computedStyle.fontSize) || 14;
-            const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.2;
-            const lineCount = Math.max(
-                1,
-                Math.round(descriptionElement.getBoundingClientRect().height / lineHeight)
-            );
-            setSingleLine(lineCount === 1);
-            setPreservedLineCount((current) => current === lineCount ? current : lineCount);
-        };
-
-        const frameId = window.requestAnimationFrame(measureLineCount);
-        if (typeof ResizeObserver === "undefined") {
-            window.addEventListener("resize", measureLineCount);
-            return () => {
-                window.cancelAnimationFrame(frameId);
-                window.removeEventListener("resize", measureLineCount);
-            };
-        }
-
-        const observer = new ResizeObserver(measureLineCount);
-        observer.observe(descriptionElement);
-        return () => {
-            window.cancelAnimationFrame(frameId);
-            observer.disconnect();
-        };
-    }, [compressed, description, isEditing, itemNumber]);
-
     return (
         <List.Item
             onClick={() => onClickItem(item)}
@@ -496,18 +421,12 @@ export const FeatureListItem = ({
                 [styles.featureItemMinimal]: minimal,
                 [styles.featureItemEditing]: isEditing,
             })}
-            style={compressed && preservedHeight && !isEditing ? {
-                height: `${preservedHeight}px`,
-                minHeight: `${preservedHeight}px`,
-                maxHeight: `${preservedHeight}px`,
-                "--feature-line-clamp": preservedLineCount,
-            } : undefined}
         >
-            <div ref={featureContentRef} className={styles.featureContent}>
+            <div className={styles.featureContent}>
                 {isEditing ? (
                     <Tooltip title={!submitEnabled ? copy.pendingChanges : ""}>
                         <div className={styles.featureEditor}>
-                            <span className={styles.featureNumber}>{itemNumber}</span>
+                            <FeatureIcon className={styles.featureGlyph}/>
                             <TextArea
                                 value={editedText}
                                 onChange={(event) => setEditedText(event.target.value)}
@@ -526,37 +445,30 @@ export const FeatureListItem = ({
                         </div>
                     </Tooltip>
                 ) : minimal ? (
-                    <span className={styles.featureNumber}>{itemNumber}</span>
+                    <FeatureIcon className={styles.featureGlyph}/>
                 ) : compressed ? (
                     <div className={styles.featureDescription}>
-                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
+                        <FeatureIcon className={styles.featureGlyph}/>{" "}
                         <span>{description}</span>
                     </div>
                 ) : (
-                    <div ref={descriptionRef} className={styles.featureDescription}>
-                        <span className={styles.featureNumber}>{itemNumber}</span>{" "}
+                    <div className={styles.featureDescription}>
+                        <FeatureIcon className={styles.featureGlyph}/>{" "}
                         <span>{description}</span>
                     </div>
                 )}
             </div>
             <div className={classNames(styles.featureActions, {
-                [styles.featureActionsSingleLine]: singleLine,
+                [styles.featureActionsSingleLine]: true,
                 [styles.featureActionsMinimal]: minimal,
             })}>
+                <Dropdown trigger={['click']} menu={{items:[{key:'delete',label:'删除功能项',icon:<DeleteOutlined/>,danger:true}],onClick:({domEvent}) => {domEvent.stopPropagation(); handleDelete(item);}}}>
+                    <Button type="text" aria-label="更多功能项操作" icon={<MoreOutlined/>} onClick={event => event.stopPropagation()} className={styles.icon}/>
+                </Dropdown>
                 <Button
                     type="text"
-                    icon={<DeleteTwoTone twoToneColor="#F74E52"/>}
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        handleDelete(item);
-                    }}
-                    className={classNames(styles.icon, {
-                        [styles.selectedIcon]: isSelected && selectedType === "delete",
-                    })}
-                />
-                <Button
-                    type="text"
-                    icon={<EditTwoTone twoToneColor="#EFA92B"/>}
+                    icon={<EditOutlined/>}
+                    aria-label="编辑功能项"
                     onClick={(event) => {
                         event.stopPropagation();
                         handleEdit(item);
@@ -573,6 +485,15 @@ export const FeatureListItem = ({
 const WorkingPage = () => {
 
     const copy = WORKING_PAGE_COPY;
+    const navigate = usePageNavigation();
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [fileQuery, setFileQuery] = useState("");
+    const [addOpen, setAddOpen] = useState(false);
+    const [addEpic, setAddEpic] = useState(null);
+    const [addDescription, setAddDescription] = useState("");
+    const [sourcePreview, setSourcePreview] = useState(null);
+    const [sourceError, setSourceError] = useState("");
+    const sourceRequest = useRef(0);
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
@@ -802,7 +723,7 @@ const WorkingPage = () => {
     const [viewportWidth, setViewportWidth] = useState(() => (
         typeof window === "undefined" ? 1440 : window.innerWidth
     ));
-    const [featurePanelSize, setFeaturePanelSize] = useState("45%");
+    const [featurePanelSize, setFeaturePanelSize] = useState(300);
     const drawerResizeRef = useRef(null);
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
     const [isCandidateDiff, setIsCandidateDiff] = useState(false);
@@ -968,6 +889,8 @@ const WorkingPage = () => {
             message.warning(copy.saveBeforeClose);
             return false;
         }
+        const sourceToken = ++sourceRequest.current;
+        setSourcePreview(null); setSourceError(''); setCodeDiff('');
         setIsCandidateDiff(false);
         setCandidateFile(null);
         setCandidateDraft('');
@@ -980,6 +903,15 @@ const WorkingPage = () => {
         setLoadingCode(true)
 
         const candidateReady = shouldShowCandidateDiff(confirmEnabled, selectedType, codeNode);
+
+        if (!candidateReady && selectedType !== 'delete') {
+            API.getSourceFile(codeNode?.funcFile || classNodeId).then(data => {
+                if (sourceRequest.current === sourceToken) setSourcePreview(data);
+            }).catch(error => {
+                if (sourceRequest.current === sourceToken) setSourceError(error.message || '无法读取文件');
+            }).finally(() => {if (sourceRequest.current === sourceToken) setLoadingCode(false);});
+            return true;
+        }
 
         if (candidateReady) {
             const candidateIdentifier = candidateIdentifierForNode(
@@ -1521,20 +1453,8 @@ const WorkingPage = () => {
         }
     }
 
-    const handleAdd = (module) => {
-        if (hasPendingFeatureOperation() && !(selectedType === "add" && activeKey === module.moduleId)) {
-            confirmDiscardAndRun(() => {
-                goAdd(module)
-            });
-        } else if (selectedType == "add" && activeKey == module.moduleId) {
-            return
-        } else {
-            goAdd(module)
-        }
-    }
-
     // Add 按钮事件
-    const goAdd = (module) => {
+    const goAdd = (module, initialDescription) => {
         if (API.capabilities?.edits === false) return API.notifyUnavailable("特性编辑");
         clearPostAgentTimers();
         clearFocusGraphStages();
@@ -1551,6 +1471,7 @@ const WorkingPage = () => {
         setSelectedType("add")
 
         let newFeatureItem = createNewFeature(module.moduleId);
+        if (initialDescription !== undefined) newFeatureItem.featureDescription = initialDescription;
 
         setFeatureData((prev) =>
             prev.map((m) => {
@@ -1566,13 +1487,13 @@ const WorkingPage = () => {
         setEditedText(newFeatureItem.featureDescription)
         setSelectedFeatureItem(newFeatureItem)
         getFeatureGraphData(null, "add")
-
+        return newFeatureItem;
     };
 
     const [chatMode, setChatMode] = useState(false)
     const [chatContent, setChatContent] = useState("")
     const containerRef = useRef(null);
-    const [modeTrans, setModeTrans] = useState(false)
+    const [, setModeTrans] = useState(false)
 
     useEffect(() => {
         if (containerRef.current) {
@@ -2069,14 +1990,14 @@ const WorkingPage = () => {
             })
     }
 
-    const submitEdit = (item) => {
+    const submitEdit = (item, description = editedText, operation = selectedType) => {
         if (!selectedModel) return;
 
         setLoadingFeatureList(true)
         setSubmitEnabled(false)
         clearFocusGraphStages()
         const expectedOperation = `${isPythonProject ? "python" : "java"}-${
-            selectedType === 'add' ? "add" : "modify"
+            operation === 'add' ? "add" : "modify"
         }`;
         setOperationProgress({
             operation: expectedOperation,
@@ -2090,9 +2011,9 @@ const WorkingPage = () => {
         })
         startProgressPolling(expectedOperation)
 
-        if (selectedType == 'edit') {
+        if (operation == 'edit') {
             // console.log(editedText);
-            API.modifyFeature(editedText, selectedModel)
+            API.modifyFeature(description, selectedModel)
                 .then(async (data) => {
                     const runId = data?.runId
                     restoredRunRef.current = runId
@@ -2100,7 +2021,7 @@ const WorkingPage = () => {
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
                     await loadFocusGraphStages(runId, "edit")
-                    handleChat(API.getLlmResponse(runId, selectedModel), runId)
+                    handleChat(API.getLlmResponse(runId, selectedModel), runId, operation)
                 })
                 .catch((error) => {
                     console.error('Error Modify Feature:', error)
@@ -2120,10 +2041,11 @@ const WorkingPage = () => {
                     setLoadingFeatureList(false)
                     setSubmitEnabled(true)
                 });
-        } else if (selectedType == 'add') {
+        } else if (operation == 'add') {
             // 构建请求参数，包含moduleId
             const requestData = {
-                featureDescription: editedText,
+                featureDescription: description,
+                model: selectedModel,
                 moduleId: item.moduleId || selectedFeatureItem.moduleId,
 
             };
@@ -2136,7 +2058,7 @@ const WorkingPage = () => {
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
                     await loadFocusGraphStages(runId, "add")
-                    handleChat(API.getLlmResponse(runId, selectedModel), runId)
+                    handleChat(API.getLlmResponse(runId, selectedModel), runId, operation)
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -2385,8 +2307,21 @@ const WorkingPage = () => {
     const splitterLayoutCondensed = featurePanelCondensed && diffDrawerLayoutSettled;
     const featurePanelDrawerSize = Math.round(Math.max(
         FEATURE_PANEL_MINIMAL_WIDTH,
-        Math.min(380, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
+        Math.min(280, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
     ));
+    const openAddFeature = (epicId = null) => {
+        const open = () => {setAddEpic(epicId || activeKey || featureData[0]?.moduleId || null); setAddDescription(''); setAddOpen(true);};
+        if (hasPendingFeatureOperation()) confirmDiscardAndRun(open); else open();
+    };
+    const submitNewFeature = () => {
+        if (API.capabilities?.edits === false || API.capabilities?.agent === false) return API.notifyUnavailable('智能体功能编辑');
+        if (!selectedModel) return message.warning('请先选择模型');
+        const epic = featureData.find(item => String(item.moduleId) === String(addEpic));
+        if (!epic || !addDescription.trim()) return;
+        const item = goAdd(epic, addDescription.trim());
+        if (item) {setAddOpen(false); submitEdit(item, addDescription.trim(), 'add');}
+    };
+
     const featurePanelMinimal = splitterLayoutCondensed
         && featurePanelDrawerSize < FEATURE_PANEL_DESCRIPTION_MIN_WIDTH;
     const graphPanelCompact = splitterLayoutCondensed
@@ -2411,6 +2346,29 @@ const WorkingPage = () => {
                         "--workspace-container-width": `${workspaceContainerWidth}px`,
                     }}
                 >
+                    <header className={styles.topbar}>
+                        <img className={styles.brandLogo} src="/assets/welcome/brand/featx-logo.svg" alt="FeatX"/>
+                        <Button type="text" icon={<ArrowLeftOutlined/>} onClick={() => navigate('/welcome')}>项目仓库</Button>
+                        <span className={styles.projectTitle} title={currentProject?.projectName || currentProject?.name}>{currentProject?.projectName || currentProject?.name || '工作台'}</span>
+                        {(currentProject?.git?.branch || currentProject?.git?.refName) && <span className={styles.branchBadge}>{currentProject.git.branch || currentProject.git.refName}</span>}
+                        <div className={styles.topbarModel}><label className={styles.modelControl}>
+                                    <span className={styles.modelLabel}>{copy.model}</span>
+                                    <Select
+                                        aria-label={copy.model}
+                                        className={styles.modelSelect}
+                                        value={selectedModel}
+                                        options={models.map((model) => ({value: model, label: model}))}
+                                        onChange={setSelectedModel}
+                                        loading={loadingModels}
+                                        disabled={loadingModels || models.length === 0 || loadingFeatureList || operationProgress?.running}
+                                        placeholder={API.capabilities?.agent === false ? ("Agent 尚未实现") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
+                                        showSearch
+                                        optionFilterProp="label"
+                                        popupMatchSelectWidth={false}
+                                        size="small"
+                                    />
+                                </label></div>
+                    </header>
                     <main
                         className={classNames(styles.workspace, {
                             [styles.workspaceWithDrawer]: diffDrawerOpen,
@@ -2419,17 +2377,17 @@ const WorkingPage = () => {
                         <Splitter
                             className={styles.background_area}
                             onResize={(sizes) => {
-                                if (!diffDrawerOpen && Number.isFinite(sizes[0])) {
+                                if (!sidebarCollapsed && !diffDrawerOpen && Number.isFinite(sizes[0])) {
                                     setFeaturePanelSize(sizes[0]);
                                 }
                             }}
                         >
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel
-                        size={splitterLayoutCondensed ? featurePanelDrawerSize : featurePanelSize}
-                        min={splitterLayoutCondensed ? featurePanelDrawerSize : "20%"}
-                        max={splitterLayoutCondensed ? featurePanelDrawerSize : "60%"}
-                        resizable={!splitterLayoutCondensed}
+                        size={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : featurePanelSize}
+                        min={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : 245}
+                        max={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : "45%"}
+                        resizable={!sidebarCollapsed && !splitterLayoutCondensed}
                         className={classNames(styles.main_area, {
                             [styles.featurePanelAreaMinimal]: featurePanelMinimal,
                         })}
@@ -2441,30 +2399,10 @@ const WorkingPage = () => {
                             })}
                             title={
                                 <div className={styles.card_title} title={copy.featurePanel}>
-                                    {featurePanelMinimal
-                                        ? ("功")
-                                        : copy.featurePanel}
+                                    <FeatureCatalogIcon/> <span>功能特征</span>
                                 </div>
                             }
-                            extra={
-                                <label className={styles.modelControl}>
-                                    <span className={styles.modelLabel}>{copy.model}</span>
-                                    <Select
-                                        aria-label={copy.model}
-                                        className={styles.modelSelect}
-                                        value={selectedModel}
-                                        options={models.map((model) => ({value: model, label: model}))}
-                                        onChange={setSelectedModel}
-                                        loading={loadingModels}
-                                        disabled={loadingModels || models.length === 0 || loadingFeatureList}
-                                        placeholder={API.capabilities?.agent === false ? ("Agent 尚未实现") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
-                                        showSearch
-                                        optionFilterProp="label"
-                                        popupMatchSelectWidth={false}
-                                        size="small"
-                                    />
-                                </label>
-                            }
+                            extra={<Button size="small" icon={<PlusOutlined/>} onClick={() => openAddFeature()}>新增功能项</Button>}
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
@@ -2505,18 +2443,20 @@ const WorkingPage = () => {
                                                 header={
                                                     <div className={styles.moduleTitle}>
                                                         <div className={styles.moduleHeading}>
-                                                            <span className={styles.moduleNumber}>{moduleIndex + 1}.</span>{" "}
+                                                            <EpicIcon className={styles.epicIcon}/>
                                                             <span className={styles.moduleDescription}>
                                                                 {getModuleDescription(module)}
                                                             </span>
                                                         </div>
                                                         <div className={styles.iconContainer}>
+                                                            <span className={styles.epicCount}>{module.featureList.filter(item => !item.isNew).length}</span>
                                                             <Button
                                                                 type="text"
-                                                                icon={<PlusSquareTwoTone twoToneColor="#13B54D"/>}
+                                                                icon={<PlusOutlined/>}
+                                                                aria-label="在此主题新增功能项"
                                                                 onClick={(e) => {
                                                                     e.stopPropagation()
-                                                                    handleAdd(module)
+                                                                    openAddFeature(module.moduleId)
                                                                 }}
                                                                 className={classNames(styles.icon, {
                                                                     [styles.selectedIcon]: module.moduleId === activeKey && (selectedType === 'add'),
@@ -2559,13 +2499,14 @@ const WorkingPage = () => {
                                     </Collapse>
                                 </div>
                                 </Spin>
+                                <div className={styles.sidebarFoot}>{featureData.length} 个主题 · {featureData.reduce((sum, epic) => sum + epic.featureList.filter(item => !item.isNew).length, 0)} 个功能项</div>
                             </div>
                         </Card>
                     </Splitter.Panel>
 
 
                     {/*中间功能去臃肿详情*/}
-                    <Splitter.Panel min={splitterLayoutCondensed ? 0 : "55%"} className={styles.main_area}>
+                    <Splitter.Panel min={splitterLayoutCondensed ? 0 : 280} className={styles.main_area}>
                         <div className={styles.panelShell}>
                             <Card
                                 className={classNames(styles.panelCard, {
@@ -2575,7 +2516,10 @@ const WorkingPage = () => {
                                 title={
                                     <div className={styles.card_title}>
                                         <div>
-                                            {chatMode ? copy.agentPanel : copy.graphPanel}
+                                            <div className={styles.viewSwitch}>
+                                                <Tooltip title={sidebarCollapsed ? '展开功能列表' : '收起功能列表'}><Button type="text" icon={sidebarCollapsed ? <MenuUnfoldOutlined/> : <MenuFoldOutlined/>} onClick={() => setSidebarCollapsed(value => !value)}/></Tooltip>
+                                                <Segmented aria-label="工作台视图" value={chatMode ? 'agent' : 'graph'} options={[{value:'graph',label:'代码图谱'},{value:'agent',label:'智能体输出'}]} onChange={value => setChatMode(value === 'agent')}/>
+                                            </div>
                                         </div>
                                         <div className={styles.panelActions}>
                                             {showGitOperationActions && (
@@ -2596,7 +2540,7 @@ const WorkingPage = () => {
                                                             className={styles.gitCommitButton}
                                                             aria-label={copy.commitChanges}
                                                         >
-                                                            {stagedFileCount > 0 ? stagedFileCount : null}
+                                                            确认修改 {stagedFileCount > 0 ? stagedFileCount : null}
                                                         </Button>
                                                     </Tooltip>
                                                     <Tooltip title={copy.confirmAllChanges}>
@@ -2633,7 +2577,7 @@ const WorkingPage = () => {
                                                             }}
                                                             className={styles.icon}
                                                             aria-label={copy.discardAllChanges}
-                                                        />
+                                                        >放弃修改</Button>
                                                     </Tooltip>
                                                 </>
                                             )}
@@ -2651,27 +2595,25 @@ const WorkingPage = () => {
                                                     disabled={!hasFocusGraphStages}
                                                 />
                                             </Tooltip>
-                                            <Button
-                                                type="text"
-                                                icon={<SwapOutlined/>}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setChatMode(!chatMode)
-                                                }}
-                                                className={styles.icon}
-                                                disabled={!modeTrans}
-                                            />
+                                            {!chatMode && <Input.Search className={styles.fileSearch} aria-label="查找文件" placeholder="查找文件或元素" allowClear value={fileQuery} onChange={event => setFileQuery(event.target.value)}/>}
                                         </div>
                                     </div>
                                 }
                                 bordered={false}
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
+                                <div className={styles.featureContext}>
+                                    <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
+                                    <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
+                                        <strong title={selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : ''}>{selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : '请选择功能项'}</strong></div>
+                                    <span className={styles.contextCount}>{graphData?.nodes?.length || 0} 个文件</span>
+                                    <span className={styles.contextCount}>{selectedFeatureItem?.codeElements?.length || 0} 个元素</span>
+                                </div>
                                 <div className={classNames(styles.panelView, {
                                     [styles.panelViewHidden]: !chatMode,
                                 })}>
                                     <div ref={containerRef} className={styles.scrollContainer}>
-                                        <MarkdownRendererComponent content={chatContent}/>
+                                        {chatContent ? <MarkdownRendererComponent content={chatContent}/> : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
                                     </div>
                                 </div>
                                 <div
@@ -2690,7 +2632,8 @@ const WorkingPage = () => {
                                             graphData={graphData}
                                             onNodeClick={getCodeDiff}
                                             onBackgroundClick={handleGraphBackgroundClick}
-                                            nodeFontSize={17}
+                                            searchQuery={fileQuery}
+                                            viewportKey={`${diffDrawerOpen}-${diffDrawerWidth}-${sidebarCollapsed}-${featurePanelSize}`}
                                         />
                                     </Spin>
                                 </div>
@@ -2728,7 +2671,7 @@ const WorkingPage = () => {
                         />
                         <header className={styles.diffDrawerHeader}>
                             <div className={styles.diffDrawerTitle}>
-                                <h2>{isCandidateDiff ? copy.candidateDiff : copy.changesPanel}</h2>
+                                <h2>{isCandidateDiff ? copy.candidateDiff : '源码预览'}</h2>
                                 {(candidateFile?.path || selectedCodeNodeId) && (
                                     <p>{candidateFile?.path || selectedCodeNodeId}</p>
                                 )}
@@ -2744,7 +2687,7 @@ const WorkingPage = () => {
                             </div>
                         </header>
                         <div className={classNames(styles.diffDrawerBody, {
-                            [styles.diffDrawerBodyEditor]: isCandidateDiff,
+                            [styles.diffDrawerBodyEditor]: isCandidateDiff || Boolean(sourcePreview),
                         })}>
                             <Spin spinning={loadingCode} tip={copy.fetchingCode} size="large">
                                 {isCandidateDiff && candidateFile ? (
@@ -2781,10 +2724,10 @@ const WorkingPage = () => {
                                         </div>
                                     </div>
                                 ) : (
-                                    <CodeDiffComponent
-                                        diffText={codeDiff}
-                                        isPlainCode={false}
-                                    />
+                                    sourceError ? <Alert type="error" showIcon message={sourceError}/> : sourcePreview ?
+                                        <Suspense fallback={<Spin/>}><SourcePreview file={sourcePreview}/></Suspense> :
+                                        <CodeDiffComponent diffText={codeDiff} isPlainCode={false}/>
+
                                 )}
                                 {isCandidateDiff && candidateFile && (
                                     <Tooltip
@@ -2844,6 +2787,14 @@ const WorkingPage = () => {
                     </aside>
                 </div>
             </Spin>
+            <Modal title="新增功能项" open={addOpen} onCancel={() => setAddOpen(false)} onOk={submitNewFeature} okText="提交并调用智能体" cancelText="取消" width={480}
+                okButtonProps={{disabled: !addEpic || !addDescription.trim()}}>
+                <div className={styles.addFeatureForm}>
+                    <label>所属 Epic</label><Select aria-label="所属 Epic" value={addEpic} onChange={setAddEpic} options={featureData.map(epic => ({value:epic.moduleId,label:getModuleDescription(epic)}))}/>
+                    <label>功能描述</label><TextArea aria-label="功能描述" value={addDescription} onChange={event => setAddDescription(event.target.value)} autoSize={{minRows:4,maxRows:8}} placeholder="描述希望新增的功能及预期行为"/>
+                    <small>使用模型：{selectedModel || '暂无可用模型'}。{API.capabilities?.agent === false ? '智能体服务尚未接入，暂不能执行修改。' : '提交后将自动调用智能体。'}</small>
+                </div>
+            </Modal>
             <FocusGraphStageModal
                 open={focusGraphModalOpen}
                 onClose={() => setFocusGraphModalOpen(false)}

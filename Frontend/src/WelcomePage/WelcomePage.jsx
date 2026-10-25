@@ -1,10 +1,11 @@
 // WelcomePage.jsx
 import {useEffect, useState} from "react";
-import {useNavigate} from 'react-router-dom';
+import usePageNavigation from "../utils/usePageNavigation";
 import styles from './WelcomePage.module.css';
 import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, Progress, Spin, Tag, Tooltip} from "antd";
-import {ArrowRightOutlined, AppstoreOutlined, FolderOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
+import {ArrowRightOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
+import {repositoryDisplay} from "../utils/repositoryDisplay";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
 import {
@@ -92,12 +93,13 @@ const statusColor = (status) => {
 
 const getGitLink = (project) => project.gitLink || project.githubLink || "";
 
-const getGitName = (project, copy) => project.gitName || project.githubName || getGitLink(project) || copy.notLinked;
-
-const isBrowsableGitLink = (link) => /^https?:\/\//i.test(link || "");
+const repositoryIcons = {
+    local: <FolderOutlined/>, github: <GithubOutlined/>, gitlab: <GitlabOutlined/>,
+    gitlink: <LinkOutlined/>, git: <ForkOutlined/>,
+};
 
 const WelcomePage = () => {
-    const navigate = useNavigate();
+    const navigate = usePageNavigation();
 
     const copy = WELCOME_COPY;
 
@@ -444,6 +446,7 @@ const WelcomePage = () => {
                         <div className={styles.projectGrid}>
                             {visibleProjects.map(project => {
                                 const progress = progressForProject(project);
+                                const repository = repositoryDisplay(project);
                                 const state = progress?.status || project.analysis?.status;
                                 const pending = project.summaryPending;
                                 const failed = state === "failed";
@@ -466,8 +469,11 @@ const WelcomePage = () => {
                                         {pending && progress?.percent != null && <Progress percent={Math.round(progress.percent)} size="small"/>}
                                     </div>
                                     <div className={styles.cardSource}>
-                                        {isBrowsableGitLink(getGitLink(project)) ? <a href={getGitLink(project)} target="_blank" rel="noopener noreferrer" title={getGitLink(project)}><GithubOutlined/><span>{getGitName(project, copy)}</span></a>
-                                            : <span><FolderOutlined/> {project.source?.kind === "upload" ? "本地项目" : getGitName(project, copy)}</span>}
+                                        {repository.href
+                                            ? <a href={repository.href} target="_blank" rel="noopener noreferrer" title={repository.label}>
+                                                {repositoryIcons[repository.platform]}<span>{repository.label}</span>
+                                            </a>
+                                            : <span title={repository.label}>{repositoryIcons[repository.platform]}<span>{repository.label}</span></span>}
                                     </div>
                                     <div className={styles.cardFooter}>
                                         <span className={styles.createdAt}>{project.createdAt ? new Date(project.createdAt).toLocaleDateString("zh-CN") : ""}</span>
