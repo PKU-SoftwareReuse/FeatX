@@ -2,4 +2,4 @@
 name = "featx-backend"
 version = "1.0.0"
 requires-python = ">=3.11"
-description = "Language-neutral FeatX HTTP backend with JSON file storage"
+description = "FeatX HTTP backend with JSON file storage"

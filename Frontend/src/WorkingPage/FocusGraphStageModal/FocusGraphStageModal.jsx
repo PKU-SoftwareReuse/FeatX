@@ -1,8 +1,8 @@
-import React, {useEffect, useMemo, useRef, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import {Button, Modal, Segmented, Tag} from "antd";
 import {PlayCircleOutlined} from "@ant-design/icons";
 import {DataSet, Network} from "vis-network/standalone/esm/vis-network";
-import {useLanguage} from "../../i18n/LanguageContext";
+
 import styles from "./FocusGraphStageModal.module.css";
 
 const STAGE_ORDER = ["initial", "expanded", "reasoning"];
@@ -21,7 +21,6 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const EXPANDED_VIEW_PADDING = 96;
 
 const modalCopy = {
-    zh: {
         title: "推理图构建阶段",
         replay: "重播动画",
         nodes: "节点",
@@ -46,34 +45,7 @@ const modalCopy = {
             source: "来源",
             score: "得分",
         },
-    },
-    en: {
-        title: "Reasoning Graph Stages",
-        replay: "Replay",
-        nodes: "Nodes",
-        edges: "Edges",
-        callableNode: "callable / field node",
-        typeNode: "type node",
-        filteredNode: "filtered out during reasoning",
-        switchTo: "Switch to",
-        stageLabels: {
-            initial: "Initial Graph",
-            expanded: "Expanded Graph",
-            reasoning: "Reasoning Graph",
-        },
-        stageDescriptions: {
-            initial: "Seed code nodes from retrieved features and their direct relations.",
-            expanded: "The dependency-expanded code graph used for graph ranking.",
-            reasoning: "The Top-K induced subgraph after query-code ranking and personalized PageRank.",
-        },
-        tooltip: {
-            file: "File",
-            category: "Category",
-            source: "Source",
-            score: "Score",
-        },
-    },
-};
+    };
 
 const rgba = ([r, g, b], alpha = 1) => `rgba(${r}, ${g}, ${b}, ${alpha})`;
 
@@ -147,7 +119,7 @@ const toVisNode = (node, options = {}) => {
         opacity = 1,
         sizeScale = 1,
         fadeOut = false,
-        tooltipLabels = modalCopy.en.tooltip,
+        tooltipLabels = modalCopy.tooltip,
     } = options;
     const resolvedNode = {...node, fadeOut: fadeOut || node.fadeOut};
     const baseSize = ["Class", "Interface", "Enum", "Annotation"].includes(node.category) ? 16 : 14;
@@ -489,8 +461,8 @@ const computeStagePositions = (stageMap) => {
 };
 
 const FocusGraphStageModal = ({open, onClose, stages}) => {
-    const {language} = useLanguage();
-    const copy = modalCopy[language] || modalCopy.en;
+
+    const copy = modalCopy;
     const containerRef = useRef(null);
     const networkRef = useRef(null);
     const nodesRef = useRef(null);

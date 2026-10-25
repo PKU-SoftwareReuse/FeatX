@@ -1,4 +1,4 @@
-import {http, getSelectedRepositoryId, setSelectedRepositoryId, projectPath, unavailable, text, notifyUnavailable} from './client';
+import {http, getSelectedRepositoryId, setSelectedRepositoryId, projectPath, unavailable, notifyUnavailable} from './client';
 import {projectView, progressView} from './viewModels';
 
 const data = promise => promise.then(response => response.data);
@@ -7,10 +7,11 @@ export function normalizeGitUrl(value) {
     let url = value.trim();
     if (/^[\w.-]+\/[\w.-]+$/.test(url)) url = `https://github.com/${url}`;
     else if (/^[\w.-]+@[^/:]+:.+$/.test(url)) url = `ssh://${url.replace(':', '/')}`;
-    const parsed = new URL(url);
+    let parsed;
+    try {parsed = new URL(url);} catch (_) {throw new Error('请输入有效的 Git 仓库地址');}
     if (!['https:', 'http:', 'ssh:'].includes(parsed.protocol) || !parsed.hostname || parsed.password
         || (parsed.protocol !== 'ssh:' && parsed.username)) {
-        throw new Error(text('请填写不含密码或令牌的 Git URL', 'Use a Git URL without credentials'));
+        throw new Error('请填写不含密码或令牌的 Git URL');
     }
     return url;
 }
@@ -31,9 +32,9 @@ const projectApi = {
         try {return projectView(await data(http.get(projectPath(id))));}
         catch (error) {if (error.response?.status === 404) setSelectedRepositoryId(null); throw error;}
     },
-    postResummary: async id => {
+    postResummary: async (id, hints = {}) => {
         try {
-            const task = await data(http.post(`${projectPath(id)}/analyses`));
+            const task = await data(http.post(`${projectPath(id)}/summary`, {hints}));
             statusErrors.delete(String(id));
             return task;
         } catch (error) {statusErrors.set(String(id), error.message); throw error;}
@@ -43,8 +44,8 @@ const projectApi = {
         return Object.fromEntries(await Promise.all(projects.map(async project => {
             try {
                 // Poll real active jobs only. A bare registration does not create a remote job.
-                const task = project.analysis ? await data(http.get(`${projectPath(project.id)}/analysis`))
-                    : {status: 'not_started', message: statusErrors.get(project.id)};
+                const task = project.analysis ? await data(http.get(`${projectPath(project.id)}/summary/status`))
+                    : {status: 'not_started', message: statusErrors.get(project.id) || project.summaryError};
                 return [project.id, progressView(task)];
             } catch (error) {return [project.id, progressView({status: 'failed', error: error.message})];}
         })));
@@ -54,16 +55,14 @@ const projectApi = {
         statusErrors.delete(String(id));
         if (String(getSelectedRepositoryId()) === String(id)) setSelectedRepositoryId(null);
     },
-    updateProject: () => unavailable(text('项目设置修改', 'Project settings editing')),
-    uploadProject: form => http.post('/projects/upload', form, {timeout: 120000}).then(response => projectView(response.data)),
-    gitDownRepo: async gitName => {
-        // Address validation only, not a clone/preview. The original dialog says so explicitly.
-        const url = normalizeGitUrl(gitName);
-        return {projectType: text('仅登记', 'Registration only'), repoName: new URL(url).pathname.split('/').filter(Boolean).pop()?.replace(/\.git$/, '') || 'Repository', paths: []};
-    },
-    gitClear: () => Promise.resolve(), // No clone was created, so there is nothing to remove.
-    gitRepo: async (gitName, revision, name) => projectView(await data(http.post('/projects', {
-        name, source: {url: normalizeGitUrl(gitName), revision: revision.trim() || null},
-    }))),
+    updateProject: () => unavailable('项目设置修改'),
+    uploadProject: (form, onUploadProgress) => http.post('/projects/upload', form, {timeout: 120000, onUploadProgress}).then(response => projectView(response.data)),
+    gitDownRepo: async (gitName, commitId) => data(http.post('/projects/git/check', {
+        url: normalizeGitUrl(gitName), commitId: commitId.trim() || null,
+    }, {timeout: 40000})),
+    gitClear: () => Promise.resolve(), // 检查仓库不创建本地副本。
+    gitRepo: async (gitName, commitId, name) => projectView(await data(http.post('/projects', {
+        name, source: {url: normalizeGitUrl(gitName), commitId: commitId.trim() || null},
+    }, {timeout: 600000}))),
 };
 export default projectApi;

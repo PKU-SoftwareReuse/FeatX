@@ -1,7 +1,6 @@
 import React from "react";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {Modal} from "antd";
-import {LanguageProvider} from "../i18n/LanguageContext";
 import API from "../api";
 import WelcomePage from "./WelcomePage";
 
@@ -65,7 +64,6 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-    window.localStorage.setItem("featx-language", "en");
     API.testConnect.mockResolvedValue({});
     API.getProjectsInfo.mockResolvedValue(projects);
     API.getCurrentProject.mockResolvedValue({repoId: 12});
@@ -84,18 +82,18 @@ test("asks before discarding an active Agent run and switches only after confirm
         .mockResolvedValueOnce({});
 
     render(
-        <LanguageProvider>
+        <>
             <WelcomePage/>
-        </LanguageProvider>
+        </>
     );
 
-    const openButtons = await screen.findAllByRole("button", {name: "Open"});
+    const openButtons = await screen.findAllByRole("button", {name: "打开"});
     fireEvent.click(openButtons[1]);
 
-    expect((await screen.findAllByText("Discard current changes and switch projects?")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("放弃当前修改并切换项目？")).length).toBeGreaterThan(0);
     expect(API.discardFeatureChanges).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", {name: "Discard and open"}));
+    fireEvent.click(screen.getByRole("button", {name: "放弃并打开"}));
 
     await waitFor(() => expect(API.discardFeatureChanges).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(API.postProjectPath).toHaveBeenCalledTimes(2));
@@ -107,18 +105,18 @@ test("keeps the current operation when the switch confirmation is cancelled", as
     API.postProjectPath.mockRejectedValueOnce({response: {status: 409}});
 
     render(
-        <LanguageProvider>
+        <>
             <WelcomePage/>
-        </LanguageProvider>
+        </>
     );
 
-    const openButtons = await screen.findAllByRole("button", {name: "Open"});
+    const openButtons = await screen.findAllByRole("button", {name: "打开"});
     fireEvent.click(openButtons[1]);
-    await screen.findAllByText("Discard current changes and switch projects?");
-    fireEvent.click(screen.getByRole("button", {name: "No"}));
+    await screen.findAllByText("放弃当前修改并切换项目？");
+    fireEvent.click(screen.getByRole("button", {name: "取消"}));
 
     await waitFor(() => expect(
-        screen.queryAllByText("Discard current changes and switch projects?")
+        screen.queryAllByText("放弃当前修改并切换项目？")
     ).toHaveLength(0));
     expect(API.discardFeatureChanges).not.toHaveBeenCalled();
     expect(API.postProjectPath).toHaveBeenCalledTimes(1);
@@ -126,7 +124,6 @@ test("keeps the current operation when the switch confirmation is cancelled", as
 });
 
 test("localizes feature-summary progress and presents modules as Topics in Chinese", async () => {
-    window.localStorage.setItem("featx-language", "zh");
     API.getProjectsInfo.mockResolvedValue([{...projects[0], summaryFlag: false}]);
     API.getSummaryProgressAll.mockResolvedValue({
         12: {
@@ -150,9 +147,9 @@ test("localizes feature-summary progress and presents modules as Topics in Chine
     });
 
     render(
-        <LanguageProvider>
+        <>
             <WelcomePage/>
-        </LanguageProvider>
+        </>
     );
 
     await waitFor(() => expect(API.getSummaryProgressAll).toHaveBeenCalled());

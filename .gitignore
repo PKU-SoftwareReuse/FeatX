@@ -1,46 +1,28 @@
-# OS / Editor
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+# Private configuration
+.env
+.env.*
+!.env.example
 
-# Python
-__pycache__/
-*.pyc
-
-# Logs (兜底)
+# Runtime data
+/data/
 *.log
 
-# Env
-.env
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
 
-out/
+# Frontend dependencies and generated output
+node_modules/
+Frontend/build/
+coverage/
 
-# Historical local model data; not used by the current native framework.
-/models/
-
-/Py
-
-# Runtime repositories created/imported by FeatX.
-/repos/
-/agent-logs/
-
-# Project-local Codex experiment toolchain runtime.
-/tools/
-
-code-workspace/
-experiments/
-output/
-scripts/
-tmp/
-
-
-# Local experiment workspaces and service recovery artifacts.
-/codex-workplace/
-/recording/
-/.run/service-recovery-20260910/
-
-# Lightweight demo runtime and local Python environment.
-/data/
-Backend/.venv/
-Frontend/coverage/
+# Editor and OS metadata
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

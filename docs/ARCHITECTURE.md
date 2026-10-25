@@ -1,60 +1,50 @@
-# FeatX 新框架
-
-## 数据流
+# 当前架构
 
 ```text
-React → /api/v1 → FastAPI → HTTP RepoSummary
-                      ↓
-               data/projects/<id>.json
+浏览器 → React :3010 → /api → FastAPI :13010 → HTTP → RepoSummary :18091
+                                  ↓                         ↓
+                         data/projects/<id>.json     共享目录/<id>/summary.json
 ```
 
-一个项目文件保存元信息、最近一次远端任务和该任务的结果。文件使用同目录临时文件、
-fsync、os.replace 原子替换；进程内 RLock 防止单进程并发写冲突。只运行一个 Uvicorn worker。
-不依赖数据库，不自动迁移旧数据。网络请求也在受锁保护的操作内完成，面向小规模本地 demo，
-不是高并发服务器；存储或任务队列扩展留待后续。
+## 职责
 
-## 模块
+- 主后端准备上传文件或 Git 工作区，分配项目 ID、初始化导入起点并提交总结任务。
+- RepoSummary 从共享目录读取项目，报告阶段和进度，将摘要写入 summary.json。
+- 主后端在任务完成后读取共享 JSON，验证项目和任务 ID；不从 HTTP 下载结果。
+- 前端保留原页面和组件，显示真实的 Epic / Feature 层级，按文件组织代码元素节点。
+- 界面只有中文；代码元素名按原文显示，不做源码分析或依赖边推断。
 
-- projects：登记、列表、详情、删除登记；项目 ID 显式传入，不存在全局“当前项目”。
-- analyses：提交远端任务、查询状态、保存完成结果。没有后台 worker、计划任务或隐式重试。
-- graphs：读取原始图、特性和完整结果，不执行任何分析。过滤只在前端发生。
-- reposummary：唯一外部分析客户端，只依赖 HTTP 契约。
-- operations：编辑、Agent、Diff、Git 未实现入口，始终 501。
-- store：JSON 文件存储；models：语言无关结果结构及引用完整性校验。
+## 存储
 
-## 主 API
+- `data/projects/<id>.json`：项目元信息、Git 信息、任务状态，不重复存放完整摘要。
+- `data/uploads/<id>.zip`：上传归档。
+- `SHARED_PROJECT_ROOT/<id>/source/`：实际项目文件和 Git 仓库。
+- `SHARED_PROJECT_ROOT/<id>/summary.json`：唯一正式摘要，使用原子替换写入。
 
-API 根为 `/api/v1`，可交互说明由 `/docs` 提供，OpenAPI 位于 `/openapi.json`。
+使用文件存储和进程内锁，只运行一个后端实例，不使用数据库或消息队列。
 
-| 方法 | 路径 | 行为 |
+## 主接口
+
+统一前缀 `/api`，接口文档由 `/docs` 提供。
+
+| 方法 | 路径 | 作用 |
 |---|---|---|
-| GET | /health | 主后端在线，不要求 RepoSummary 可用 |
-| GET | /integrations/reposummary | 查询真实依赖状态，含 businessReady |
-| GET / POST | /projects | 列表 / 登记 `{name,source:{url,revision}}` |
-| GET / DELETE | /projects/{id} | 详情 / 删除登记、结果及自有上传归档，不动外部 Git 仓库或远端任务 |
-| POST | /projects/{id}/analyses | 向 RepoSummary 提交，202 返回任务 |
-| GET | /projects/{id}/analysis | 轮询并保存状态，无任务时 not_started |
-| GET | /projects/{id}/result | 完整结果，未完成返回 409 |
-| GET | /projects/{id}/graph | 原始 nodes/edges，未完成返回 409 |
-| GET | /projects/{id}/features | 特性列表，未完成返回 409 |
-| POST | /projects/{id}/edits | 501，占位 |
-| POST | /projects/{id}/agent/runs | 501，占位 |
-| GET | /projects/{id}/diff | 501，占位 |
-| POST | /projects/{id}/git/operations | 501，占位 |
+| GET | /health | 主后端健康检查 |
+| GET | /integrations/reposummary | 总结服务健康检查 |
+| GET / POST | /projects | 项目列表 / Git 导入 |
+| POST | /projects/git/check | 验证仓库及链接中的分支或标签 |
+| POST | /projects/upload | 文件夹上传 |
+| GET / DELETE | /projects/{id} | 项目详情 / 删除项目 |
+| GET | /projects/{id}/archive | 凭证下载上传归档 |
+| POST | /projects/{id}/summary | 提交首次或再次总结 |
+| GET | /projects/{id}/summary/status | 查询服务返回的阶段和进度 |
+| GET | /projects/{id}/summary | 读取共享摘要文件 |
 
-错误 envelope 为 `{error:{code,message}}`；输入字段错误由 FastAPI 返回 422 detail。
-成功项目响应不包含体积较大的 result，结果通过单独接口读取。
-提交成功后清除上一轮结果，避免把旧图误认为新结果；提交失败则保留原记录。
-远端 complete 但结果获取暂时失败时可刷新重试；结果校验失败则保存 failed 状态。
+`edits`、`agent/runs`、`diff`、`git/operations` 为后续功能入口，目前返回未实现状态。
+错误返回 `{error:{code,message}}`；参数校验失败返回 422。
 
-## 前端与运行
+## 运行
 
-保留原 React/Ant Design 页面、组件和 CSS；API 适配层将新结果转换成旧组件需要的结构。
-选择项目保存在浏览器 sessionStorage，发给后端的请求始终显式携带项目 ID。
-未实现功能保留原入口并提示，或保持不可用状态。
-
-`dev.sh` 管理三个用户级 systemd 服务：前端 3010，主 API 127.0.0.1:13010，
-RepoSummary 127.0.0.1:18091。前端热更新，主后端自动重载；不使用数据库或容器。
-前端代理 API 和接口文档；`Frontend/build` 不参与当前开发服务。
-旧容器和数据卷独立保留，`.run/featx-host-nginx.conf` 仍被旧前端容器挂载。
-这是无认证的本地开发服务，不适合直接公网或多租户部署。
+`dev.sh` 从根目录 `.env` 读取服务配置并管理三个用户级 systemd 服务。
+前端代理 `/api`、`/docs` 和 `/openapi.json` 到主后端，开启热更新；主后端开启代码重载。
+当前不使用静态构建目录。仅适用于可信环境中的单实例开发，不提供账号和权限管理。

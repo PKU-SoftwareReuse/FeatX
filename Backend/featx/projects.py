@@ -4,37 +4,73 @@ from secrets import compare_digest
 from fastapi.responses import FileResponse
 from .errors import AppError
 from fastapi import APIRouter, Request
-from .models import ProjectInput
+from .models import ProjectInput, Source
+from .errors import AppError
+from .git_import import GitImport
 
 router = APIRouter(prefix='/projects', tags=['projects'])
 
 
-def public(record):
-    return {k: v for k, v in record.items() if k not in ('result', 'uploadToken')}
+def public(record, shared=None):
+    result = {k: v for k, v in record.items() if k not in ('result', 'uploadToken')}
+    result['description'] = ''
+    if shared is not None:
+        try:
+            result['description'] = shared.read_summary(record['id'], record.get('summaryRunId'))['description']
+        except AppError:
+            # An absent/invalid summary must not make the project list unavailable.
+            pass
+    return result
 
 
 @router.get('')
 def list_projects(request: Request):
     store = request.app.state.store
     with store.lock:
-        return [public(p) for p in store.list()]
+        return [public(p, request.app.state.shared) for p in store.list()]
+
+
+@router.post('/git/check')
+def check_git(body: Source):
+    return GitImport(body.url).check()
 
 
 @router.post('', status_code=201)
 def create_project(body: ProjectInput, request: Request):
-    record = {'id': uuid4().hex, **body.model_dump(mode='json'),
-              'createdAt': datetime.now(timezone.utc).isoformat(), 'analysis': None, 'result': None}
+    # Complete clone/checkout before publishing a project or starting its summary.
+    importer = GitImport(body.source.url)
+    project_id = uuid4().hex
+    directory = request.app.state.shared.directory(project_id)
+    directory.mkdir(exist_ok=False)
+    source = directory / 'source'
     store = request.app.state.store
-    with store.lock:
-        store.write(record)
-    return public(record)
+    saved = False
+    try:
+        git_info = importer.clone(source, body.source.commitId)
+        record = {'id': project_id, **body.model_dump(mode='json'), 'git': git_info,
+                  'createdAt': datetime.now(timezone.utc).isoformat(), 'analysis': None}
+        with store.lock:
+            store.write(record)
+        saved = True
+        from .analyses import start_summary
+        try:
+            start_summary(request.app, project_id)
+        except AppError as exc:
+            with store.lock:
+                record = store.read(project_id)
+                record['summaryError'] = exc.message
+                store.write(record)
+        return public(store.read(project_id), request.app.state.shared)
+    finally:
+        if not saved:
+            request.app.state.shared.delete(project_id)
 
 
 @router.get('/{project_id}')
 def get_project(project_id: str, request: Request):
     store = request.app.state.store
     with store.lock:
-        return public(store.read(project_id))
+        return public(store.read(project_id), request.app.state.shared)
 
 
 @router.delete('/{project_id}', status_code=204)
@@ -42,6 +78,12 @@ def delete_project(project_id: str, request: Request):
     # Deletes registration, result and any owned upload. Never touches an external Git repo or remote task.
     store = request.app.state.store
     with store.lock:
+        from .analyses import refresh_task
+        project = store.read(project_id)
+        task = refresh_task(request.app, project)
+        if task and task['status'] in ('queued', 'running'):
+            raise AppError(409, 'SUMMARY_RUNNING', '请等待总结任务结束后再删除项目')
+        request.app.state.shared.delete(project_id)
         store.delete(project_id)
 
 

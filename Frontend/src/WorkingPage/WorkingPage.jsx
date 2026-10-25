@@ -1,7 +1,7 @@
 // WorkingPage.jsx
 
 import styles from './WorkingPage.module.css';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from "react";
+import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import {Alert, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
     CloseOutlined,
@@ -24,8 +24,8 @@ import FeatureGraph from "../graph/featureGraph/FeatureGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import MarkdownRendererComponent from "./MarkdownRenderComponent/MarkdownRenderComponent";
 import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
-import {getLocalizedField, useLanguage} from "../i18n/LanguageContext";
-import {localizeOperationProgressMessage} from "../i18n/progressLocalization";
+import {getDisplayField} from "../utils/text";
+import {localizeOperationProgressMessage} from "../utils/progressText";
 
 const {Panel} = Collapse;
 const {TextArea} = Input;
@@ -281,7 +281,6 @@ const clearFeatureRequestDraft = () => {
 };
 
 const WORKING_PAGE_COPY = {
-    zh: {
         noAction: "当前没有可执行的操作",
         switchTitle: "确认切换操作",
         switchDescription: "确定要放弃当前修改吗？",
@@ -375,109 +374,13 @@ const WORKING_PAGE_COPY = {
         failedApplyDeleteDiff: "应用删除差异失败。",
         failedApplyModifyDiff: "应用修改差异失败。",
         failedApplyAddDiff: "应用新增差异失败。",
-    },
-    en: {
-        noAction: "Maybe Not Todo",
-        switchTitle: "You are trying to do another thing",
-        switchDescription: "Do you want to give up your modification?",
-        discard: "Discard all uncommitted changes",
-        cancel: "Cancel",
-        newSubfeature: "new SubFeature Item ",
-        completed: "This is a [Fake] success message",
-        applyingChanges: "Applying the Code Diff...",
-        featurePanel: "Feature Panel",
-        searchFeatures: "Search features",
-        noFeatureMatches: "No matching features",
-        fetchingFeatureSummary: "Fetching repo's feature summary.",
-        pendingChanges: "You have made some modifications. Please confirm or drop it.",
-        submit: "Submit",
-        agentPanel: "Agent Panel",
-        model: "Model",
-        loadingModels: "Loading models...",
-        modelUnavailable: "No models available",
-        graphPanel: "CodeMap Panel",
-        fetchingGraph: "fetching codeMap.",
-        changesPanel: "Diff Panel",
-        resizeChangesPanel: "Resize the diff panel; double-click to reset",
-        closeChangesPanel: "Close Diff Panel",
-        fetchingCode: "Fetching code details.",
-        candidateDiff: "Candidate Git Diff",
-        failedFetchCandidateDiff: "Failed to fetch candidate Git diff.",
-        candidateSaved: "Candidate code saved.",
-        failedSaveCandidate: "Failed to save candidate code.",
-        saveBeforeApply: "Save your edits before applying the change.",
-        saveBeforeClose: "The current edits have not been saved.",
-        gitGeneratedDiff: "Git-generated diff",
-        confirmFile: "Stage file",
-        stagingFile: "Staging...",
-        fileStaged: "File staged",
-        candidateStaged: "The file was written to the project and staged.",
-        failedStageCandidate: "Failed to stage the candidate file.",
-        unstageFile: "Unstage file",
-        unstagingFile: "Unstaging...",
-        candidateUnstaged: "The file was unstaged without changing its content.",
-        failedUnstageCandidate: "Failed to unstage the candidate file.",
-        noCandidateChanges: "This file has no changes to stage.",
-        revertFile: "Revert this file",
-        revertingFile: "Reverting...",
-        candidateReverted: "The candidate change for this file was reverted.",
-        failedRevertCandidate: "Failed to revert the candidate file.",
-        commitChanges: "Commit staged files",
-        noStagedFiles: "Stage at least one file in the Diff Panel first.",
-        partialCommitTitle: "Confirm partial commit",
-        completeCommitTitle: "Confirm complete commit",
-        metadataCommitTitle: "Confirm stale metadata reconciliation",
-        partialCommitDescription: "This is a selective confirmation. Only staged files will be kept and committed. Every other candidate will be permanently discarded and cannot be committed after this operation ends. FeatX will still complete the feature confirmation and update feature data, CodeMap, and static analysis.",
-        completeCommitDescription: "All candidate files are confirmed. This commits the remaining changes and updates feature data, CodeMap, and static analysis.",
-        metadataCommitDescription: "The source already matches the target state. FeatX will create an auditable empty commit and remove the stale Feature and CodeMap data without changing files.",
-        partialCommitSuccess: "Confirmed files were committed; all other candidates were discarded.",
-        completeCommitSuccess: "All candidate changes were committed.",
-        metadataCommitSuccess: "No source changes were needed; stale feature data was reconciled.",
-        failedCommitChanges: "Failed to commit code changes.",
-        discardAllChanges: "Discard all uncommitted changes",
-        discardAllTitle: "Discard all uncommitted changes?",
-        discardAllDescription: "The index and worktree return to the latest commit, and non-ignored untracked files are removed. Existing commits and preprocessing output are preserved.",
-        discardSuccess: "Uncommitted changes were discarded; existing commits were preserved.",
-        failedDiscardChanges: "Failed to discard uncommitted changes.",
-        committingChanges: "Committing and updating project data...",
-        noSubmittedChanges: "You haven't made any modifications. Please submit first.",
-        confirmAllChanges: "Confirm all candidate changes",
-        reviewAllChanges: "FeatX will automatically accept every unconfirmed Agent candidate without requiring each file to be staged individually, then immediately commit the complete candidate set. Continue only when the entire Agent output should be applied.",
-        confirmApply: "Accept and commit all",
-        decline: "Cancel",
-        failedConfirmAllChanges: "Failed to confirm all candidate changes.",
-        incompleteConfirmAllChanges: "Some candidate files could not be confirmed automatically. Review them individually and try again.",
-        submittingFeatureDeletion: "Submitting feature deletion.",
-        submittingFeatureAddition: "Submitting feature addition.",
-        submittingFeatureModification: "Submitting feature modification.",
-        preparingModification: "Preparing modification.",
-        streamingPythonAgent: "Streaming Python Agent code generation.",
-        streamingAgent: "Running the three-stage Agent code generation.",
-        codeGenerationFinished: "Code generation finished. Review the diff and confirm or drop it.",
-        codeGenerationFailed: "Code generation failed; no candidate changes are available to confirm.",
-        restoringAgentRun: "Restoring the Agent run from before the refresh...",
-        failedRestoreAgentRun: "The Agent run from before the refresh could not be restored. Submit the request again.",
-        focusGraphReady: "Show the initial, expanded, and reasoning code graphs.",
-        focusGraphPending: "Graph stages are available after Java/Python Add or Modify submit.",
-        failedFetchFeatureSummary: "Failed to fetch feature summary.",
-        failedFetchCodeMap: "Failed to fetch CodeMap.",
-        failedFetchCandidateGraph: "Failed to fetch candidate graph.",
-        failedFetchCodeDiff: "Failed to fetch code diff.",
-        failedFetchCodeContext: "Failed to fetch code context.",
-        failedPrepareDeletion: "Failed to prepare deletion context.",
-        failedPrepareModification: "Failed to prepare modification context.",
-        failedAddFeature: "Failed to add feature.",
-        failedApplyDeleteDiff: "Failed to apply delete diff.",
-        failedApplyModifyDiff: "Failed to apply modify diff.",
-        failedApplyAddDiff: "Failed to apply add diff.",
-    },
-};
+    };
 
-const getModuleDescription = (module, language) =>
-    getLocalizedField(module, "moduleDesc", language);
+const getModuleDescription = (module) =>
+    getDisplayField(module, "moduleDesc");
 
-const getFeatureDescription = (feature, language) =>
-    getLocalizedField(feature, "featureDescription", language);
+const getFeatureDescription = (feature) =>
+    getDisplayField(feature, "featureDescription");
 
 const getFeatureDisplayIndex = (featureList, item) => item.isNew
     ? 0
@@ -668,8 +571,8 @@ export const FeatureListItem = ({
 };
 
 const WorkingPage = () => {
-    const {language, apiLanguage} = useLanguage();
-    const copy = WORKING_PAGE_COPY[language];
+
+    const copy = WORKING_PAGE_COPY;
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
@@ -711,7 +614,7 @@ const WorkingPage = () => {
                 if (!active) return;
                 const availableModels = Array.isArray(catalog.models) ? catalog.models : [];
                 const sortedModels = [...availableModels].sort(
-                    new Intl.Collator('en', {numeric: true, sensitivity: 'base'}).compare
+                    new Intl.Collator('zh-CN', {numeric: true, sensitivity: 'base'}).compare
                 );
                 setModels(sortedModels);
                 setSelectedModel(
@@ -1423,7 +1326,7 @@ const WorkingPage = () => {
     }
 
     const goDelete = (item) => {
-        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
+        if (API.capabilities?.edits === false) return API.notifyUnavailable("特性编辑");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -1453,7 +1356,7 @@ const WorkingPage = () => {
     }
 
     const goEdit = (item) => {
-        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
+        if (API.capabilities?.edits === false) return API.notifyUnavailable("特性编辑");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -1467,7 +1370,7 @@ const WorkingPage = () => {
 
         setSelectedFeatureItem(item)
         setSelectedType("edit")
-        setEditedText(getFeatureDescription(item, language))
+        setEditedText(getFeatureDescription(item))
         getFeatureGraphData(item.featureId, "edit")
     }
 
@@ -1503,21 +1406,21 @@ const WorkingPage = () => {
 
         const matches = [];
         featureData.forEach((module, moduleIndex) => {
-            const displayedModuleDescription = getModuleDescription(module, language);
+            const displayedModuleDescription = getModuleDescription(module);
             const searchableModuleDescriptions = [
-                getModuleDescription(module, "zh"),
-                getModuleDescription(module, "en"),
+                getModuleDescription(module),
+                getModuleDescription(module),
             ];
 
             module.featureList.forEach((item) => {
                 const displayIndex = getFeatureDisplayIndex(module.featureList, item);
                 const itemNumber = `${moduleIndex + 1}.${displayIndex}`;
-                const displayedDescription = getFeatureDescription(item, language);
+                const displayedDescription = getFeatureDescription(item);
                 const searchableText = [
                     itemNumber,
                     item.featureId,
-                    getFeatureDescription(item, "zh"),
-                    getFeatureDescription(item, "en"),
+                    getFeatureDescription(item),
+                    getFeatureDescription(item),
                     ...searchableModuleDescriptions,
                 ].join(" ").toLocaleLowerCase();
 
@@ -1542,7 +1445,7 @@ const WorkingPage = () => {
         });
 
         return matches.slice(0, 50);
-    }, [featureData, featureSearchText, language]);
+    }, [featureData, featureSearchText]);
 
     useEffect(() => {
         if (!featureScrollTarget || String(activeKey) !== featureScrollTarget.moduleId) {
@@ -1632,7 +1535,7 @@ const WorkingPage = () => {
 
     // Add 按钮事件
     const goAdd = (module) => {
-        if (API.capabilities?.edits === false) return API.notifyUnavailable(language === "zh" ? "特性编辑" : "Feature editing");
+        if (API.capabilities?.edits === false) return API.notifyUnavailable("特性编辑");
         clearPostAgentTimers();
         clearFocusGraphStages();
         clearLocalDraftFeature();
@@ -1855,7 +1758,7 @@ const WorkingPage = () => {
                 setActiveKey(targetModule.moduleId)
                 setSelectedFeatureItem(targetFeature)
                 setSelectedType(operationType)
-                setEditedText(snapshot.request || getFeatureDescription(targetFeature, language))
+                setEditedText(snapshot.request || getFeatureDescription(targetFeature))
                 setSubmitEnabled(false)
                 setConfirmEnabled(snapshot.status === 'COMPLETED')
                 setMetadataOnlyEligible(Boolean(snapshot.metadataOnlyEligible))
@@ -1881,7 +1784,6 @@ const WorkingPage = () => {
                 handleChat(
                     API.getLlmResponse(
                         snapshot.runId,
-                        snapshot.language || apiLanguage,
                         snapshot.model || selectedModel
                     ),
                     snapshot.runId,
@@ -2040,7 +1942,7 @@ const WorkingPage = () => {
         return (
             <div className={styles.featureListProgress}>
                 <div className={styles.featureListProgressMessage}>
-                    {localizeOperationProgressMessage(operationProgress, language)}
+                    {localizeOperationProgressMessage(operationProgress)}
                 </div>
                 <Progress
                     percent={progressPercent()}
@@ -2135,7 +2037,7 @@ const WorkingPage = () => {
         API.deleteFeature({
             featureId: item.featureId,
             featureDescription: item.featureDescription,
-            language: apiLanguage,
+
         })
             .then(async (result) => {
                 const runId = result?.runId
@@ -2143,7 +2045,7 @@ const WorkingPage = () => {
                 setActiveRunId(runId)
                 await loadFocusGraphStages(runId, "delete")
                 handleChat(
-                    API.getLlmResponse(runId, apiLanguage, selectedModel),
+                    API.getLlmResponse(runId, selectedModel),
                     runId,
                     "delete"
                 )
@@ -2190,7 +2092,7 @@ const WorkingPage = () => {
 
         if (selectedType == 'edit') {
             // console.log(editedText);
-            API.modifyFeature(editedText, apiLanguage, selectedModel)
+            API.modifyFeature(editedText, selectedModel)
                 .then(async (data) => {
                     const runId = data?.runId
                     restoredRunRef.current = runId
@@ -2198,7 +2100,7 @@ const WorkingPage = () => {
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
                     await loadFocusGraphStages(runId, "edit")
-                    handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
+                    handleChat(API.getLlmResponse(runId, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Modify Feature:', error)
@@ -2223,7 +2125,7 @@ const WorkingPage = () => {
             const requestData = {
                 featureDescription: editedText,
                 moduleId: item.moduleId || selectedFeatureItem.moduleId,
-                language: apiLanguage,
+
             };
 
             API.addFeature(requestData)
@@ -2234,7 +2136,7 @@ const WorkingPage = () => {
                     clearFeatureRequestDraft()
                     setActiveRunId(runId)
                     await loadFocusGraphStages(runId, "add")
-                    handleChat(API.getLlmResponse(runId, apiLanguage, selectedModel), runId)
+                    handleChat(API.getLlmResponse(runId, selectedModel), runId)
                 })
                 .catch((error) => {
                     console.error('Error Add Feature:', error)
@@ -2383,9 +2285,7 @@ const WorkingPage = () => {
                     )}
                     {!metadataOnly && (
                         <p>
-                            {language === 'zh'
-                                ? `本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`
-                                : `This commit contains ${stagedCount} staged file${stagedCount === 1 ? '' : 's'}${remainingCount ? `; ${remainingCount} candidate file${remainingCount === 1 ? '' : 's'} remain unconfirmed` : ''}.`}
+                            {`本次提交 ${stagedCount} 个已暂存文件${remainingCount ? `，仍有 ${remainingCount} 个候选文件未确认` : ''}。`}
                         </p>
                     )}
                 </div>
@@ -2421,9 +2321,7 @@ const WorkingPage = () => {
                         message={copy.confirmAllChanges}
                         description={copy.reviewAllChanges}
                     />
-                    <p>{language === 'zh'
-                        ? `将确认并提交全部 ${totalCount} 个候选文件，其中 ${remainingCount} 个尚未逐文件确认。`
-                        : `All ${totalCount} candidate file${totalCount === 1 ? '' : 's'} will be committed; ${remainingCount} ${remainingCount === 1 ? 'has' : 'have'} not been confirmed individually.`}</p>
+                    <p>{`将确认并提交全部 ${totalCount} 个候选文件，其中 ${remainingCount} 个尚未逐文件确认。`}</p>
                 </div>
             ),
             okText: copy.confirmApply,
@@ -2544,7 +2442,7 @@ const WorkingPage = () => {
                             title={
                                 <div className={styles.card_title} title={copy.featurePanel}>
                                     {featurePanelMinimal
-                                        ? (language === "zh" ? "功" : "F")
+                                        ? ("功")
                                         : copy.featurePanel}
                                 </div>
                             }
@@ -2559,7 +2457,7 @@ const WorkingPage = () => {
                                         onChange={setSelectedModel}
                                         loading={loadingModels}
                                         disabled={loadingModels || models.length === 0 || loadingFeatureList}
-                                        placeholder={API.capabilities?.agent === false ? (language === "zh" ? "Agent 尚未实现" : "Agent not implemented") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
+                                        placeholder={API.capabilities?.agent === false ? ("Agent 尚未实现") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
                                         showSearch
                                         optionFilterProp="label"
                                         popupMatchSelectWidth={false}
@@ -2609,7 +2507,7 @@ const WorkingPage = () => {
                                                         <div className={styles.moduleHeading}>
                                                             <span className={styles.moduleNumber}>{moduleIndex + 1}.</span>{" "}
                                                             <span className={styles.moduleDescription}>
-                                                                {getModuleDescription(module, language)}
+                                                                {getModuleDescription(module)}
                                                             </span>
                                                         </div>
                                                         <div className={styles.iconContainer}>
@@ -2638,7 +2536,7 @@ const WorkingPage = () => {
                                                                 item={item}
                                                                 moduleId={module.moduleId}
                                                                 itemNumber={`${moduleIndex + 1}.${displayIndex}`}
-                                                                description={getFeatureDescription(item, language)}
+                                                                description={getFeatureDescription(item)}
                                                                 selectedType={selectedType}
                                                                 selectedFeatureItem={selectedFeatureItem}
                                                                 submitEnabled={submitEnabled}

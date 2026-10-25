@@ -1,1 +1,1 @@
-"""Language-neutral FeatX application."""
+"""FeatX 主后端。"""

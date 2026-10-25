@@ -1,1 +1,1 @@
-"""RepoSummary HTTP transport."""
+"""RepoSummary HTTP 接口。"""

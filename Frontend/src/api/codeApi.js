@@ -1,10 +1,10 @@
-import {http, projectPath, unavailable, text} from './client';
+import {http, projectPath, unavailable} from './client';
 const diff = () => http.get(`${projectPath()}/diff`).then(response => response.data);
 const codeApi = {
     getDeleteDiffByClass: diff,
-    getContextByClass: () => unavailable(text('源码内容查看', 'Source content viewing')),
+    getContextByClass: () => unavailable('源码内容查看'),
     getCandidateDiff: diff,
     getManualCandidate: diff,
-    updateCandidateDiff: () => unavailable(text('代码编辑', 'Code editing')),
+    updateCandidateDiff: () => unavailable('代码编辑'),
 };
 export default codeApi;

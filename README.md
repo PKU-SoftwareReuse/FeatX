@@ -1,76 +1,72 @@
-# FeatX · 轻量开发框架
+# FeatX
 
-通过编辑功能特征来编辑软件。本分支已改为语言无关的 Python 主后端：
-不使用数据库、静态分析、模型或 Java 工具链，图的唯一来源是独立 RepoSummary 服务。
+React 前端、Python 主后端和独立 RepoSummary 服务，通过 HTTP 和共享项目目录协作。
 
-## 本机开发（不使用 Docker）
+## 启动
 
 ```bash
-./dev.sh up       # 启动
-./dev.sh restart  # 重启
-./dev.sh down     # 停止
-./dev.sh logs     # 查看日志
+./dev.sh up
+./dev.sh restart
+./dev.sh down
+./dev.sh ps
+./dev.sh logs
 ```
 
-访问 **http://服务器IP:3010**。React 开发服务器支持前端热更新，
-Python 主后端开启自动重载；修改 RepoSummary 空壳后执行 restart。
-API 文档仍在 `/docs`。API 和 RepoSummary 分别只监听本机 13010、18091，前端统一代理。
+- 页面入口：`http://服务器IP:3010`，前端热更新。
+- API 文档：`http://服务器IP:3010/docs`。
+- 主后端：`127.0.0.1:13010`，代码自动重载。
+- RepoSummary：`127.0.0.1:18091`。
 
-进程由当前用户的 systemd 管理，关闭终端不会停止；没有配置开机自启。
-已有 `data/` 原地使用。旧 Docker 容器和数据卷不动，新 featx-quick 容器已移除。
-这是无鉴权的开发服务，不要作为公网生产环境使用。
+三个进程由当前用户的 systemd 管理，关闭终端不会停止；没有配置开机自启。
+这是无鉴权的开发服务，不作为公网生产环境使用。
 
-首次在新机器准备依赖：
+首次安装依赖：
 ```bash
 python3 -m venv Backend/.venv
 Backend/.venv/bin/pip install -r Backend/requirements.txt
 (cd Frontend && npm ci)
 ```
 
-## 当前能做什么
+## 配置
 
-- 登记 Git URL 和可选 revision；也支持原来的文件夹上传（不限语言，保留目录结构）。
-- 上传文件保存至 `data/uploads/`，最多 2000 个文件、100 MiB；删除上传项目会一并删除归档。
-- 用 JSON 文件保存项目、远端任务关联和已完成分析结果，重启仍可读取。
-- 通过 HTTP 提交分析、轮询任务、取回结果，展示特性列表和节点/边图。
-- 图展示不限制语言；实际分析支持哪些语言由 RepoSummary 决定。
-- 编辑、Agent、Diff、Git 仅有未实现接口，原入口提示未实现或保持禁用，不执行写操作。
+`.env` 只保留当前使用的四项：
 
-**附带的 RepoSummary 只是 HTTP 空壳。** 健康接口返回 `businessReady:false`，
-业务接口返回 501；因此默认界面显示待接入，不会产生任务、分析结果或示例图。
-真实闭环需要同门实现 [RepoSummary 接口契约](docs/REPOSUMMARY_API.md)。
+| 配置 | 作用 | 生效方式 |
+|---|---|---|
+| REPOSUMMARY_HTTP_URL | 主后端连接的总结服务地址 | `./dev.sh restart` |
+| SHARED_PROJECT_ROOT | 双方共享的项目根目录 | `./dev.sh restart` |
+| GITHUB_PROXY_URL | GitHub 代理地址；空值或不配置则直连 | 下次 Git 请求 |
+| GIT_CLONE_TIMEOUT_SECONDS | Git 下载和版本切换的超时秒数 | 下次 Git 请求 |
 
-## 架构与目录
+`dev.sh` 读取 `.env` 中的服务配置，shell 环境变量可覆盖它；不会执行 `.env` 内容。
+`.env.example` 为配置样例。不要提交私有 `.env` 或运行数据。
+
+## 项目导入
+
+- 文件夹上传保留文件与目录结构，最多 2000 个文件、100 MiB。
+- 没有 `.git` 时初始化 `main`；有完整有效的 `.git` 时保留历史、分支和远程配置。
+- 上传后追加“导入项目起点”提交，遵循 `.gitignore`，不推送远程。
+- Git 导入支持仓库、GitHub 分支和标签链接；Commit ID 单独选填。
+- GitHub 有代理配置时走代理，代理失败时报错，不静默直连。
+- 导入成功后自动调用 RepoSummary；项目设置中可重新总结。
+
+## 目录
 
 ```text
-Frontend/    React + Ant Design + vis-network，项目页与工作台
-Backend/     FastAPI + Uvicorn，项目/分析/图/扩展接口，JSON 文件存储
-PyBackend/   独立 RepoSummary HTTP 空壳，无第三方运行依赖
-data/        运行时生成 projects/<id>.json，Git 忽略
-dev.sh       本机 systemd 开发服务入口
+Backend/      主后端：项目、上传、Git、任务、共享文件和接口
+Frontend/     中文界面、组件和 API 适配层
+PyBackend/    RepoSummary 服务
+ data/        项目管理记录及上传归档，不提交 Git
+ docs/        架构和 RepoSummary 接口约定
+ dev.sh       本机服务管理入口
 ```
 
-本机开发服务器在 3010 提供前端，并把 `/api/v1` 和 `/docs` 代理到 Python 后端。不启动数据库、消息队列、分析工具或模型。
-旧 `datasets/`、`models/`、`repos/` 已删除；旧容器和数据卷保留不动。
-`.run/featx-host-nginx.conf` 仍保留给旧容器使用，不能因新框架不使用就直接删除。
+共享目录位于 `SHARED_PROJECT_ROOT/<projectId>/`：
+- `source/`：项目文件及 Git 仓库。
+- `summary.json`：唯一的正式功能摘要。
 
-## 接入真实 RepoSummary
+主系统读取摘要展示 Epic / Feature；中央图谱按文件显示相关代码元素，暂不绘制边。
+功能编辑、智能体代码生成、Diff 和 Git 写操作的业务接口仍待实现。
+删除项目会删除其本地管理记录、上传归档和共享项目目录，不删除远端 Git 仓库。
 
-设置服务地址后重启：
-```bash
-REPOSUMMARY_HTTP_URL=http://your-service:8091 ./dev.sh restart
-```
-外部服务需要下载上传归档时，同时设置 `FEATX_DOWNLOAD_BASE_URL` 为它可达的主应用地址，
-例如 `http://本机IP:3010`。服务根地址不带 `/v1`。
-
-## 边界
-
-- 单实例、单 worker、本地 demo；使用进程内锁及原子 JSON 替换，不支持多进程/多副本共享写入。
-- GET 分析状态会轮询远端并保存新状态，没有后台队列；关闭页面不会取消远端任务。
-- 删除项目会删除登记、结果和自有上传归档；不删除外部 Git 仓库、不取消远端任务。
-- 提交超时结果可能不确定，不自动重试；应先核对远端任务后再重新提交。
-- 新接口不兼容旧 Java API，也不读取共享 CSV、旧数据库或模型缓存。
-
-最小冒烟：`PYTHONPATH=Backend Backend/.venv/bin/python -m unittest discover -s Backend/tests -v`。
-
-详见 [架构与主 API](docs/ARCHITECTURE.md) 和 [RepoSummary 交接文档](docs/REPOSUMMARY_API.md)。
+详见 [架构说明](docs/ARCHITECTURE.md) 和 [RepoSummary 接口约定](docs/REPOSUMMARY_API.md)。

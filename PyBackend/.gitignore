@@ -1,20 +1,4 @@
-# OS / Editor
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
-
-# Python
 __pycache__/
 *.pyc
-
-# Logs (兜底)
-*.log
-
-# Env
 .env
-
-output/
-output04/
-output06/
-models/
+.pytest_cache/

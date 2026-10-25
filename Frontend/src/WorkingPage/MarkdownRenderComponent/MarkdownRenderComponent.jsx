@@ -55,11 +55,10 @@ export const normalizeAgentPresentation = (content = '') => {
             return
         }
 
-        const language = chineseStage ? 'CN' : 'EN'
         const stage = stageMatch[1].toUpperCase()
         const detail = stageMatch[2].trim()
         if (stage === 'I' && /^(补充上下文复核|Additional Context Recheck)$/i.test(detail)) {
-            normalized.push(language === 'CN' ? '#### 补充上下文复核' : '#### Additional Context Recheck')
+            normalized.push('#### 补充上下文复核')
             return
         }
 
@@ -74,18 +73,14 @@ export const normalizeAgentPresentation = (content = '') => {
         }
 
         if (stage === 'III') {
-            const prefix = language === 'CN' ? '具体文件修改' : 'Concrete File Modification'
+            const prefix = chineseStage ? '具体文件修改' : 'Concrete File Modification'
             const filename = detail.startsWith(prefix) ? detail.slice(prefix.length).trim() : ''
             if (!seenStages.has(stage)) {
                 seenStages.add(stage)
-                normalized.push(language === 'CN'
-                    ? '## 阶段 III：具体文件修改'
-                    : '## Stage III: Concrete File Modification')
+                normalized.push('## 阶段 III：具体文件修改')
             }
             if (filename) {
-                normalized.push(language === 'CN'
-                    ? `#### 文件：\`${filename}\``
-                    : `#### File: \`${filename}\``)
+                normalized.push(`#### 文件：\`${filename}\``)
             }
             return
         }
@@ -93,13 +88,9 @@ export const normalizeAgentPresentation = (content = '') => {
         if (seenStages.has(stage)) return
         seenStages.add(stage)
         if (stage === 'I') {
-            normalized.push(language === 'CN'
-                ? '## 阶段 I：信息需求分析'
-                : '## Stage I: Information Requirement Analysis')
+            normalized.push('## 阶段 I：信息需求分析')
         } else {
-            normalized.push(language === 'CN'
-                ? '## 阶段 II：修改方案规划'
-                : '## Stage II: Modification Planning')
+            normalized.push('## 阶段 II：修改方案规划')
         }
     })
 

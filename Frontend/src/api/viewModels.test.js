@@ -1,38 +1,25 @@
 import {featureView, graphView, progressView, projectView} from './viewModels';
 jest.mock('./client', () => ({text: (zh, en) => en}));
-
-const result = {
-    features: [{id: 'f-1', name: 'Authentication', description: 'Check access', nodeIds: ['node.1']}],
-    graph: {nodes: [
-        {id: 'node.1', name: 'service.fn()', type: 'custom-component', location: {path: 'src/main.rs'}},
-        {id: 'node-2', name: 'Other', type: 'anything'},
-    ], edges: [{source: 'node.1', target: 'node-2', type: 'depends'}]},
-};
-
-test('maps project registration without pretending analysis completed', () => {
-    const project = projectView({id: 'p', name: 'Repo', source: {url: 'https://example.com/repo'}, analysis: null});
-    expect(project.projectName).toBe('Repo');
-    expect(project.repoId).toBe('p');
-    expect(project.summaryFlag).toBe(false);
-    expect(project.projectType).toBe('GENERIC');
-});
-
-test('adapts flat features into the original accordion shape without new analysis', () => {
-    expect(featureView(result)[0].featureList[0].featureId).toBe('f-1');
-    expect(featureView({features: []})).toEqual([]);
-});
-
-test('keeps graph IDs and arbitrary names, filters only supplied associations', () => {
-    const graph = graphView(result, 'f-1');
-    expect(graph.nodes).toHaveLength(1);
-    expect(graph.nodes[0].id).toBe('node.1');
-    expect(graph.nodes[0].displayLabel).toContain('service.fn()');
-    expect(graph.nodes[0].semanticType).toBe('custom-component');
+const result = {epics: [{id: 'e1', description: 'Epic', features: [
+    {id: 'f1', description: 'Feature', codeElements: ['src/main.rs::crate::auth::login', 'src/main.rs::validate', 'web/main.ts::submit']},
+]}]};
+test('retains real epic hierarchy and groups elements by file without edges', () => {
+    expect(featureView(result)[0].moduleId).toBe('e1');
+    expect(featureView(result)[0].featureList[0].featureId).toBe('f1');
+    const graph = graphView(result, 'f1');
+    expect(graph.nodes).toHaveLength(2);
+    expect(graph.nodes[0].methods).toEqual(['crate::auth::login', 'validate']);
     expect(graph.edges).toEqual([]);
-    expect(() => graphView(result, 'missing')).toThrow();
 });
-
-test('does not report pending registrations as running analysis', () => {
-    expect(progressView({status: 'not_started'})).toMatchObject({status: 'pending', percent: 0});
-    expect(progressView({status: 'failed', error: 'Unavailable'}).displayMessage).toBe('Unavailable');
+test('only displays service-supplied stages and percentages', () => {
+    const progress = progressView({status:'running', totalStages:3, currentStageIndex:2, overallPercent:42,
+        elapsedMs:4000, stages:[{name:'One'},{name:'Two',message:'Working',progress:{percent:21}},{name:'Three'}]});
+    expect(progress.percent).toBe(42);
+    expect(progress.totalSteps).toBe(3);
+    expect(progress.steps[1].percent).toBe(21);
+    expect(progress.displayMessage).toBe('Working');
+    expect(progressView({status:'running'}).percent).toBeNull();
+});
+test('registered projects are not falsely marked summarized', () => {
+    expect(projectView({id:'p',name:'P',source:{url:'https://example.com/p'},analysis:null}).summaryFlag).toBe(false);
 });

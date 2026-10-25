@@ -1,36 +1,18 @@
-import "./App.css"
+import './App.css';
 import React from 'react';
 import {BrowserRouter as Router, Navigate, Route, Routes} from 'react-router-dom';
-import WelcomePage from "./WelcomePage/WelcomePage";
-import WorkingPage from "./WorkingPage/WorkingPage";
-import {ConfigProvider} from "antd";
-import zhCN from "antd/locale/zh_CN";
-import enUS from "antd/locale/en_US";
-import {LanguageProvider, useLanguage} from "./i18n/LanguageContext";
+import {ConfigProvider} from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import WelcomePage from './WelcomePage/WelcomePage';
+import WorkingPage from './WorkingPage/WorkingPage';
 
-const AppContent = () => {
-    const {language} = useLanguage();
-
-    return (
-        <ConfigProvider locale={language === "zh" ? zhCN : enUS}>
-            <Router>
-                <Routes>
-                    <Route path="/" element={<Navigate to="/welcome"/>}/>
-                    <Route path="/welcome" element={<WelcomePage/>}/>
-                    <Route path="/working" element={<WorkingPage/>}/>
-                    <Route path="*" element={<Navigate to="/"/>}/>
-                </Routes>
-            </Router>
-        </ConfigProvider>
-    );
-};
-
-function App() {
-    return (
-        <LanguageProvider>
-            <AppContent/>
-        </LanguageProvider>
-    );
+export default function App() {
+    return <ConfigProvider locale={zhCN}>
+        <Router><Routes>
+            <Route path="/" element={<Navigate to="/welcome"/>}/>
+            <Route path="/welcome" element={<WelcomePage/>}/>
+            <Route path="/working" element={<WorkingPage/>}/>
+            <Route path="*" element={<Navigate to="/"/>}/>
+        </Routes></Router>
+    </ConfigProvider>;
 }
-
-export default App;

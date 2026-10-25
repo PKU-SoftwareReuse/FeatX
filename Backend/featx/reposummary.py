@@ -1,10 +1,9 @@
-"""HTTP only: never imports analysis code, accesses source trees, or loads models."""
-import os
+"""Only submit and poll HTTP. Results are read from the shared filesystem."""
 from urllib.parse import quote
 import httpx
 from pydantic import ValidationError
 from .errors import AppError
-from .models import Task, AnalysisResult
+from .models import Task
 
 
 class RepoSummaryClient:
@@ -16,46 +15,38 @@ class RepoSummaryClient:
             with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
                 response = client.request(method, self.base_url + path, json=payload)
         except httpx.RequestError as exc:
-            raise AppError(503, 'REPOSUMMARY_UNREACHABLE',
-                           'RepoSummary 不可达或超时；提交超时时请先确认远端任务状态再重试') from exc
+            raise AppError(503, 'REPOSUMMARY_UNREACHABLE', 'RepoSummary 不可达或超时；不要自动重复提交') from exc
         if response.status_code == 501:
-            raise AppError(501, 'REPOSUMMARY_NOT_IMPLEMENTED', 'RepoSummary 待接入，业务尚未实现')
+            raise AppError(501, 'REPOSUMMARY_NOT_IMPLEMENTED', 'RepoSummary 业务尚未实现')
         if not response.is_success:
-            raise AppError(502, 'REPOSUMMARY_ERROR', f'RepoSummary 返回 HTTP {response.status_code}')
+            try:
+                message = response.json().get('error', {}).get('message')
+            except (ValueError, AttributeError):
+                message = None
+            raise AppError(response.status_code if response.status_code in (404, 409) else 502,
+                           'REPOSUMMARY_ERROR', message or f'RepoSummary HTTP {response.status_code}')
         try:
             data = response.json()
             if not isinstance(data, dict):
-                raise ValueError('expected object')
+                raise ValueError()
             return data
         except ValueError as exc:
-            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', 'RepoSummary 返回了无效 JSON 对象') from exc
+            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', 'RepoSummary 返回了无效 JSON') from exc
 
     def health(self):
-        data = self.call('GET', '/health')
-        if not isinstance(data.get('businessReady'), bool):
-            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', '健康接口缺少 businessReady 布尔值')
-        return data
+        return self.call('GET', '/health')
 
-    def parse(self, model, data):
+    def parse_task(self, data, project_id=None, run_id=None):
         try:
-            return model.model_validate(data).model_dump(mode='json')
-        except ValidationError as exc:
-            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', 'RepoSummary 数据不符合接口契约') from exc
+            task = Task.model_validate(data).model_dump(mode='json')
+            if (project_id and task['projectId'] != project_id) or (run_id and task['runId'] != run_id):
+                raise ValueError('task identity mismatch')
+            return task
+        except (ValueError, ValidationError) as exc:
+            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', '任务状态不符合约定') from exc
 
-    def submit(self, project):
-        source = dict(project['source'])
-        if source.get('kind') == 'upload':
-            base = os.getenv('FEATX_DOWNLOAD_BASE_URL', 'http://127.0.0.1:8080').rstrip('/')
-            source['downloadUrl'] = (f"{base}/api/v1/projects/{project['id']}/archive"
-                                     f"?token={quote(project['uploadToken'], safe='')}")
-        return self.parse(Task, self.call('POST', '/v1/analyses',
-                                         {'projectId': project['id'], 'source': source}))
+    def submit(self, project, hints=None):
+        return self.parse_task(self.call('POST', '/summary', {'projectId': project['id'], 'hints': hints or {}}), project['id'])
 
-    def poll(self, task_id):
-        data = self.parse(Task, self.call('GET', f'/v1/analyses/{quote(task_id, safe="")}'))
-        if data['taskId'] != task_id:
-            raise AppError(502, 'INVALID_REPOSUMMARY_RESULT', 'RepoSummary 返回了错误的任务 ID')
-        return data
-
-    def result(self, task_id):
-        return self.parse(AnalysisResult, self.call('GET', f'/v1/analyses/{quote(task_id, safe="")}/result'))
+    def poll(self, run_id, project_id):
+        return self.parse_task(self.call('GET', f'/summary/{quote(run_id, safe="")}'), project_id, run_id)

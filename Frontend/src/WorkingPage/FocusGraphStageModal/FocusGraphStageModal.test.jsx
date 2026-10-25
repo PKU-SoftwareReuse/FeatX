@@ -78,21 +78,21 @@ jest.mock('vis-network/standalone/esm/vis-network', () => {
 const stages = [
     {
         id: 'initial',
-        label: 'Initial Graph',
+        label: "初始图",
         description: 'English initial description.',
         nodes: [{id: 'a', label: 'a'}],
         edges: [],
     },
     {
         id: 'expanded',
-        label: 'Expanded Graph',
+        label: "扩展图",
         description: 'English expanded description.',
         nodes: [{id: 'a', label: 'a'}, {id: 'b', label: 'b'}],
         edges: [{from: 'a', to: 'b', type: 'Call'}],
     },
     {
         id: 'reasoning',
-        label: 'Reasoning Graph',
+        label: "推理图",
         description: 'English reasoning description.',
         nodes: [{id: 'b', label: 'b'}],
         edges: [],
@@ -102,9 +102,9 @@ const stages = [
 const renderModal = (language) => {
     window.localStorage.setItem('featx-language', language)
     return render(
-        <LanguageProvider>
+        <>
             <FocusGraphStageModal open onClose={jest.fn()} stages={stages}/>
-        </LanguageProvider>
+        </>
     )
 }
 
@@ -144,7 +144,7 @@ test('switches directly to a stage when its summary card is clicked', () => {
 test('keeps English labels when the web interface is English', () => {
     renderModal('en')
 
-    expect(screen.getByRole('heading', {name: 'Reasoning Graph Stages'})).toBeInTheDocument()
+    expect(screen.getByRole('heading', {name: "推理图构建阶段"})).toBeInTheDocument()
     expect(screen.getByRole('button', {name: 'Switch to Expanded Graph'})).toBeInTheDocument()
-    expect(screen.getByText('Replay')).toBeInTheDocument()
+    expect(screen.getByText("重播动画")).toBeInTheDocument()
 })

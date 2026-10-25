@@ -96,7 +96,7 @@ describe("FeatureListItem", () => {
                 selectedModel="test-model"
                 editedText={editedText}
                 setEditedText={setEditedText}
-                copy={{pendingChanges: "Pending", submit: "Submit"}}
+                copy={{pendingChanges: "Pending", submit: "提交"}}
                 onClickItem={jest.fn()}
                 submitEdit={jest.fn()}
                 handleDelete={jest.fn()}
@@ -108,7 +108,7 @@ describe("FeatureListItem", () => {
 
         const editor = screen.getByRole("textbox");
         expect(editor.value).toBe(editedText);
-        expect(screen.getByRole("button", {name: "Submit"})).not.toBeNull();
+        expect(screen.getByRole("button", {name: "提交"})).not.toBeNull();
         expect(editor.closest("[data-feature-id]").classList.contains("featureItemEditing")).toBe(true);
         fireEvent.change(editor, {target: {value: "Recovered request draft"}});
         expect(setEditedText).toHaveBeenCalledWith("Recovered request draft");

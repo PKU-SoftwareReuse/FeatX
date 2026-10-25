@@ -9,6 +9,9 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from .errors import AppError
 from .projects import public
+from .analyses import start_summary
+from .git_import import initialize_uploaded_repository
+import shutil
 
 router = APIRouter(prefix='/projects', tags=['uploads'])
 MAX_BYTES = 100 * 1024 * 1024
@@ -35,29 +38,38 @@ def checked_paths(paths):
     return [value.replace('\\', '/') for value in paths]
 
 
-def save_upload(store, name, files, paths):
+def save_upload(app, name, files, paths):
+    store = app.state.store
     project_id = uuid4().hex
     archive_dir = store.root.parent / 'uploads'
     archive_dir.mkdir(parents=True, exist_ok=True)
     archive = archive_dir / f'{project_id}.zip'
     temporary = archive.with_suffix('.pending')
     total = 0
+    directory = app.state.shared.directory(project_id)
+    source = directory / 'source'
+    source.mkdir(parents=True, exist_ok=False)
+    saved = False
     try:
         with ZipFile(temporary, 'w', compression=ZIP_STORED) as bundle:
             for file, path in zip(files, paths):
                 file.file.seek(0)
-                with bundle.open(path, 'w') as destination:
+                target = source / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with bundle.open(path, 'w') as destination, target.open('wb') as source_file:
                     while chunk := file.file.read(1024 * 1024):
                         total += len(chunk)
                         if total > MAX_BYTES:
                             raise AppError(413, 'UPLOAD_TOO_LARGE', '项目文件总大小不能超过 100 MiB')
                         destination.write(chunk)
+                        source_file.write(chunk)
+        git_info = initialize_uploaded_repository(source)
         record = {
-            'id': project_id, 'name': name,
+            'id': project_id, 'name': name, 'git': git_info,
             'source': {'kind': 'upload', 'uploadId': project_id, 'filename': 'project.zip'},
             'upload': {'fileCount': len(files), 'bytes': total},
             'uploadToken': token_urlsafe(32),
-            'createdAt': datetime.now(timezone.utc).isoformat(), 'analysis': None, 'result': None,
+            'createdAt': datetime.now(timezone.utc).isoformat(), 'analysis': None,
         }
         with store.lock:
             temporary.replace(archive)
@@ -66,9 +78,20 @@ def save_upload(store, name, files, paths):
             except Exception:
                 archive.unlink(missing_ok=True)
                 raise
-        return public(record)
+        saved = True
+        try:
+            start_summary(app, project_id)
+        except AppError as exc:
+            # Upload is durable even if the summary service is unavailable; allow manual retry.
+            with store.lock:
+                record = store.read(project_id)
+                record['summaryError'] = exc.message
+                store.write(record)
+        return public(store.read(project_id))
     finally:
         temporary.unlink(missing_ok=True)
+        if not saved:
+            shutil.rmtree(directory, ignore_errors=True)
 
 
 @router.post('/upload', status_code=201)
@@ -92,4 +115,4 @@ async def upload_project(request: Request):
         if len(paths) != len(files):
             raise AppError(400, 'INVALID_PATHS', 'files 和 paths 必须一一对应')
         safe_paths = checked_paths(paths)
-        return await run_in_threadpool(save_upload, request.app.state.store, name.strip(), files, safe_paths)
+        return await run_in_threadpool(save_upload, request.app, name.strip(), files, safe_paths)

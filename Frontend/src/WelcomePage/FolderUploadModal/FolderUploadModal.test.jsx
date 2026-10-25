@@ -1,6 +1,5 @@
 import React from "react";
 import {fireEvent, render, screen, waitFor} from "@testing-library/react";
-import {LanguageProvider} from "../../i18n/LanguageContext";
 import FolderUploadModal from "./FolderUploadModal";
 import API from "../../api";
 
@@ -10,12 +9,12 @@ jest.mock("../../api", () => ({
 
 test("enables confirmation after selecting a Rust project folder", async () => {
     render(
-        <LanguageProvider>
+        <>
             <FolderUploadModal reloadGetProjectsInfo={jest.fn()}/>
-        </LanguageProvider>
+        </>
     );
 
-    fireEvent.click(screen.getByRole("button", {name: /upload new repo/i}));
+    fireEvent.click(screen.getByRole("button", {name: /上传新代码仓库/}));
     const input = document.querySelector("input[type=file]");
     const file = new File(["fn main() {}"], "main.rs", {type: "text/plain"});
     Object.defineProperty(file, "webkitRelativePath", {
@@ -34,12 +33,12 @@ test("enables confirmation after selecting a Rust project folder", async () => {
 test("submits non-source project files with their original relative paths", async () => {
     API.uploadProject.mockResolvedValue({});
     render(
-        <LanguageProvider>
+        <>
             <FolderUploadModal reloadGetProjectsInfo={jest.fn()}/>
-        </LanguageProvider>
+        </>
     );
 
-    fireEvent.click(screen.getByRole("button", {name: /upload new repo/i}));
+    fireEvent.click(screen.getByRole("button", {name: /上传新代码仓库/}));
     const input = document.querySelector("input[type=file]");
     const javaFile = new File(["fn main() {}"], "main.rs", {type: "text/plain"});
     const pomFile = new File(["<project/>"] , "pom.xml", {type: "application/xml"});

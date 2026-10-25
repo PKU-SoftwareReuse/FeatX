@@ -1,9 +1,9 @@
 import {loadResult} from './featureApi';
 import {graphView} from './viewModels';
-import {unavailable, text} from './client';
+import {unavailable} from './client';
 const graphApi = {
     getInitialGraphData: async featureId => graphView(await loadResult(), featureId),
-    getMinGraphData: () => unavailable(text('删除结果图', 'Deletion result graph')),
-    getCandidateGraphData: () => unavailable(text('候选修改图', 'Candidate change graph')),
+    getMinGraphData: () => unavailable('删除结果图'),
+    getCandidateGraphData: () => unavailable('候选修改图'),
 };
 export default graphApi;

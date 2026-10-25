@@ -1,20 +1,23 @@
 from typing import Any, Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Source(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     url: str = Field(min_length=1, max_length=2048)
-    revision: str | None = Field(default=None, max_length=256)
+    commitId: str | None = Field(default=None, pattern=r'^[0-9a-fA-F]{7,64}$')
 
     @field_validator('url')
     @classmethod
     def git_url(cls, value):
+        if any(char.isspace() or ord(char) < 32 for char in value):
+            raise ValueError('Git 地址不能包含空白或控制字符')
         parsed = urlsplit(value)
         if parsed.scheme not in {'https', 'http', 'ssh'} or not parsed.hostname:
-            raise ValueError('Use an HTTP(S) or ssh:// Git URL')
+            raise ValueError('请使用 HTTP(S) 或 ssh:// 格式的 Git 地址')
         if parsed.password or (parsed.scheme != 'ssh' and parsed.username):
-            raise ValueError('Do not put credentials in repository URLs')
+            raise ValueError('Git 地址不能包含密码或令牌')
         return value
 
 
@@ -32,66 +35,61 @@ class ProjectInput(BaseModel):
     @classmethod
     def nonblank(cls, value):
         if not value.strip():
-            raise ValueError('name cannot be blank')
+            raise ValueError('项目名称不能为空')
         return value.strip()
 
 
 class Feature(BaseModel):
     id: str = Field(min_length=1)
-    name: str
-    description: str = ''
-    nodeIds: list[str] = Field(default_factory=list)
+    description: str
+    codeElements: list[str]
+
+    @field_validator('codeElements')
+    @classmethod
+    def elements(cls, value):
+        if any(not item.strip() for item in value) or len(set(value)) != len(value):
+            raise ValueError('代码元素必须是非空字符串，且不能重复')
+        return value
 
 
-class Location(BaseModel):
-    path: str
-    startLine: int | None = Field(default=None, ge=1)
-    endLine: int | None = Field(default=None, ge=1)
-
-
-class Node(BaseModel):
+class Epic(BaseModel):
     id: str = Field(min_length=1)
-    name: str
-    type: str
-    location: Location | None = None
-    attributes: dict[str, Any] = Field(default_factory=dict)
-
-
-class Edge(BaseModel):
-    source: str
-    target: str
-    type: str
-
-
-class Graph(BaseModel):
-    nodes: list[Node]
-    edges: list[Edge]
-
-
-class AnalysisResult(BaseModel):
-    version: Literal['1']
-    source: UploadSource | Source
-    language: str | None = None
+    description: str
     features: list[Feature]
-    graph: Graph
+
+
+class ProjectSummary(BaseModel):
+    projectId: str
+    runId: str
+    description: str = ""  # Older summary files may not contain a project description.
+    epics: list[Epic]
 
     @model_validator(mode='after')
-    def references(self):
-        node_ids = {n.id for n in self.graph.nodes}
-        if len(node_ids) != len(self.graph.nodes):
-            raise ValueError('duplicate node IDs')
-        if len({f.id for f in self.features}) != len(self.features):
-            raise ValueError('duplicate feature IDs')
-        if any(e.source not in node_ids or e.target not in node_ids for e in self.graph.edges):
-            raise ValueError('edge references an unknown node')
-        if any(n not in node_ids for f in self.features for n in f.nodeIds):
-            raise ValueError('feature references an unknown node')
+    def ids(self):
+        epic_ids = [e.id for e in self.epics]
+        feature_ids = [f.id for e in self.epics for f in e.features]
+        if len(set(epic_ids)) != len(epic_ids) or len(set(feature_ids)) != len(feature_ids):
+            raise ValueError('功能主题或功能项 ID 重复')
         return self
 
 
 class Task(BaseModel):
-    taskId: str = Field(min_length=1, max_length=512)
+    projectId: str
+    runId: str
     status: Literal['queued', 'running', 'complete', 'failed']
-    progress: float | None = Field(default=None, ge=0, le=1)
+    totalStages: int | None = Field(default=None, ge=0)
+    currentStageIndex: int | None = Field(default=None, ge=1)
+    overallPercent: float | None = Field(default=None, ge=0, le=100)
+    elapsedMs: int | None = None
+    stages: list[dict[str, Any]] = Field(default_factory=list)
     message: str = ''
     error: str | None = None
+    hints: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode='after')
+    def stages_consistent(self):
+        if self.totalStages is not None and self.totalStages != len(self.stages):
+            raise ValueError('总阶段数与阶段列表不一致')
+        if self.currentStageIndex is not None and self.currentStageIndex > len(self.stages):
+            raise ValueError('当前阶段序号无效')
+        return self
