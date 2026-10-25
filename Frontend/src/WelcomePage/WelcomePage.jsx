@@ -3,7 +3,7 @@ import {useEffect, useState} from "react";
 import usePageNavigation from "../utils/usePageNavigation";
 import styles from './WelcomePage.module.css';
 import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, Progress, Spin, Tag, Tooltip} from "antd";
-import {ArrowRightOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
+import {ArrowRightOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
 import {repositoryDisplay} from "../utils/repositoryDisplay";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
@@ -401,22 +401,22 @@ const WelcomePage = () => {
                     <a href="/welcome" className={styles.brand} aria-label="FeatX 首页"><img src={asset("brand/featx-logo.svg")} alt="FeatX"/></a>
                     <nav className={styles.navigation} aria-label="主导航">
                         <a href="#projects" className={styles.activeNav}><AppstoreOutlined/> 项目仓库</a>
+                        <a href="https://pku-softwarereuse.github.io/" target="_blank" rel="noopener noreferrer"><TeamOutlined/> 关于我们</a>
                     </nav>
-                    <span className={styles.headerCaption}>从功能出发，理解代码</span>
                 </div>
             </header>
             <section id="workflow" className={styles.hero}>
                 <div className={styles.heroInner}>
                     <div className={styles.heroCopy}>
-                        <span className={styles.eyebrow}>功能特征导向的软件工作空间</span>
-                        <h1>通过功能特征<br/><em>理解与编辑软件</em></h1>
-                        <p>导入你的项目，整理功能主题与功能项，<br/>在代码图谱中探索功能与实现的关联。</p>
+                        <span className={styles.eyebrow}>功能摘要 · 代码关联 · 修改审阅</span>
+                        <h1>编辑功能需求<br/><em>修改项目代码</em></h1>
+                        <p>导入项目后，查看功能摘要及其关联代码。<br/>提交需求变更，由智能体修改代码，再审阅并提交。</p>
                     </div>
                     <div className={styles.workflow}>
                         {[
-                            ["edit-features", "编辑功能特征", "用自然语言描述或修改软件的功能需求"],
-                            ["file-graph", "定位相关代码", "通过功能与代码的关联，定位相关实现"],
-                            ["agent-edit", "智能体编辑", "基于功能需求与相关代码，生成可审阅的修改"],
+                            ["edit-features", "编辑功能特征", "新增、修改或删除功能项，说明需要怎样改动"],
+                            ["file-graph", "定位相关代码", "查看功能关联的文件与代码元素"],
+                            ["agent-edit", "智能体编辑", "根据需求修改代码，由你审阅并决定是否提交"],
                         ].map(([image, title, description], index) => <div key={image} className={styles.flowCard}>
                             <img src={asset(`illustrations/${image}.svg`)} alt=""/>
                             <h2><span>{index + 1}</span>{title}</h2>
@@ -428,7 +428,7 @@ const WelcomePage = () => {
             <main id="projects" className={styles.repository}>
                 <div className={styles.repositoryHeading}>
                     <div><h2><AppstoreOutlined/> 项目仓库 <span>{projectOptions?.length ?? "—"}</span></h2>
-                        <p>所有项目，一个工作空间。选择项目，继续探索。</p></div>
+                        <p>选择已有项目，或从 Git、本地文件夹导入。</p></div>
                     <div className={styles.uploadModalWrapper}>
                         <GitDownModal reloadGetProjectsInfo={getProjects}/>
                         <FolderUploadModal reloadGetProjectsInfo={getProjects}/>
@@ -561,7 +561,7 @@ const WelcomePage = () => {
                 </div>
             </Modal>
 
-            <footer className={styles.footer}>FeatX · 从功能到代码，让项目更清晰</footer>
+            <footer className={styles.footer}>FeatX · 功能特征驱动的软件编辑</footer>
         </div>
     );
 }
