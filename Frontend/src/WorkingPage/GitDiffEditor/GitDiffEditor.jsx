@@ -1,6 +1,7 @@
 import React, {useEffect, useLayoutEffect, useRef} from "react";
 import {DiffEditor} from "@monaco-editor/react";
 import {monaco} from "../../editor/monaco";
+import {EDITOR_THEME_NAME, EDITOR_TYPOGRAPHY, registerEditorTheme} from "../../editor/theme";
 
 import styles from "./GitDiffEditor.module.css";
 
@@ -87,13 +88,16 @@ const GitDiffEditor = ({file, value, onChange, onSave, readOnly = false}) => {
                 onMount={handleMount}
                 keepCurrentOriginalModel
                 keepCurrentModifiedModel
-                theme="vs"
+                beforeMount={registerEditorTheme}
+                theme={EDITOR_THEME_NAME}
                 loading={<div className={styles.loading}>正在打开差异…</div>}
                 options={{
                     automaticLayout: true,
                     enableSplitViewResizing: false,
-                    fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
-                    fontSize: 12,
+                    ...EDITOR_TYPOGRAPHY,
+                    padding: {top:16,bottom:16},
+                    renderLineHighlight: 'none',
+                    scrollbar: {verticalScrollbarSize:7,horizontalScrollbarSize:7,useShadows:false},
                     glyphMargin: true,
                     lineNumbers: "on",
                     minimap: {enabled: false},

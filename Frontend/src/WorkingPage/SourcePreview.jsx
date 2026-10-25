@@ -3,46 +3,8 @@ import {Button, Tooltip} from 'antd';
 import {SearchOutlined, AlignLeftOutlined, LockOutlined} from '@ant-design/icons';
 import {Editor} from '@monaco-editor/react';
 import '../editor/monaco';
+import {EDITOR_THEME_NAME, EDITOR_TYPOGRAPHY, registerEditorTheme} from '../editor/theme';
 import styles from './SourcePreview.module.css';
-
-function registerTheme(instance) {
-    instance.editor.defineTheme('featx-source', {
-        base:'vs', inherit:true,
-        rules:[
-            {token:'',foreground:'334761'},
-            {token:'comment',foreground:'64748B',fontStyle:'italic'},
-            {token:'keyword',foreground:'3F65AF'},
-            {token:'string',foreground:'287969'},
-            {token:'number',foreground:'87569F'},
-            {token:'tag',foreground:'3D6C9F'},
-            {token:'attribute.name',foreground:'706092'},
-            {token:'attribute.value',foreground:'287969'},
-            {token:'delimiter',foreground:'5B6E87'},
-        ],
-        colors:{
-            'editor.background':'#FBFDFF',
-            'editor.foreground':'#334761',
-            'editorGutter.background':'#FBFDFF',
-            'editorLineNumber.foreground':'#74859C',
-            'editorLineNumber.activeForeground':'#3F628F',
-            'editor.selectionBackground':'#DBEAFC',
-            'editor.inactiveSelectionBackground':'#EAF1FA',
-            'editor.lineHighlightBackground':'#F2F7FD',
-            'editor.lineHighlightBorder':'#00000000',
-            'editorCursor.foreground':'#538FE2',
-            'editorIndentGuide.background1':'#EAF0F8',
-            'editorIndentGuide.activeBackground1':'#CADBF0',
-            'editorWidget.background':'#FFFFFF',
-            'editorWidget.border':'#DDE8F5',
-            'editor.findMatchBackground':'#D5E7FC',
-            'editor.findMatchHighlightBackground':'#E9F1FC',
-            'focusBorder':'#A7C9F3',
-            'scrollbarSlider.background':'#BACBDD55',
-            'scrollbarSlider.hoverBackground':'#A3BBD488',
-            'scrollbarSlider.activeBackground':'#8BAACAAA',
-        },
-    });
-}
 
 export default function SourcePreview({file}) {
     const editor = useRef(null);
@@ -58,11 +20,10 @@ export default function SourcePreview({file}) {
             </div>
         </div>
         <div className={styles.editor}>
-            <Editor path={`source/${file.projectId}/${file.path}`} value={file.content} beforeMount={registerTheme} theme="featx-source"
+            <Editor path={`source/${file.projectId}/${file.path}`} value={file.content} beforeMount={registerEditorTheme} theme={EDITOR_THEME_NAME}
                 loading={<div className={styles.loading}>正在打开源码…</div>}
                 onMount={instance => {editor.current = instance; setReady(true);}}
-                options={{readOnly:true,domReadOnly:true,automaticLayout:true,minimap:{enabled:false},fontSize:13,lineHeight:22,
-                    fontFamily:"'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+                options={{readOnly:true,domReadOnly:true,automaticLayout:true,minimap:{enabled:false},...EDITOR_TYPOGRAPHY,
                     scrollBeyondLastLine:false,padding:{top:16,bottom:16},wordWrap:wrap ? 'on' : 'off',
                     glyphMargin:false,lineNumbersMinChars:3,lineDecorationsWidth:12,renderLineHighlight:'none',
                     overviewRulerLanes:0,hideCursorInOverviewRuler:true,stickyScroll:{enabled:false},

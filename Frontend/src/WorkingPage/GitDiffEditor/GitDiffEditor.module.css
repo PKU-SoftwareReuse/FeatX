@@ -3,8 +3,8 @@
     height: 100%;
     min-height: 420px;
     overflow: hidden;
-    background: #fff;
-    border: 1px solid #d8dee9;
+    background: #fbfdff;
+    border: 0;
 }
 
 .loading {
