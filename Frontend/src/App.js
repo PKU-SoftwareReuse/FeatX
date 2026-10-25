@@ -24,5 +24,8 @@ function PageRoutes() {
 }
 
 export default function App() {
-    return <ConfigProvider locale={zhCN}><Router useTransitions={false}><PageRoutes/></Router></ConfigProvider>;
+    return <ConfigProvider locale={zhCN} theme={{token:{
+        colorText:'#24364b', colorTextSecondary:'#4d6078', colorTextTertiary:'#65758b',
+        colorTextPlaceholder:'#748297', colorTextDisabled:'#8793a4',
+    }}}><Router useTransitions={false}><PageRoutes/></Router></ConfigProvider>;
 }
