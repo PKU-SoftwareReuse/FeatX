@@ -45,6 +45,7 @@
 - `GET /agent/models`：读取模型配置及副本安装/认证配置状态。
 - `GET /projects/{id}/agent/runs/{runId}`、`.../events`：任务快照、支持事件 ID 续传的 SSE。
 - `GET /projects/{id}/agent/progress`：执行状态，不虚构百分比。
+- `POST /projects/{id}/graph/preview`：只读本地文本匹配，返回初始、扩展、裁剪快照；用于新增/修改前的画布动画，不改变智能体上下文或摘要。
 - `GET /projects/{id}/agent/runs/{runId}/graph`：未提交修改文件节点。
 - `GET / PUT /projects/{id}/diff`：读取、修改项目工作区文件内容。
 - `POST /projects/{id}/git/operations`：文件暂存、取消暂存、恢复、整体提交或放弃回退。

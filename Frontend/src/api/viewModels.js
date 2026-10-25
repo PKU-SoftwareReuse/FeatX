@@ -26,8 +26,12 @@ export function featureView(result) {
 export function graphView(result, featureId) {
     const feature = result.epics.flatMap(epic => epic.features).find(item => String(item.id) === String(featureId));
     if (!feature) throw new Error('特性不存在，请刷新项目');
+    return graphForElements(feature.codeElements);
+}
+
+export function graphForElements(codeElements) {
     const files = new Map();
-    for (const qualifiedName of feature.codeElements) {
+    for (const qualifiedName of codeElements) {
         const delimiter = qualifiedName.indexOf('::');
         if (delimiter <= 0) throw new Error('代码元素缺少文件路径分隔符 ::');
         const path = qualifiedName.slice(0, delimiter);

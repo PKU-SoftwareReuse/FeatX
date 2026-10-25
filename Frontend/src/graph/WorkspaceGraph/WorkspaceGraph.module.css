@@ -26,3 +26,17 @@
 .viewing {display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#3c83df;margin-left:auto;white-space:nowrap;}
 .node.modified {border-color:#dca751;}.node.staged {border-color:#66ae88;}
 .node.selected {outline:2px solid #4b95f4;outline-offset:3px;box-shadow:0 6px 18px #3d83d112;}
+
+.previewPosition {transition:transform .55s cubic-bezier(.2,.7,.2,1);}
+.previewBadge {padding:6px 14px;font-size:10px;color:#607d9d;background:#eef4fc;border-bottom:1px solid #e4edf8;}
+.previewEntering {animation:previewNodeIn .55s ease both;animation-delay:var(--preview-delay,0ms);}
+.previewDropping {animation:previewNodeOut var(--prune-duration,2000ms) linear forwards;}
+.elementAdded {animation:previewElementIn .6s ease both;animation-delay:var(--preview-delay,0ms);color:#347fc6;}
+.elementKept {background:#edf5ff;border-radius:5px;color:#326fa8;transition:background .3s;}
+.elementRemoved {animation:previewElementOut var(--prune-duration,2000ms) linear forwards;}
+@keyframes previewNodeIn {from{opacity:0;transform:translateY(10px) scale(.96);}to{opacity:1;transform:none;}}
+@keyframes previewNodeOut {0%,6%{opacity:1;clip-path:inset(0 0 0 0);}55%{opacity:.15;clip-path:inset(0 95% 0 0);filter:blur(1px);}75%,100%{opacity:0;clip-path:inset(0 100% 0 0);}}
+@keyframes previewElementIn {from{opacity:0;transform:translateX(-5px);}to{opacity:1;transform:none;}}
+@keyframes previewElementOut {0%,6%{opacity:1;clip-path:inset(0 0 0 0);}55%{opacity:.12;clip-path:inset(0 95% 0 0);filter:blur(.6px);}75%,100%{opacity:0;clip-path:inset(0 100% 0 0);}}
+.previewDropping .elementRemoved {animation:none;}
+@media(prefers-reduced-motion:reduce){.previewPosition{transition:none;}.previewEntering,.previewDropping,.elementAdded,.elementRemoved{animation-duration:.1s;animation-delay:0s;}}

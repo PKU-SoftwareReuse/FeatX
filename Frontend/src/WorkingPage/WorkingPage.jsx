@@ -6,7 +6,7 @@ import {cloneElement, lazy, Suspense, useCallback, useEffect, useMemo, useRef, u
 import {Alert, Dropdown, Segmented, AutoComplete, Splitter, Collapse, ConfigProvider, Modal, Input, Card, List, Spin, Button, Tooltip, Select, message, Progress} from "antd";
 import {
     ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, MoreOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-    CloseOutlined, DownOutlined,
+    CloseOutlined, DownOutlined, LoadingOutlined,
     ExclamationCircleOutlined,
     SearchOutlined,
     ApartmentOutlined,
@@ -20,6 +20,8 @@ import API from "../api";
 import {iconForFile} from "../utils/fileIcon";
 import {EpicIcon, FeatureIcon, FeatureCatalogIcon, GraphViewIcon, AgentViewIcon} from "../components/FeatureIcons";
 import FeatureGraph from "../graph/WorkspaceGraph/WorkspaceGraph";
+import useGraphPreview from "../graph/GraphPreview/useGraphPreview";
+import {graphForElements} from "../api/viewModels";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
 import AgentOutputPanel from "./AgentOutputPanel/AgentOutputPanel";
 import FocusGraphStageModal from "./FocusGraphStageModal/FocusGraphStageModal";
@@ -399,6 +401,7 @@ export const FeatureListItem = ({
     selectedModel,
     selectedModelLabel,
     reviewReady,
+    graphPreparing,
     editedText,
     setEditedText,
     copy,
@@ -447,7 +450,7 @@ export const FeatureListItem = ({
                             <span>{editedText.length} 字符</span>
                         </div>
                         <div className={styles.editFooter}>
-                            {!submitEnabled && <p>{reviewReady ? '修改已生成，请在右侧审阅并提交。' : '智能体正在执行，请在输出视图查看进度。'}</p>}
+                            {!submitEnabled && <p>{graphPreparing ? '正在展示关联图谱，稍后查看智能体执行结果。' : reviewReady ? '修改已生成，请在右侧审阅并提交。' : '智能体正在执行，请在输出视图查看进度。'}</p>}
                             <div>
                                 <Button disabled={!submitEnabled} onClick={() => onCancelEdit?.(item)}>取消</Button>
                                 <Tooltip title={!selectedModel ? '请先在顶部选择模型' : !editedText.trim() ? '请填写功能描述' : !descriptionChanged ? '请先修改功能描述' : ''}>
@@ -506,6 +509,15 @@ const WorkingPage = () => {
     const [sourcePreview, setSourcePreview] = useState(null);
     const [sourceError, setSourceError] = useState("");
     const sourceRequest = useRef(0);
+    const {preview:graphPreview, startPreview, clearPreview} = useGraphPreview();
+    const graphLaunch = useRef(null);
+    const pageMounted = useRef(true);
+    const [agentStarting, setAgentStarting] = useState(false);
+    const [outputToStart, setOutputToStart] = useState(null);
+    useEffect(() => {
+        pageMounted.current = true;
+        return () => {pageMounted.current = false; if (graphLaunch.current) graphLaunch.current.cancelled = true;};
+    }, []);
 
     const [loadingFeatureList, setLoadingFeatureList] = useState(false);
     const [loadingFeatureGraph, setLoadingFeatureGraph] = useState(false);
@@ -681,6 +693,7 @@ const WorkingPage = () => {
     }, [activeRunId, activeRunStorageReady, currentProject]);
 
     const getFeatureGraphData = (featureId, selectedType, runId = activeRunId) => {
+        clearPreview();
         setLoadingFeatureGraph(true);
         setLoadingCode(false);
         setGraphData({nodes: [], edges: []});
@@ -1243,6 +1256,7 @@ const WorkingPage = () => {
     };
 
     const onClickItem = (item) => {
+        if (graphPreview?.active || agentStarting) return;
         if (selectedFeatureItem == null || item.featureId != selectedFeatureItem.featureId) {
             handleSelect(item)
         }
@@ -1289,6 +1303,7 @@ const WorkingPage = () => {
     }
 
     const handleDelete = (item) => {
+        if (graphPreview?.active || agentStarting) return;
         modal.confirm({title:'删除功能项', content:'智能体将直接修改项目文件以删除此功能；完成后可审阅并提交，或放弃回退。',
             okText:'生成删除修改', cancelText:'取消', onOk:() => {
                 if (hasPendingFeatureOperation()) confirmDiscardAndRun(() => goDelete(item));
@@ -1297,6 +1312,7 @@ const WorkingPage = () => {
     }
 
     const goDelete = (item) => {
+        clearPreview();
         if (API.capabilities?.edits === false) return API.notifyUnavailable("特性编辑");
         clearPostAgentTimers();
         clearFocusGraphStages();
@@ -1314,6 +1330,7 @@ const WorkingPage = () => {
     }
 
     const handleEdit = (item) => {
+        if (graphPreview?.active || agentStarting) return;
         if (selectedType === "edit" && selectedFeatureItem?.featureId === item.featureId) {
             return;
         }
@@ -1483,6 +1500,7 @@ const WorkingPage = () => {
     };
 
     const changeActiveKey = (newActiveKey) => {
+        if (graphPreview?.active || agentStarting) return;
         if (hasPendingFeatureOperation()) {
             confirmDiscardAndRun(() => {
                 clearLocalDraftFeature();
@@ -1709,6 +1727,18 @@ const WorkingPage = () => {
             eventSourceRef.current = null;
         };
     }
+
+    useEffect(() => {
+        if (!outputToStart || !chatMode || graphPreview?.active) return;
+        const {launch,runId,model,operation} = outputToStart;
+        if (graphLaunch.current !== launch || launch.cancelled || launch.failed || launch.outputStarted) return;
+        // Effects run after the output view has committed to the DOM.
+        launch.outputStarted = true; launch.busy = false;
+        setOutputToStart(null); setAgentStarting(false);
+        handleChat(API.getLlmResponse(runId, model), runId, operation);
+        // The launch token, not the frequently recreated handler, owns the connection.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [outputToStart, chatMode, graphPreview?.active]);
 
     const [confirmEnabled, setConfirmEnabled] = useState(false)
     const [submitEnabled, setSubmitEnabled] = useState(false)
@@ -1942,6 +1972,7 @@ const WorkingPage = () => {
     }
 
     const featureListLoadingOverlay = () => {
+        if (graphPreview?.active) return '正在整理关联图谱，随后展示智能体输出';
         if (!isFeatureModifyProgress()) {
             return copy.fetchingFeatureSummary;
         }
@@ -2076,95 +2107,66 @@ const WorkingPage = () => {
     }
 
     const submitEdit = (item, description = editedText, operation = selectedType) => {
-        if (!selectedModel) return;
-
-        setLoadingFeatureList(true)
-        setSubmitEnabled(false)
-        clearFocusGraphStages()
-        const expectedOperation = `feature-${
-            operation === 'add' ? "add" : "modify"
-        }`;
-        setOperationProgress({
-            operation: expectedOperation,
-            stage: "submit",
-            messageKey: "progress.operation.submit",
-            messageArgs: {},
-            currentStep: null,
-            totalSteps: null,
-            running: true,
-            failed: false
-        })
-        startProgressPolling(expectedOperation)
-
-        if (operation == 'edit') {
-            // console.log(editedText);
-            API.modifyFeature(description, selectedModel, item.featureId)
-                .then(async (data) => {
-                    const runId = data?.runId
-                    restoredRunRef.current = runId
-                    setRequestDraftDirty(false)
-                    clearFeatureRequestDraft()
-                    setActiveRunId(runId)
-                    await loadFocusGraphStages(runId, "edit")
-                    handleChat(API.getLlmResponse(runId, selectedModel), runId, operation)
-                })
-                .catch((error) => {
-                    console.error('Error Modify Feature:', error)
-                    stopProgressPolling()
-                    const msg = errorMessage(error, copy.failedPrepareModification)
-                    setOperationProgress({
-                        operation: expectedOperation,
-                        stage: "failed",
-                        messageKey: "progress.operation.failed",
-                        messageArgs: {},
-                        currentStep: operationProgress?.currentStep || 0,
-                        totalSteps: null,
-                        running: false,
-                        failed: true,
-                    })
-                    message.error(msg)
-                    setLoadingFeatureList(false)
-                    setSubmitEnabled(true)
-                });
-        } else if (operation == 'add') {
-            // 构建请求参数，包含moduleId
-            const requestData = {
-                featureDescription: description,
-                model: selectedModel,
-                moduleId: item.moduleId || selectedFeatureItem.moduleId,
-
-            };
-
-            API.addFeature(requestData)
-                .then(async (data) => {
-                    const runId = data?.runId
-                    restoredRunRef.current = runId
-                    setRequestDraftDirty(false)
-                    clearFeatureRequestDraft()
-                    setActiveRunId(runId)
-                    await loadFocusGraphStages(runId, "add")
-                    handleChat(API.getLlmResponse(runId, selectedModel), runId, operation)
-                })
-                .catch((error) => {
-                    console.error('Error Add Feature:', error)
-                    stopProgressPolling()
-                    const msg = errorMessage(error, copy.failedAddFeature)
-                    setOperationProgress({
-                        operation: expectedOperation,
-                        stage: "failed",
-                        messageKey: "progress.operation.failed",
-                        messageArgs: {},
-                        currentStep: operationProgress?.currentStep || 0,
-                        totalSteps: null,
-                        running: false,
-                        failed: true,
-                    })
-                    message.error(msg)
-                    setLoadingFeatureList(false)
-                    setSubmitEnabled(true)
-                });
+        if (!selectedModel || graphLaunch.current?.busy) return;
+        const projectId = currentProject?.repoId || currentProject?.id || API.getSelectedRepositoryId();
+        const launch = {busy:true,cancelled:false,failed:false,animationDone:false,runId:null,outputStarted:false};
+        graphLaunch.current = launch;
+        const valid = () => pageMounted.current && graphLaunch.current === launch && !launch.cancelled && !launch.failed;
+        let initial = {nodes:[],edges:[]};
+        if (operation !== 'add') {
+            try {initial = graphForElements(item.codeElements || []);} catch (_) {initial = graphData;}
         }
-    }
+        resetGraphDiffDrawer();
+        setFileQuery(''); setChatMode(false); setGraphData(initial); setLoadingFeatureGraph(false);
+        setOutputToStart(null); setAgentStarting(true); setLoadingFeatureList(true); setSubmitEnabled(false);
+        clearFocusGraphStages();
+        const expectedOperation = `feature-${operation === 'add' ? 'add' : 'modify'}`;
+        setOperationProgress({operation:expectedOperation,stage:'submit',messageKey:'progress.operation.submit',
+            messageArgs:{},currentStep:null,totalSteps:null,running:true,failed:false});
+        startProgressPolling(expectedOperation);
+        const showOutput = () => {
+            if (!valid() || !launch.animationDone) return;
+            setChatMode(true);
+            if (!launch.runId || launch.outputRequested) return;
+            launch.outputRequested = true;
+            setOutputToStart({launch,runId:launch.runId,model:selectedModel,operation});
+        };
+        const requestData = operation === 'add'
+            ? {operation:'add',epicId:item.moduleId || selectedFeatureItem?.moduleId,description}
+            : {operation:'modify',featureId:item.featureId,description};
+        // The visual query and the existing agent submission are independent.
+        // Only opening the SSE connection is gated by the graph presentation.
+        startPreview(projectId, requestData, initial).then(outcome => {
+            if (!valid() || outcome.cancelled) return;
+            launch.animationDone = true;
+            if (outcome.notice) message.warning(outcome.notice);
+            showOutput();
+        });
+        const request = operation === 'add'
+            ? API.addFeature({featureDescription:description,model:selectedModel,moduleId:requestData.epicId})
+            : API.modifyFeature(description, selectedModel, item.featureId);
+        request.then(data => {
+            const runId = data?.runId;
+            if (!runId) throw new Error('任务响应缺少任务 ID，请刷新项目确认接收状态，不要重复提交。');
+            // Persist even when the user navigated away while the request was in flight.
+            storeActiveRunId(projectId, runId);
+            if (!valid()) return;
+            launch.runId = runId;
+            restoredRunRef.current = runId;
+            setActiveRunId(runId);
+            setRequestDraftDirty(false); clearFeatureRequestDraft();
+            showOutput();
+        }).catch(error => {
+            if (!valid()) return;
+            launch.failed = true; launch.busy = false;
+            clearPreview(); stopProgressPolling();
+            setOutputToStart(null); setAgentStarting(false); setChatMode(false); setGraphData(initial);
+            setLoadingFeatureGraph(false); setLoadingFeatureList(false); setSubmitEnabled(true);
+            setOperationProgress({operation:expectedOperation,stage:'failed',messageKey:'progress.operation.failed',
+                messageArgs:{},currentStep:null,totalSteps:null,running:false,failed:true});
+            message.error(errorMessage(error, operation === 'add' ? copy.failedAddFeature : copy.failedPrepareModification));
+        });
+    };
 
     const finishFeatureCommit = async (commitResult) => {
         const completedRunId = activeRunId;
@@ -2394,10 +2396,12 @@ const WorkingPage = () => {
         Math.min(420, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
     ));
     const openAddFeature = (epicId = null) => {
+        if (graphPreview?.active || agentStarting) return;
         const open = () => {setAddEpic(epicId || activeKey || featureData[0]?.moduleId || null); setAddDescription(''); setAddOpen(true);};
         if (hasPendingFeatureOperation()) confirmDiscardAndRun(open); else open();
     };
     const submitNewFeature = () => {
+        if (graphLaunch.current?.busy) return;
         if (API.capabilities?.edits === false || API.capabilities?.agent === false) return API.notifyUnavailable('智能体功能编辑');
         if (!selectedModel) return message.warning('请先选择模型');
         const epic = featureData.find(item => String(item.moduleId) === String(addEpic));
@@ -2405,6 +2409,9 @@ const WorkingPage = () => {
         const item = goAdd(epic, addDescription.trim());
         if (item) {setAddOpen(false); submitEdit(item, addDescription.trim(), 'add');}
     };
+
+    const displayedGraph = graphPreview?.data?.stages[['final','transition'].includes(graphPreview.phase) ? 'pruned' : graphPreview.phase === 'retrieving' ? 'initial' : 'expanded'] || graphPreview?.initial || graphData;
+    const displayedElementCount = graphPreview ? displayedGraph?.elementCount ?? (displayedGraph?.nodes || []).reduce((count,node) => count + (node.methods?.length || 0),0) : selectedFeatureItem?.codeElements?.length || 0;
 
     const featurePanelMinimal = splitterLayoutCondensed
         && featurePanelDrawerSize < FEATURE_PANEL_DESCRIPTION_MIN_WIDTH;
@@ -2469,7 +2476,7 @@ const WorkingPage = () => {
                         size={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : featurePanelSize}
                         min={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : 245}
                         max={sidebarCollapsed ? 0 : splitterLayoutCondensed ? featurePanelDrawerSize : "45%"}
-                        resizable={!sidebarCollapsed && !splitterLayoutCondensed}
+                        resizable={!sidebarCollapsed && !splitterLayoutCondensed && !graphPreview?.active}
                         className={classNames(styles.main_area, {
                             [styles.featurePanelAreaMinimal]: featurePanelMinimal,
                         })}
@@ -2484,7 +2491,7 @@ const WorkingPage = () => {
                                     <FeatureCatalogIcon/> <span>功能特征</span>
                                 </div>
                             }
-                            extra={<Button size="small" icon={<PlusOutlined/>} onClick={() => openAddFeature()}>新增功能项</Button>}
+                            extra={<Button size="small" disabled={graphPreview?.active || agentStarting} icon={<PlusOutlined/>} onClick={() => openAddFeature()}>新增功能项</Button>}
                             bordered={false}
                             bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                         >
@@ -2564,6 +2571,7 @@ const WorkingPage = () => {
                                                                 submitEnabled={submitEnabled}
                                                                 selectedModel={selectedModel}
                                                                 reviewReady={confirmEnabled}
+                                                                graphPreparing={Boolean(graphPreview?.active)}
                                                                 selectedModelLabel={modelOptions.find(option => option.value === selectedModel)?.label}
                                                                 editedText={editedText}
                                                                 setEditedText={updateEditedText}
@@ -2601,8 +2609,8 @@ const WorkingPage = () => {
                                     <div className={styles.card_title}>
                                         <div>
                                             <div className={styles.viewSwitch}>
-                                                <Tooltip title={sidebarCollapsed ? '展开功能列表' : '收起功能列表'}><Button type="text" icon={sidebarCollapsed ? <MenuUnfoldOutlined/> : <MenuFoldOutlined/>} onClick={() => setSidebarCollapsed(value => !value)}/></Tooltip>
-                                                <Segmented aria-label="工作台视图" value={chatMode ? 'agent' : 'graph'} options={[{value:'graph',label:'代码图谱'},{value:'agent',label:'智能体输出'}]} onChange={value => setChatMode(value === 'agent')}/>
+                                                <Tooltip title={sidebarCollapsed ? '展开功能列表' : '收起功能列表'}><Button type="text" icon={sidebarCollapsed ? <MenuUnfoldOutlined/> : <MenuFoldOutlined/>} disabled={graphPreview?.active} onClick={() => setSidebarCollapsed(value => !value)}/></Tooltip>
+                                                <Segmented disabled={Boolean(graphPreview?.active)} aria-label="工作台视图" value={chatMode ? 'agent' : 'graph'} options={[{value:'graph',label:'代码图谱'},{value:'agent',label:'智能体输出'}]} onChange={value => setChatMode(value === 'agent')}/>
                                             </div>
                                         </div>
                                         <div className={styles.panelActions}>
@@ -2617,10 +2625,10 @@ const WorkingPage = () => {
                                                         setFocusGraphModalOpen(true);
                                                     }}
                                                     className={styles.icon}
-                                                    disabled={!hasFocusGraphStages}
+                                                    disabled={!hasFocusGraphStages || graphPreview?.active}
                                                 />
                                             </Tooltip>
-                                            {!chatMode && <Input.Search className={styles.fileSearch} aria-label="查找文件" placeholder="查找文件或元素" allowClear value={fileQuery} onChange={event => setFileQuery(event.target.value)}/>}
+                                            {!chatMode && <Input.Search disabled={graphPreview?.active} className={styles.fileSearch} aria-label="查找文件" placeholder="查找文件或元素" allowClear value={fileQuery} onChange={event => setFileQuery(event.target.value)}/>}
                                         </div>
                                     </div>
                                 }
@@ -2660,33 +2668,36 @@ const WorkingPage = () => {
                                     <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
                                     <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
                                         <strong title={selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : ''}>{selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : '请选择功能项'}</strong></div>
-                                    <span className={styles.contextCount}>{graphData?.nodes?.length || 0} 个文件</span>
-                                    <span className={styles.contextCount}>{selectedFeatureItem?.codeElements?.length || 0} 个元素</span>
+                                    <span className={styles.contextCount}>{displayedGraph?.nodes?.length || 0} 个文件</span>
+                                    <span className={styles.contextCount}>{displayedElementCount} 个元素</span>
                                 </div>
-                                <div className={classNames(styles.panelView, {
+                                <div data-workbench-view="agent" className={classNames(styles.panelView, {
                                     [styles.panelViewHidden]: !chatMode,
+                                    [styles.agentPreviewEntering]: chatMode && Boolean(graphPreview),
                                 })}>
                                     <div ref={containerRef} className={styles.scrollContainer}>
-                                        {agentViewRunId ? <AgentOutputPanel key={agentViewRunId} runId={agentViewRunId} isVisible={chatMode} snapshot={agentSnapshot} activities={agentActivities} connectionError={agentConnectionError}
+                                        {agentStarting && !graphPreview?.active ? <div className={styles.agentEmpty}><LoadingOutlined/><h3>正在连接智能体任务</h3><p>关联图谱展示已结束，正在等待执行信息，请勿重复提交。</p></div> : agentViewRunId ? <AgentOutputPanel key={agentViewRunId} runId={agentViewRunId} isVisible={chatMode} snapshot={agentSnapshot} activities={agentActivities} connectionError={agentConnectionError}
                                             onShowGraph={() => setChatMode(false)}
                                             onOpenFile={path => getCodeDiff(path, graphData?.nodes?.find(node => node.id === path) || {id:path,funcFile:path,type:'Modify',methods:[]})}/>
                                             : <div className={styles.agentEmpty}><AgentViewIcon/><h3>暂无智能体输出</h3><p>新增、编辑或删除功能项，提交后在这里查看执行过程。</p>{API.capabilities?.agent === false && <span>智能体服务尚未接入</span>}</div>}
                                     </div>
                                 </div>
-                                <div
+                                <div data-workbench-view="graph"
                                     onClick={(event) => event.stopPropagation()}
                                     className={classNames(styles.panelView, {
                                         [styles.panelViewHidden]: chatMode,
+                                        [styles.graphPreviewLeaving]: graphPreview?.active && graphPreview.phase === 'transition',
                                     })}
                                 >
                                     <Spin
                                         wrapperClassName={styles.panelSpin}
-                                        spinning={loadingFeatureGraph}
+                                        spinning={loadingFeatureGraph && !graphPreview?.active}
                                         tip={copy.fetchingGraph}
                                         size={"large"}
                                     >
                                         <FeatureGraph
                                             graphData={graphData}
+                                            preview={graphPreview}
                                             onNodeClick={getCodeDiff}
                                             onBackgroundClick={handleGraphBackgroundClick}
                                             searchQuery={fileQuery}
