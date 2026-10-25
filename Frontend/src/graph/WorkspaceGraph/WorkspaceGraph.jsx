@@ -1,13 +1,9 @@
-import {memo, useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {ReactFlow, Background, Controls, ControlButton, Handle, MarkerType, MiniMap, Panel, Position, ReactFlowProvider, useReactFlow, useNodesState, useViewport} from '@xyflow/react';
 import {AppstoreOutlined, FileTextOutlined} from '@ant-design/icons';
 import '@xyflow/react/dist/style.css';
 import styles from './WorkspaceGraph.module.css';
-
-const iconForFile = path => {
-    const hash = Array.from(path).reduce((value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0, 2166136261);
-    return `/assets/workspace/files/file-${hash % 8 + 1}.svg`;
-};
+import {iconForFile} from '../../utils/fileIcon';
 
 const FileNode = memo(({data, selected}) => {
     const [expanded, setExpanded] = useState(false);
@@ -53,6 +49,32 @@ function positions(nodes, edges) {
 
 function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey}) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const host = useRef(null);
+    const [frameSize, setFrameSize] = useState({width:0,height:0});
+    useLayoutEffect(() => {
+        const element = host.current;
+        let frame = null;
+        let nextSize;
+        // Fix the renderer's dimensions in pixels. ResizeObserver only reads;
+        // updates happen on the next animation frame, outside its delivery loop.
+        const schedule = (width, height) => {
+            if (width <= 0 || height <= 0) return;
+            nextSize = {width:Math.max(0, Math.floor(width)),height:Math.max(0, Math.floor(height))};
+            if (frame !== null) return;
+            frame = requestAnimationFrame(() => {
+                frame = null;
+                const next = nextSize;
+                setFrameSize(current => current.width === next.width && current.height === next.height ? current : next);
+            });
+        };
+        schedule(element.clientWidth, element.clientHeight);
+        const observer = new ResizeObserver(entries => {
+            const box = entries[0]?.contentRect;
+            if (box) schedule(box.width, box.height);
+        });
+        observer.observe(element);
+        return () => {observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame);};
+    }, []);
     const flow = useReactFlow();
     const {zoom} = useViewport();
     const callbacks = useRef({onNodeClick, onBackgroundClick});
@@ -102,8 +124,9 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     const clear = () => setNodes(current => current.map(n => ({...n,selected:false})));
     const query = searchQuery.trim().toLowerCase();
     const shownNodes = nodes.map(n => ({...n, style:{opacity:!query || `${n.data.path} ${n.data.elements.join(' ')}`.toLowerCase().includes(query) ? 1 : 0.28}}));
-    return <div className={styles.canvas}>
-        <ReactFlow nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}
+    return <div ref={host} className={styles.canvas}>
+        <div className={styles.viewport} style={frameSize}>
+        {frameSize.width > 0 && frameSize.height > 0 && <ReactFlow proOptions={{hideAttribution:true}} nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}
             onNodeClick={handleNodeClick} onPaneClick={() => {if (callbacks.current.onBackgroundClick?.(clear) !== false) clear();}}
             nodesConnectable={false} deleteKeyCode={null} selectionKeyCode={null} nodesFocusable minZoom={0.15} maxZoom={1.8}
             fitView fitViewOptions={{padding:0.2,maxZoom:1}}>
@@ -114,7 +137,8 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
             </Controls>
             <MiniMap style={{width:128,height:86}} pannable zoomable nodeColor="#cce2ff" maskColor="rgba(239,245,253,.65)"/>
             <Panel position="top-left" className={styles.canvasHint}>{query && !shownNodes.some(n => n.style.opacity === 1) ? '没有找到匹配的文件或元素' : '拖动画布平移 · 滚轮缩放'}</Panel>
-        </ReactFlow>
+        </ReactFlow>}
+        </div>
         {!nodes.length && <div className={styles.empty}><FileTextOutlined/><strong>暂无代码图谱</strong><span>选择左侧功能项，查看关联文件与代码元素</span></div>}
     </div>;
 }

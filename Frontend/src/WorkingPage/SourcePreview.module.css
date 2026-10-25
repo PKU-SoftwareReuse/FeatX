@@ -1,0 +1,7 @@
+.preview {display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;border:1px solid #e3ecf7;border-radius:10px;background:#fbfdff;}
+.toolbar {height:42px;min-height:42px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #edf2f8;background:#fff;}
+.readOnly {display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#7b91ab;background:#f2f6fc;padding:4px 8px;border-radius:6px;}
+.actions {display:flex;align-items:center;gap:4px;}.actions :global(.ant-btn) {border-radius:6px;color:#7e94af;font-size:11px;height:27px;}.actions .active {color:#347ed8;background:#edf4ff;}
+.editor {flex:1;min-height:0;overflow:hidden;}.loading {display:grid;place-items:center;height:100%;font-size:12px;color:#91a4bc;}
+.status {display:flex;align-items:center;gap:12px;min-height:29px;padding:0 12px;border-top:1px solid #edf2f8;background:#f7faff;color:#95a5ba;font-size:10px;}.statusHint {margin-left:auto;}
+@media(max-width:600px){.statusHint{display:none;}}

@@ -1,4 +1,4 @@
-.canvas {width:100%;height:100%;min-height:0;position:relative;background:#f6f9fd;}
+.canvas {overflow:hidden;contain:layout size;width:100%;height:100%;min-height:0;position:relative;background:#f6f9fd;}
 .node {width:290px;background:#fff;border:1px solid #dce7f4;border-radius:12px;box-shadow:0 5px 20px #7997b610;color:#243853;overflow:hidden;font-size:12px;}
 .node.selected {border-color:#3288ff;box-shadow:0 0 0 1px #3288ff,0 7px 24px #3288ff17;}
 .node.modified {border-color:#e5ac89;}.node.staged {border-color:#6dbb9c;}
@@ -16,3 +16,5 @@
 .zoom {font-size:11px;color:#7790ac;padding:0 12px;}.canvas :global(.react-flow__minimap) {border:1px solid #e2ebf6;border-radius:9px;overflow:hidden;width:125px;height:85px;bottom:17px;}
 .canvasHint {font-size:10px;color:#9aabc0;pointer-events:none;}.empty {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;pointer-events:none;color:#93a8c1;font-size:12px;}.empty > span:first-child {font-size:32px;color:#a5c5eb;}.empty strong {font-size:15px;color:#69829f;}
 @media(max-width:650px){.canvas :global(.react-flow__minimap){display:none;}}
+
+.viewport {position:absolute;top:0;left:0;overflow:hidden;}

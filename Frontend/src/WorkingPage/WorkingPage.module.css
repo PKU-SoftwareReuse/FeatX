@@ -830,7 +830,7 @@
 .projectTitle {font-size:13px;font-weight:600;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .branchBadge {font-size:10px;color:#788ba5;border-radius:12px;background:#f0f5fb;padding:4px 10px;max-width:150px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
 .topbarModel {margin-left:auto;}.topbarModel .modelControl {gap:10px;}.topbarModel .modelLabel {color:#6e819b;font-size:12px;}.topbarModel .modelSelect {width:190px;}.topbarModel :global(.ant-select-selector) {border-radius:8px!important;min-height:32px;align-items:center;border-color:#dde7f4!important;}
-.workspace {height:calc(100% - 58px);width:100%;margin:0;padding:10px 12px 12px;}
+.workspace {box-sizing:border-box;height:calc(100% - 58px);width:100%;margin:0;padding:10px 12px 12px;}
 .workspaceWithDrawer {width:calc(100vw - var(--diff-drawer-width));}
 .background_area {background:transparent;}.background_area > .main_area {padding:0 5px;}.background_area > .main_area:first-child {padding-left:0;padding-right:8px;}.background_area > .main_area:last-child {padding-left:8px;padding-right:0;}
 .panelCard {border:1px solid #e2ebf7;border-radius:12px;box-shadow:0 3px 12px #8fa7c106;}
@@ -873,3 +873,14 @@
 .contextIcon {display:grid;place-items:center;width:40px;height:40px;flex-shrink:0;background:#f4f7fd;border-radius:10px;}
 .contextIcon > svg {width:28px;height:28px;}
 .agentEmpty > svg {width:42px;height:42px;}
+
+.sourceDrawer {top:70px;right:12px;width:min(calc(var(--diff-drawer-width) - 12px),calc(100vw - 24px));height:calc(100dvh - 82px);border:1px solid #e0e9f5;border-radius:12px;background:#f7faff;box-shadow:-6px 5px 24px #56789b12;}
+.sourceDrawer .diffDrawerHeader {align-items:center;gap:11px;padding:14px;background:#fff;border-radius:12px 12px 0 0;border-bottom:1px solid #e9eff7;}
+.sourceHeaderIcon {width:39px;height:39px;flex-shrink:0;}
+.sourceDrawer .diffDrawerTitle {flex:1;min-width:0;}.sourceDrawer .diffDrawerTitle h2 {font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#30455f;}.sourceDrawer .diffDrawerTitle p {font-family:inherit;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#96a6ba;margin-top:4px;}
+.sourceDrawer .diffDrawerClose {color:#90a1b8;border-radius:7px;background:#f5f8fc;border:0;}
+.sourceDrawer .diffDrawerBody {padding:10px;background:#f7faff;border-radius:0 0 12px 12px;}
+@media(max-width:960px){.sourceDrawer{width:calc(100vw - 24px);right:12px;}}
+
+/* Resizing must not let child intrinsic widths resize the enclosing splitter. */
+.background_area > .main_area,.panelShell,.panelCard {min-width:0;}

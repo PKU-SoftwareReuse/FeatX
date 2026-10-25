@@ -18,6 +18,7 @@ import {
 import classNames from "classnames";
 
 import API from "../api";
+import {iconForFile} from "../utils/fileIcon";
 import {EpicIcon, FeatureIcon, FeatureCatalogIcon, GraphViewIcon, AgentViewIcon} from "../components/FeatureIcons";
 import FeatureGraph from "../graph/WorkspaceGraph/WorkspaceGraph";
 import CodeDiffComponent from "./CodeDiffComponent/CodeDiffComponent";
@@ -724,6 +725,31 @@ const WorkingPage = () => {
         typeof window === "undefined" ? 1440 : window.innerWidth
     ));
     const [featurePanelSize, setFeaturePanelSize] = useState(300);
+    const [graphLayoutRevision, setGraphLayoutRevision] = useState(0);
+    const panelResizeFrame = useRef(null);
+    const pendingPanelWidth = useRef(null);
+    useEffect(() => () => {
+        if (panelResizeFrame.current !== null) cancelAnimationFrame(panelResizeFrame.current);
+    }, []);
+    const resizeFeaturePanel = (sizes) => {
+        if (sidebarCollapsed || diffDrawerOpen || !Number.isFinite(sizes[0])) return;
+        pendingPanelWidth.current = Math.round(sizes[0]);
+        if (panelResizeFrame.current !== null) return;
+        panelResizeFrame.current = requestAnimationFrame(() => {
+            panelResizeFrame.current = null;
+            const width = pendingPanelWidth.current;
+            setFeaturePanelSize(current => current === width ? current : width);
+        });
+    };
+    const finishFeaturePanelResize = (sizes) => {
+        if (panelResizeFrame.current !== null) cancelAnimationFrame(panelResizeFrame.current);
+        panelResizeFrame.current = null;
+        if (!sidebarCollapsed && !diffDrawerOpen && Number.isFinite(sizes[0])) {
+            const width = Math.round(sizes[0]);
+            setFeaturePanelSize(current => current === width ? current : width);
+        }
+        setGraphLayoutRevision(value => value + 1);
+    };
     const drawerResizeRef = useRef(null);
     const [selectedCodeNodeId, setSelectedCodeNodeId] = useState('');
     const [isCandidateDiff, setIsCandidateDiff] = useState(false);
@@ -2375,12 +2401,10 @@ const WorkingPage = () => {
                         })}
                     >
                         <Splitter
+                            lazy
                             className={styles.background_area}
-                            onResize={(sizes) => {
-                                if (!sidebarCollapsed && !diffDrawerOpen && Number.isFinite(sizes[0])) {
-                                    setFeaturePanelSize(sizes[0]);
-                                }
-                            }}
+                            onResize={resizeFeaturePanel}
+                            onResizeEnd={finishFeaturePanelResize}
                         >
                     {/*左侧可滚动功能列表 */}
                     <Splitter.Panel
@@ -2633,7 +2657,7 @@ const WorkingPage = () => {
                                             onNodeClick={getCodeDiff}
                                             onBackgroundClick={handleGraphBackgroundClick}
                                             searchQuery={fileQuery}
-                                            viewportKey={`${diffDrawerOpen}-${diffDrawerWidth}-${sidebarCollapsed}-${featurePanelSize}`}
+                                            viewportKey={`${diffDrawerOpen}-${diffDrawerWidth}-${sidebarCollapsed}-${graphLayoutRevision}`}
                                         />
                                     </Spin>
                                 </div>
@@ -2647,9 +2671,10 @@ const WorkingPage = () => {
                     <aside
                         className={classNames(styles.diffDrawer, {
                             [styles.diffDrawerOpen]: diffDrawerOpen,
+                            [styles.sourceDrawer]: !isCandidateDiff && selectedType !== 'delete',
                         })}
                         aria-hidden={!diffDrawerOpen}
-                        aria-label={copy.changesPanel}
+                        aria-label={isCandidateDiff || selectedType === "delete" ? copy.changesPanel : "源码预览"}
                     >
                         <div
                             className={styles.diffDrawerResizeHandle}
@@ -2670,10 +2695,11 @@ const WorkingPage = () => {
                             onDoubleClick={resetDrawerWidth}
                         />
                         <header className={styles.diffDrawerHeader}>
+                            {!isCandidateDiff && selectedType !== 'delete' && <img className={styles.sourceHeaderIcon} src={iconForFile(selectedCodeNodeId)} alt=""/>}
                             <div className={styles.diffDrawerTitle}>
-                                <h2>{isCandidateDiff ? copy.candidateDiff : '源码预览'}</h2>
+                                <h2>{isCandidateDiff ? copy.candidateDiff : selectedType === 'delete' ? copy.changesPanel : selectedCodeNodeId.split('/').pop() || '源码预览'}</h2>
                                 {(candidateFile?.path || selectedCodeNodeId) && (
-                                    <p>{candidateFile?.path || selectedCodeNodeId}</p>
+                                    <p title={candidateFile?.path || selectedCodeNodeId}>{candidateFile?.path || selectedCodeNodeId}</p>
                                 )}
                             </div>
                             <div className={styles.diffDrawerHeaderActions}>
