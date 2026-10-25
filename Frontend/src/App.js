@@ -3,6 +3,7 @@ import React, {useLayoutEffect, useRef} from 'react';
 import {BrowserRouter as Router, Navigate, Route, Routes, useLocation} from 'react-router-dom';
 import {ConfigProvider} from 'antd';
 import {hasPageTransition} from './utils/usePageNavigation';
+import {techSpinConfig} from './components/TechSpinner/TechSpinner';
 import zhCN from 'antd/locale/zh_CN';
 import WelcomePage from './WelcomePage/WelcomePage';
 import WorkingPage from './WorkingPage/WorkingPage';
@@ -24,7 +25,7 @@ function PageRoutes() {
 }
 
 export default function App() {
-    return <ConfigProvider locale={zhCN} theme={{token:{
+    return <ConfigProvider locale={zhCN} spin={techSpinConfig} theme={{token:{
         colorText:'#24364b', colorTextSecondary:'#4d6078', colorTextTertiary:'#65758b',
         colorTextPlaceholder:'#748297', colorTextDisabled:'#8793a4',
     }}}><Router useTransitions={false}><PageRoutes/></Router></ConfigProvider>;

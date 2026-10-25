@@ -1,0 +1,10 @@
+.loader {display:inline-flex;align-items:center;justify-content:center;position:relative;width:36px;height:36px;flex-shrink:0;}
+.loader svg {display:block;width:36px;height:36px;overflow:visible;}
+.tile {animation:tileFloat 1.7s ease-in-out infinite;}
+/* Keep the original translucent loading context; only the short caption has a light backing. */
+.spin:global(.ant-spin-spinning) {display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:10px;max-height:none!important;padding:16px;box-sizing:border-box;color:#45617f;background:rgba(249,252,255,.24);}
+.spin :global(.ant-spin-dot) {position:relative!important;top:auto!important;left:auto!important;width:36px!important;height:36px!important;margin:0!important;transform:none!important;flex-shrink:0;}
+.spin :global(.ant-spin-text) {position:static!important;width:auto!important;max-width:min(360px,100%);padding:4px 10px!important;margin:0!important;font-size:12px!important;line-height:1.7;color:#45617f;letter-spacing:0;text-shadow:none!important;overflow-wrap:anywhere;background:rgba(255,255,255,.94);border-radius:7px;}
+.spin :global(.ant-spin-dot-holder) {position:relative!important;top:auto!important;left:auto!important;margin:0!important;}
+@keyframes tileFloat {0%,70%,100%{opacity:.7;transform:translateY(0);}35%{opacity:1;transform:translateY(-2px);}}
+@media(prefers-reduced-motion:reduce){.tile{animation:none!important;opacity:.85;}}
