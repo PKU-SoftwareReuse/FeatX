@@ -1224,6 +1224,24 @@ const WorkingPage = () => {
     };
 
     const [modal, contextHolder] = Modal.useModal();
+    const confirmDialog = (options) => {
+        const danger = Boolean(options.okButtonProps?.danger);
+        return modal.confirm({
+            ...options,
+            centered: true,
+            width: 480,
+            className: styles.confirmDialog,
+            autoFocusButton: 'cancel',
+            icon: null,
+            title: <div className={styles.confirmHeading}>
+                <span className={classNames(styles.confirmSymbol, {[styles.confirmDanger]: danger})}>
+                    {options.icon || <ExclamationCircleOutlined/>}
+                </span>
+                <span>{options.title}</span>
+            </div>,
+        });
+    };
+
 
     const resetGraphDiffDrawer = () => {
         setSelectedCodeNodeId('');
@@ -1304,7 +1322,7 @@ const WorkingPage = () => {
 
     const handleDelete = (item) => {
         if (graphPreview?.active || agentStarting) return;
-        modal.confirm({title:'删除功能项', content:'智能体将直接修改项目文件以删除此功能；完成后可审阅并提交，或放弃回退。',
+        confirmDialog({title:'删除功能项', content:'智能体将直接修改项目文件以删除此功能；完成后可审阅并提交，或放弃回退。',
             okText:'生成删除修改', cancelText:'取消', onOk:() => {
                 if (hasPendingFeatureOperation()) confirmDiscardAndRun(() => goDelete(item));
                 else goDelete(item);
@@ -1911,13 +1929,24 @@ const WorkingPage = () => {
     };
 
     const confirmDiscardAndRun = (nextAction) => {
-        modal.confirm({
-            title: copy.discardAllTitle,
-            icon: <ExclamationCircleOutlined/>,
-            content: copy.discardAllDescription,
-            okText: copy.discard,
+        confirmDialog({
+            title: '放弃本次全部未提交修改？',
+            icon: <UndoOutlined/>,
+            content: <div className={styles.discardDetails}>
+                <p>本次任务产生的修改将被撤回，包括已选择但尚未提交的修改。</p>
+                <div className={styles.discardScope}>
+                    <strong>确认后将执行</strong>
+                    <ul>
+                        <li>停止本次智能体任务</li>
+                        <li>还原本次修改的文件，并删除本次新增文件</li>
+                    </ul>
+                </div>
+                <div className={styles.preservedNote}><CheckCircleOutlined/><span>已有 Git 提交和任务开始前的忽略文件不受影响。</span></div>
+                <small>操作期间请勿在项目中并行手动修改文件。</small>
+            </div>,
+            okText: '确认放弃修改',
             okButtonProps: {danger: true},
-            cancelText: copy.cancel,
+            cancelText: '继续审阅',
             onOk: async () => {
                 const features = await discardPendingChanges();
                 await nextAction?.(features);
@@ -2273,7 +2302,7 @@ const WorkingPage = () => {
         const complete = status.commitScope === 'COMPLETE';
         const partial = !metadataOnly && !complete;
         const remainingCount = status.unstagedCandidatePaths?.length || 0;
-        modal.confirm({
+        confirmDialog({
             title: metadataOnly
                 ? copy.metadataCommitTitle
                 : complete ? copy.completeCommitTitle : copy.partialCommitTitle,
@@ -2319,7 +2348,7 @@ const WorkingPage = () => {
         }
 
         const totalCount = status.candidatePaths?.length || remainingCount;
-        modal.confirm({
+        confirmDialog({
             title: copy.confirmAllChanges,
             icon: <ExclamationCircleOutlined/>,
             content: (
@@ -2443,7 +2472,7 @@ const WorkingPage = () => {
                         <span className={styles.projectTitle} title={currentProject?.projectName || currentProject?.name}>{currentProject?.projectName || currentProject?.name || '工作台'}</span>
                         {(currentProject?.git?.branch || currentProject?.git?.refName) && <span className={styles.branchBadge}>{currentProject.git.branch || currentProject.git.refName}</span>}
                         <div className={styles.topbarModel}><label className={styles.modelControl}>
-                                    <span className={styles.modelLabel}>{copy.model}</span>
+                                    <span className={styles.modelLabel}><AgentViewIcon/><span>模型</span></span>
                                     <Select
                                         aria-label={copy.model}
                                         className={styles.modelSelect}
@@ -2455,8 +2484,12 @@ const WorkingPage = () => {
                                         placeholder={API.capabilities?.agent === false ? ("Agent 尚未实现") : (loadingModels ? copy.loadingModels : copy.modelUnavailable)}
                                         showSearch
                                         optionFilterProp="label"
-                                        popupMatchSelectWidth={false}
-                                        size="small"
+                                        popupMatchSelectWidth={280}
+                                        popupClassName={styles.modelPopup}
+                                        suffixIcon={loadingModels ? <LoadingOutlined/> : <DownOutlined/>}
+                                        notFoundContent="没有匹配的模型"
+                                        dropdownRender={menu => <><div className={styles.modelPopupHeading}>选择执行模型<span>{modelOptions.length} 个可用</span></div>{menu}</>}
+                                        size="middle"
                                     />
                                 </label></div>
                     </header>

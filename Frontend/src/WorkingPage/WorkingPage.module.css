@@ -923,3 +923,40 @@
 .agentPreviewEntering {animation:agentViewEnter .18s ease-out;}
 @keyframes agentViewEnter {from{opacity:0;}to{opacity:1;}}
 @media(prefers-reduced-motion:reduce){.graphPreviewLeaving{transition:none;}.agentPreviewEntering{animation:none;}}
+
+/* Workspace controls and confirmation dialogs share the same quiet, rounded surface. */
+.topbarModel .modelControl {gap:0;padding:3px 5px 3px 11px;border:1px solid #dce5f1;border-radius:12px;background:#f8faff;transition:border-color .2s,box-shadow .2s;}
+.topbarModel .modelControl:focus-within {border-color:#91b6ef;box-shadow:0 0 0 3px #488fe810;}
+.topbarModel .modelLabel {display:flex;align-items:center;gap:7px;padding-right:11px;border-right:1px solid #e0e7f1;color:#53627a;font-size:12px;}
+.topbarModel .modelLabel svg {width:22px;height:22px;}
+.topbarModel .modelSelect {width:210px;}
+.topbarModel .modelSelect :global(.ant-select-selector) {background:transparent!important;border:0!important;box-shadow:none!important;border-radius:8px!important;padding-left:12px!important;}
+.topbarModel .modelSelect :global(.ant-select-selection-item) {color:#283e5b;font-size:12px;font-weight:500;}
+.topbarModel .modelSelect :global(.ant-select-arrow) {color:#71839d;font-size:10px;}
+.modelPopup {padding:6px!important;border:1px solid #e0e8f3;border-radius:12px!important;box-shadow:0 12px 36px #233e6521!important;max-width:calc(100vw - 24px);}
+.modelPopupHeading {display:flex;justify-content:space-between;padding:9px 9px 12px;color:#425975;font-size:12px;border-bottom:1px solid #edf1f6;margin-bottom:5px;}
+.modelPopupHeading span {color:#748399;font-size:11px;}
+.modelPopup :global(.ant-select-item) {border-radius:7px;padding:9px 10px;color:#354c69;font-size:12px;}
+.modelPopup :global(.ant-select-item-option-selected:not(.ant-select-item-option-disabled)) {background:#eaf2ff;color:#2564bb;font-weight:500;}
+.confirmDialog :global(.ant-modal-content) {padding:26px;border-radius:18px;border:1px solid #e2eaf4;box-shadow:0 24px 90px #233b6529;}
+.confirmDialog :global(.ant-modal-confirm-title) {width:100%;}
+.confirmHeading {display:flex;align-items:center;gap:12px;color:#233850;font-size:17px;font-weight:600;line-height:1.5;}
+.confirmSymbol {display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;flex-shrink:0;border-radius:13px;background:#edf4ff;color:#4884d0;font-size:20px;}
+.confirmDanger {background:#fff0ee;color:#cf4b50;}
+.confirmDialog :global(.ant-modal-confirm-content) {margin:18px 0 0!important;color:#4e6077;font-size:13px;line-height:1.85;max-width:100%!important;}
+.confirmDialog :global(.ant-modal-confirm-btns) {margin-top:24px;padding-top:18px;border-top:1px solid #edf1f6;display:flex;justify-content:flex-end;gap:10px;}
+.confirmDialog :global(.ant-modal-confirm-btns .ant-btn) {height:36px;padding:0 17px;border-radius:9px;box-shadow:none;margin:0!important;}
+.confirmDialog :global(.ant-btn-default) {border-color:#dce4ef;color:#475b74;}
+.confirmDialog :global(.ant-btn-primary.ant-btn-dangerous) {background:#d94b53;}
+.confirmDialog :global(.ant-btn-primary.ant-btn-dangerous:not(:disabled):hover) {background:#c93c46;}
+.confirmDialog :global(.ant-alert) {border-radius:10px;}
+.discardDetails p {margin:0 0 15px;}
+.discardScope {padding:12px 15px;background:#fafbfe;border:1px solid #e8edf5;border-radius:10px;}
+.discardScope strong {color:#354b66;font-size:12px;font-weight:600;}
+.discardScope ul {margin:5px 0 0;padding-left:18px;}
+.discardScope li {padding:2px 0;}
+.preservedNote {display:flex;align-items:flex-start;gap:7px;margin-top:15px;font-size:12px;color:#4c6576;}
+.preservedNote > :global(.anticon) {margin-top:5px;color:#5a967f;}
+.discardDetails small {display:block;margin-top:8px;color:#69798e;font-size:11px;}
+@media(max-width:960px){.topbarModel .modelSelect{width:170px;}}
+@media(max-width:650px){.topbarModel .modelLabel{display:none;}.topbarModel .modelControl{padding-left:2px;}.topbarModel .modelSelect{width:130px;}.confirmDialog :global(.ant-modal-content){padding:20px;}.confirmHeading{font-size:15px;}}
