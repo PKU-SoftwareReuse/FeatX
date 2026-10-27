@@ -6,6 +6,9 @@ import styles from './WorkspaceGraph.module.css';
 import {iconForFile} from '../../utils/fileIcon';
 import GraphPreviewOverlay from '../GraphPreview/GraphPreviewOverlay';
 import {fileGrid} from './gridLayout';
+import useFileReferences from '../References/useFileReferences';
+import ReferenceEdge from '../References/ReferenceEdge';
+import {selectReferences,focusReferences,referenceSnapshots,extendPositions} from '../References/referenceGraph';
 
 const FileNode = memo(({data, selected}) => {
     const [expanded, setExpanded] = useState(false);
@@ -18,7 +21,10 @@ const FileNode = memo(({data, selected}) => {
     const keepIds = data.keepIds || new Set();
     const originalIds = data.originalIds || new Set();
     return <article data-prune-target={dropping ? 'file' : undefined} className={`${styles.node} ${selected ? styles.selected : ''} ${data.state === 'Modify' ? styles.modified : ''} ${data.state === 'Staged' ? styles.staged : ''} ${entering ? styles.previewEntering : ''} ${dropping ? styles.previewDropping : ''}`} style={{'--preview-delay': `${data.enterDelay || 0}ms`, '--prune-duration': `${data.pruneDuration || 2000}ms`}}>
-        {data.connected && <><Handle type="target" position={Position.Left} isConnectable={false}/><Handle type="source" position={Position.Right} isConnectable={false}/></>}
+        {[Position.Left,Position.Right,Position.Top,Position.Bottom].map(side=><span key={side}>
+            <Handle id={`in-${side}`} type="target" position={side} isConnectable={false}/>
+            <Handle id={`out-${side}`} type="source" position={side} isConnectable={false}/>
+        </span>)}
         {data.previewMode && <div className={styles.previewBadge}>{data.previewPhase === 'final' || data.previewPhase === 'transition' ? '裁剪结果' : data.originalFile ? '原有关联' : '扩展关联'}</div>}
         {(data.reviewMode || selected) && <div className={`${styles.stateStrip} ${data.state === 'Staged' ? styles.confirmedStrip : data.state === 'Modify' ? styles.pendingStrip : ''}`}>
             {data.reviewMode && <span className={styles.stateLabel} title={data.state === 'Staged' ? '已选择保留，尚未创建 Git 提交' : data.state === 'Modify' ? '尚未选择保留；部分提交时会放弃该修改' : '此文件没有待选择修改'}>
@@ -37,31 +43,14 @@ const FileNode = memo(({data, selected}) => {
 });
 const nodeTypes = {file: FileNode};
 
-function positions(nodes, edges, viewport, heights) {
-    // Display layout only; never create semantic relationships.
-    if (!edges.length) {
-        return fileGrid(nodes, viewport, heights).positions;
-    }
-    const incoming = new Map(nodes.map(n => [String(n.id), 0]));
-    const next = new Map(nodes.map(n => [String(n.id), []]));
-    edges.forEach(e => {if (incoming.has(e.target) && next.has(e.source)) {incoming.set(e.target, incoming.get(e.target) + 1); next.get(e.source).push(e.target);}});
-    const queue = [...incoming.keys()].filter(id => incoming.get(id) === 0);
-    const level = new Map(queue.map(id => [id, 0]));
-    for (let i = 0; i < queue.length; i++) for (const target of next.get(queue[i])) {
-        level.set(target, Math.max(level.get(target) || 0, level.get(queue[i]) + 1));
-        incoming.set(target, incoming.get(target) - 1);
-        if (!incoming.get(target)) queue.push(target);
-    }
-    const counts = new Map();
-    return new Map(nodes.map(n => {
-        const column = level.get(String(n.id)) || 0;
-        const row = counts.get(column) || 0; counts.set(column, row + 1);
-        return [String(n.id), {x:column * 430, y:row * 330}];
-    }));
+const edgeTypes = {reference:ReferenceEdge};
+function positions(nodes, viewport, heights) {
+    return fileGrid(nodes, viewport, heights).positions;
 }
 
-function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false, preview = null, layoutReferenceWidth}) {
+function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false, preview = null, layoutReferenceWidth, projectId, onReferenceSnapshot}) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [hoveredFile,setHoveredFile] = useState(null);
     const host = useRef(null);
     const [frameSize, setFrameSize] = useState({width:0,height:0});
     useLayoutEffect(() => {
@@ -116,30 +105,22 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     const latest = useRef(effectiveGraph);
     latest.current = effectiveGraph;
     const previewPositions = useRef({id:null,positions:new Map()});
-    const structure = JSON.stringify({nodes:(effectiveGraph?.nodes || []).map(n => [n.id, n.funcFile, n.methods]), edges:effectiveGraph?.edges || []});
-    const graphEdges = useMemo(() => {
-        const ids = new Set((latest.current?.nodes || []).map(n => String(n.id)));
-        return (latest.current?.edges || []).map((e, i) => ({
-            id:String(e.id ?? `edge-${i}`), source:String(e.source ?? e.from), target:String(e.target ?? e.to),
-            label:e.label || e.relation || e.type || undefined, type:'default',
-            markerEnd:{type:MarkerType.ArrowClosed, color:'#8caed9'}, style:{stroke:'#8caed9',strokeWidth:1.5},
-            labelStyle:{fill:'#627b9b',fontSize:11}, labelBgStyle:{fill:'#f5f9ff'},
-        })).filter(e => ids.has(e.source) && ids.has(e.target));
-        // Only structural changes rebuild display edges.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [structure]);
+    const structure = JSON.stringify((effectiveGraph?.nodes || []).map(n => [n.id, n.funcFile, n.methods]));
+    const references = useFileReferences(projectId, graphData, !previewMode);
+    const referenceCandidates = useMemo(()=>previewMode ? effectiveGraph?.edges || [] : references,[previewMode,effectiveGraph?.edges,references]);
     const arrange = useCallback(() => {
         const source = latest.current?.nodes || [];
         const heights = new Map(flow.getNodes().map(node => [node.id, node.measured?.height]));
-        const points = positions(source, graphEdges, layoutSize, heights);
-        const connected = new Set(graphEdges.flatMap(e => [e.source, e.target]));
+        const points = positions(source, layoutSize, heights);
         setNodes(current => {
             const old = new Map(current.map(node => [node.id, node]));
             return source.map(n => ({...old.get(String(n.id)),id:String(n.id),type:'file',position:points.get(String(n.id)),
-                data:{path:n.funcFile || String(n.id), elements:(n.methods || []).map(String),state:n.type, connected:connected.has(String(n.id))}}));
+                data:{path:n.funcFile || String(n.id), elements:(n.methods || []).map(String),state:n.type}}));
         });
         requestAnimationFrame(() => flow.fitView({padding:0.1, maxZoom:1, duration:180}));
-    }, [graphEdges, setNodes, flow, layoutSize]);
+        // Node layout depends only on node structure, never on arriving edges.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [structure, setNodes, flow, layoutSize]);
     useEffect(() => {if (!previewMode) arrange();}, [arrange, previewMode]);
     useEffect(() => {
         if (!previewMode) return;
@@ -148,24 +129,12 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         if (previewPositions.current.id !== preview.id) {
             previewPositions.current = {id:preview.id,positions:new Map(flow.getNodes().filter(node => initialFiles.has(node.id)).map(node => [node.id,node.position]))};
         }
-        const cache = previewPositions.current.positions;
-        const columns = fileGrid(source, layoutSize).columns;
-        let slot = 0;
-        for (const node of source) {
-            const id = String(node.id);
-            if (cache.has(id)) continue;
-            let point, collision;
-            do {
-                point = {x:(slot % columns) * 370,y:Math.floor(slot / columns) * 330}; slot++;
-                collision = false;
-                for (const occupied of cache.values()) {
-                    if (Math.abs(occupied.x - point.x) < 330 && Math.abs(occupied.y - point.y) < 290) {collision = true;break;}
-                }
-            } while (collision);
-            cache.set(id, point);
-        }
+        const cache = extendPositions(source, previewPositions.current.positions, layoutSize);
+        previewPositions.current.positions = cache;
         const compact = ['final','transition'].includes(preview.phase);
-        const finalPositions = compact ? positions(source, [], layoutSize) : cache;
+        const stage = compact ? 'pruned' : preview.phase==='retrieving' ? 'initial' : 'expanded';
+        const saved = preview.data?.referenceLayouts?.[stage];
+        const finalPositions = saved ? new Map(saved) : compact ? positions(source, layoutSize) : cache;
         setNodes(current => {
             const old = new Map(current.map(node => [node.id,node]));
             return source.map(node => ({...old.get(String(node.id)),id:String(node.id),type:'file',selected:false,
@@ -178,7 +147,13 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         return () => clearTimeout(timer);
         // Stages share node identities and preserve positions; no per-frame React updates.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [previewMode, preview?.id, preview?.phase, structure, setNodes, flow, layoutSize]);
+    }, [previewMode, preview?.id, preview?.phase, preview?.data?.referenceLayouts, structure, setNodes, flow, layoutSize]);
+    useEffect(() => {
+        if (!preview?.active || !preview.data || !preview.data.referencesLocked || preview.data.referenceDisplay || !onReferenceSnapshot) return;
+        const initial = previewPositions.current.positions;
+        onReferenceSnapshot(preview.id,referenceSnapshots(preview.data,layoutSize,initial));
+    }, [preview,layoutSize,onReferenceSnapshot]);
+    useEffect(()=>setHoveredFile(null),[structure,previewActive]);
     useEffect(() => {
         if (previewMode) return;
         const types = new Map((graphData?.nodes || []).map(n => [String(n.id), n.type]));
@@ -207,15 +182,53 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     const keptFiles = useMemo(() => new Set((preview?.data?.stages.pruned.nodes || []).map(node => node.id)), [preview?.data]);
     const initialFiles = useMemo(() => new Set((preview?.data?.stages.initial.nodes || preview?.initial?.nodes || []).map(node => String(node.id))), [preview?.data,preview?.initial]);
     const originalIds = useMemo(() => new Set((preview?.data?.stages.initial.nodes || preview?.initial?.nodes || []).flatMap(node => (node.methods || []).map(name => `${node.id}::${name}`))), [preview?.data,preview?.initial]);
-    const shownNodes = nodes.map((node,index) => ({...node,
+    const points = useMemo(()=>new Map(nodes.map(node=>[node.id,node.position])),[nodes]);
+    const stage = ['final','transition'].includes(preview?.phase) ? 'pruned' : preview?.phase==='retrieving' ? 'initial' : 'expanded';
+    const selectedReferences = useMemo(()=>preview?.data?.referenceDisplay?.[stage]
+        || selectReferences(referenceCandidates,nodes,points),[preview?.data?.referenceDisplay,stage,referenceCandidates,nodes,points]);
+    const graphEdges = useMemo(()=>{
+        const focus = previewActive ? null : hoveredFile;
+        const selected = focusReferences(selectedReferences,referenceCandidates,nodes,points,focus);
+        const nodeMap = new Map(nodes.map(node=>[node.id,node]));
+        const left = Math.min(...nodes.map(node=>node.position.x))-28;
+        const right = Math.max(...nodes.map(node=>node.position.x+290))+28;
+        return selected.flatMap(edge=>{
+            const source=nodeMap.get(edge.source),target=nodeMap.get(edge.target);
+            if (!source || !target) return [];
+            const a=source.position,b=target.position,dx=b.x-a.x,dy=b.y-a.y;
+            let from,to,detourX;
+            if (Math.abs(dy)>380 || (Math.abs(dy)<40 && Math.abs(dx)>420)) {
+                from=to=Position.Top;
+                detourX = Math.abs(a.x-left)+Math.abs(b.x-left) <= Math.abs(a.x+290-right)+Math.abs(b.x+290-right) ? left : right;
+            } else if (Math.abs(dy)>80) {
+                from=dy>0 ? Position.Bottom : Position.Top;to=dy>0 ? Position.Top : Position.Bottom;
+            } else {
+                from=dx>=0 ? Position.Right : Position.Left;to=dx>=0 ? Position.Left : Position.Right;
+            }
+            const adjacent=focus && (edge.source===focus || edge.target===focus);
+            const stroke=adjacent ? '#4f8bc7' : '#91a9c0';
+            const marker={type:MarkerType.ArrowClosed,color:stroke,width:12,height:12,orient:'auto-start-reverse'};
+            const dropping=preview?.phase==='pruning' && (!keptFiles.has(edge.source)||!keptFiles.has(edge.target));
+            return [{...edge,type:'reference',sourceHandle:`out-${from}`,targetHandle:`in-${to}`,
+                markerEnd:edge.forward ? marker : undefined,markerStart:edge.backward ? marker : undefined,
+                selectable:false,focusable:true,zIndex:0,
+                ariaLabel:`文件引用：${edge.source} ${edge.forward && edge.backward ? '与' : edge.forward ? '引用' : '被引用于'} ${edge.target}`,
+                style:{stroke,strokeWidth:adjacent ? 1.8 : 1.2,opacity:focus && !adjacent ? .45 : .8},
+                data:{evidence:edge.evidence,detourX,dropping,duration:preview?.phaseDuration},
+            }];
+        });
+    },[selectedReferences,referenceCandidates,nodes,points,hoveredFile,previewActive,preview?.phase,preview?.phaseDuration,keptFiles]);
+    const shownNodes = useMemo(()=>nodes.map((node,index) => ({...node,
         data:{...node.data,reviewMode:reviewMode && !previewMode,previewMode,previewActive,previewPhase:preview?.phase,pruneDuration:preview?.phaseDuration,
             keepIds,originalIds,originalFile:initialFiles.has(node.id),newFile:!initialFiles.has(node.id),keptFile:keptFiles.has(node.id),
             enterDelay:preview?.reduced ? 0 : Math.min(800,index * 800 / Math.max(1,nodes.length))},
         style:{opacity:!query || `${node.data.path} ${node.data.elements.join(' ')}`.toLowerCase().includes(query) ? 1 : .28},
-    }));
+    })),[nodes,reviewMode,previewMode,previewActive,preview?.phase,preview?.phaseDuration,preview?.reduced,
+        keepIds,originalIds,initialFiles,keptFiles,query]);
     return <div ref={host} className={styles.canvas}>
         <div className={styles.viewport} style={frameSize}>
-        {frameSize.width > 0 && frameSize.height > 0 && <ReactFlow proOptions={{hideAttribution:true}} nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}
+        {frameSize.width > 0 && frameSize.height > 0 && <ReactFlow proOptions={{hideAttribution:true}} nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}
+            onNodeMouseEnter={(_,node)=>{if(!previewActive)setHoveredFile(node.id);}} onNodeMouseLeave={()=>setHoveredFile(null)}
             onNodeClick={handleNodeClick} onPaneClick={() => {if (!previewActive && callbacks.current.onBackgroundClick?.(clear) !== false) clear();}}
             nodesConnectable={false} nodesDraggable={!previewActive} panOnDrag={!previewActive} zoomOnScroll={!previewActive} zoomOnPinch={!previewActive} zoomOnDoubleClick={!previewActive}
             deleteKeyCode={null} selectionKeyCode={null} nodesFocusable={!previewActive} minZoom={.03} maxZoom={1.8}

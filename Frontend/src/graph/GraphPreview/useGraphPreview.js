@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import API from '../../api';
+import {freezeReferences} from '../References/referenceGraph';
 
 export const PREVIEW_DEADLINE = 10000;
 const emptyGraph = {nodes:[],edges:[],fileCount:0,elementCount:0};
@@ -50,6 +51,7 @@ export default function useGraphPreview(projectId) {
         if (current) {
             current.done = true;
             current.controller.abort();
+            current.referencesController?.abort();
             cancelAnimationFrame(current.frame);
             clearTimeout(current.timeout);
             document.removeEventListener('visibilitychange', current.tick);
@@ -90,15 +92,16 @@ export default function useGraphPreview(projectId) {
         const id = ++sequence.current;
         let resolve;
         const promise = new Promise(done => {resolve = done;});
-        const current = {id,resolve,controller:new AbortController(),startedAt:performance.now(),
-            data:null,readyAt:null,phase:'retrieving',done:false,frame:null,timeout:null,
+        const current = {id,projectId,body,resolve,controller:new AbortController(),referencesController:new AbortController(),startedAt:performance.now(),
+            data:null,referencesLocked:Boolean(cached),readyAt:null,phase:'retrieving',done:false,frame:null,timeout:null,
             reduced:window.matchMedia('(prefers-reduced-motion: reduce)').matches};
         session.current = current;
-        setPreview({...replayProps,id,active:true,phase:'retrieving',data:null,initial,reduced:current.reduced,direction:1});
+        setPreview({...replayProps,id,active:true,phase:'retrieving',data:cached,initial,reduced:current.reduced,direction:1});
         const finish = outcome => {
             if (session.current !== current || current.done) return;
             current.done = true;
             current.controller.abort();
+            current.referencesController?.abort();
             cancelAnimationFrame(current.frame);
             clearTimeout(current.timeout);
             document.removeEventListener('visibilitychange', current.tick);
@@ -106,12 +109,27 @@ export default function useGraphPreview(projectId) {
             if (mounted.current) setPreview(cached && !keepFinal ? previous : {...replayProps,replaying:false,id,active:false,phase:'final',data:current.data,initial,reduced:current.reduced,direction:-1});
             resolve(outcome || {cancelled:false});
         };
+        const saveSnapshot = () => {
+            if (cached) return;
+            const snapshot = {projectId,body,data:current.data,runId:boundRun.current};
+            setLastReplay(snapshot);
+            try {sessionStorage.setItem(replayKey(projectId), JSON.stringify(snapshot));} catch (_) { /* In-memory replay remains available. */ }
+        };
+        const lockReferences = (edges=[], partial=false) => {
+            if (current.done || current.referencesLocked || session.current !== current) return;
+            current.referencesLocked = true;
+            current.referencesController.abort();
+            current.data = freezeReferences(current.data, edges, partial);
+            saveSnapshot();
+            setPreview(previous => previous?.id===id ? {...previous,data:current.data} : previous);
+        };
         current.tick = () => {
             if (session.current !== current || current.done) return;
             cancelAnimationFrame(current.frame);
             const now = performance.now();
             if (now - current.startedAt >= PREVIEW_DEADLINE) {finish(); return;}
             if (current.data && now >= current.readyAt) {
+                if (!current.referencesLocked) lockReferences([],true);
                 const phase = current.timeline.find(part => now - current.readyAt < part.end);
                 if (!phase) {finish(); return;}
                 if (current.phase !== phase.phase) {
@@ -134,10 +152,17 @@ export default function useGraphPreview(projectId) {
             }
             clearTimeout(current.timeout);
             current.data = data;
+            saveSnapshot();
             if (!cached) {
-                const snapshot = {projectId,body,data,runId:boundRun.current};
-                setLastReplay(snapshot);
-                try {sessionStorage.setItem(replayKey(projectId), JSON.stringify(snapshot));} catch (_) { /* In-memory replay remains available. */ }
+                const files = data.stages.expanded.nodes.map(node=>node.funcFile || String(node.id));
+                if (files.length<2) lockReferences();
+                else {
+                    const request = API.getGraphReferences ? API.getGraphReferences(projectId,files,current.referencesController.signal) : Promise.resolve({projectId,edges:[]});
+                    request.then(result=>{
+                        if (result.projectId === projectId) lockReferences(result.edges || [],Boolean(result.partial));
+                        else lockReferences([],true);
+                    }).catch(()=>lockReferences([],true));
+                }
             }
             current.readyAt = Math.max(current.startedAt + 400, performance.now());
             current.timeline = previewTimeline(data, current.reduced,
@@ -149,9 +174,21 @@ export default function useGraphPreview(projectId) {
         });
         return promise;
     }, [cancel]);
+    const recordReferenceDisplay = useCallback((id, snapshot) => {
+        const current = session.current;
+        if (!current || current.id!==id || current.done || current.data?.referenceDisplay) return;
+        current.data = {...current.data,...snapshot};
+        setPreview(previous=>previous?.id===id ? {...previous,data:current.data} : previous);
+        setLastReplay(previous=>{
+            if (!previous || previous.projectId!==current.projectId) return previous;
+            const next={...previous,data:current.data};
+            try {sessionStorage.setItem(replayKey(current.projectId),JSON.stringify(next));} catch (_) { /* Keep in memory. */ }
+            return next;
+        });
+    }, []);
     const replayPreview = useCallback(({keepFinal = false, runId} = {}) => {
         if (session.current || !lastReplay || lastReplay.projectId !== projectId || !runId || lastReplay.runId !== runId) return Promise.resolve({cancelled:true});
         return start(lastReplay.projectId, lastReplay.body, lastReplay.data.stages.initial, lastReplay.data, keepFinal);
     }, [lastReplay, projectId, start]);
-    return {preview,startPreview:start,clearPreview:cancel,replayPreview,lastReplay,clearReplay,bindReplay};
+    return {preview,startPreview:start,clearPreview:cancel,replayPreview,lastReplay,clearReplay,bindReplay,recordReferenceDisplay};
 }

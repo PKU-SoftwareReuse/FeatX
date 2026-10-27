@@ -40,3 +40,7 @@
 @keyframes previewElementOut {0%,6%{opacity:1;clip-path:inset(0 0 0 0);}55%{opacity:.12;clip-path:inset(0 95% 0 0);filter:blur(.6px);}75%,100%{opacity:0;clip-path:inset(0 100% 0 0);}}
 .previewDropping .elementRemoved {animation:none;}
 @media(prefers-reduced-motion:reduce){.previewPosition{transition:none;}.previewEntering,.previewDropping,.elementAdded,.elementRemoved{animation-duration:.1s;animation-delay:0s;}}
+
+/* Handles stay mounted so asynchronously arriving edges do not change card geometry. */
+.canvas :global(.react-flow__handle) {opacity:0;pointer-events:none;}
+.canvas :global(.react-flow__edge:hover .react-flow__edge-path) {stroke:#4f8bc7;stroke-width:1.8;}

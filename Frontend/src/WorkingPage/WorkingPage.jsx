@@ -509,7 +509,7 @@ const WorkingPage = () => {
     const [sourcePreview, setSourcePreview] = useState(null);
     const [sourceError, setSourceError] = useState("");
     const sourceRequest = useRef(0);
-    const {preview:graphPreview, startPreview, clearPreview, replayPreview, lastReplay, clearReplay, bindReplay} = useGraphPreview(API.getSelectedRepositoryId());
+    const {preview:graphPreview, startPreview, clearPreview, replayPreview, lastReplay, clearReplay, bindReplay, recordReferenceDisplay} = useGraphPreview(API.getSelectedRepositoryId());
     const graphPreviewRef = useRef(null);
     graphPreviewRef.current = graphPreview;
     const deferredGraphRefresh = useRef(null);
@@ -2758,7 +2758,9 @@ const WorkingPage = () => {
                                     >
                                         <FeatureGraph
                                             graphData={graphData}
+                                            projectId={currentProject?.id || API.getSelectedRepositoryId()}
                                             preview={graphPreview}
+                                            onReferenceSnapshot={recordReferenceDisplay}
                                             onNodeClick={getCodeDiff}
                                             onBackgroundClick={handleGraphBackgroundClick}
                                             searchQuery={fileQuery}

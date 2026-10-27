@@ -1,10 +1,10 @@
 import {act, renderHook} from '@testing-library/react';
 import useGraphPreview, {previewTimeline, PREVIEW_DEADLINE} from './useGraphPreview';
 import API from '../../api';
-jest.mock('../../api', () => ({previewFeatureGraph:jest.fn()}));
+jest.mock('../../api', () => ({previewFeatureGraph:jest.fn(),getGraphReferences:jest.fn()}));
 const graph = count => ({nodes:[],edges:[],elementCount:count,fileCount:count});
 const data = {stages:{initial:graph(2),expanded:graph(8),pruned:graph(4)},keptElementIds:['a'],removedElementIds:['b']};
-beforeEach(() => {jest.useFakeTimers();window.matchMedia=()=>({matches:false});API.previewFeatureGraph.mockReset();});
+beforeEach(() => {jest.useFakeTimers();window.matchMedia=()=>({matches:false});API.previewFeatureGraph.mockReset();API.getGraphReferences.mockReset();API.getGraphReferences.mockResolvedValue({projectId:'p',edges:[]});});
 afterEach(() => {jest.useRealTimers();});
 
 test('timeline holds expanded and final graphs and fits slow requests within deadline', () => {
@@ -25,7 +25,7 @@ test('normal playback resolves once; timeout resolves without stalling or accept
     await act(async()=>{done=result.current.startPreview('p',{operation:'add',description:'登录'},graph(0));});
     await act(async()=>{jest.advanceTimersByTime(9900);await done;});
     expect(result.current.preview.active).toBe(false);
-    expect(result.current.preview.data).toEqual(data);
+    expect(result.current.preview.data.stages).toEqual(data.stages);
     let late;API.previewFeatureGraph.mockImplementation(()=>new Promise(resolve=>{late=resolve;}));
     await act(async()=>{done=result.current.startPreview('p',{operation:'add',description:'登录'},graph(0));});
     let outcome;
@@ -53,7 +53,7 @@ test('replay survives clearing and remounting, reuses snapshots without another 
     act(()=>view.result.current.clearPreview());
     view.unmount();
     view=renderHook(()=>useGraphPreview('replay-project'));
-    expect(view.result.current.lastReplay.data).toEqual(data);
+    expect(view.result.current.lastReplay.data.stages).toEqual(data.stages);
     await act(async()=>{done=view.result.current.replayPreview({runId:'run-1'});});
     expect(view.result.current.preview.replaying).toBe(true);
     expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
@@ -93,5 +93,26 @@ test('resolved tasks invalidate replay and a different task cannot replay a save
     expect(result.current.lastReplay).toBeNull();
     expect(sessionStorage.getItem('featx.graphReplay.p')).toBeNull();
     expect(await result.current.replayPreview({runId:'current-run'})).toEqual({cancelled:true});
+    unmount();sessionStorage.clear();
+});
+
+
+test('references lock before expansion; a late response cannot change playback or replay', async()=>{
+    sessionStorage.clear();
+    const rich={...data,stages:{initial:{...graph(1),nodes:[{id:'a.js'}]},expanded:{...graph(2),nodes:[{id:'a.js'},{id:'b.js'}]},pruned:{...graph(1),nodes:[{id:'a.js'}]}}};
+    let late;API.getGraphReferences.mockImplementation(()=>new Promise(resolve=>{late=resolve;}));
+    API.previewFeatureGraph.mockResolvedValue(rich);
+    const {result,unmount}=renderHook(()=>useGraphPreview('p'));let done;
+    await act(async()=>{done=result.current.startPreview('p',{operation:'modify',description:'登录'},graph(1));});
+    act(()=>result.current.bindReplay('r'));
+    await act(async()=>{jest.advanceTimersByTime(500);});
+    expect(result.current.preview.data.referencesLocked).toBe(true);
+    await act(async()=>{late({projectId:'p',edges:[{source:'a.js',target:'b.js'}]});});
+    expect(result.current.preview.data.stages.expanded.edges).toEqual([]);
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{done=result.current.replayPreview({runId:'r',keepFinal:true});});
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    expect(API.getGraphReferences).toHaveBeenCalledTimes(1);
+    expect(result.current.preview.data.stages.expanded.edges).toEqual([]);
     unmount();sessionStorage.clear();
 });
