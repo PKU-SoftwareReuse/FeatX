@@ -1,0 +1,23 @@
+.current {display:flex;align-items:center;gap:14px;}
+.current > img {width:56px;height:56px;object-fit:cover;border:1px solid #e2eaf4;border-radius:14px;background:white;}
+.current p {font-size:11px;color:#65758b;margin:6px 0 0;}
+.current :global(.ant-btn-link) {padding:0;font-size:11px;height:24px;}
+.grid {display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:6px;padding:10px;background:#f7faff;border:1px solid #e2eaf4;border-radius:12px;}
+.grid button {position:relative;display:grid;place-items:center;aspect-ratio:1;border:1px solid transparent;background:transparent;border-radius:9px;padding:5px;cursor:pointer;}
+.grid button:hover,.grid button:focus-visible {background:#e7f0ff;border-color:#a2c5f6;}
+.grid .selected {background:#e7f0ff;border-color:#3888ed;}
+.grid img {width:100%;height:100%;object-fit:contain;}
+.grid :global(.anticon) {position:absolute;right:0;bottom:0;font-size:9px;background:#3287ee;color:white;border-radius:50%;padding:2px;}
+.crop canvas {display:block;width:256px;height:256px;max-width:100%;margin:18px auto;border:1px solid #dce5f1;border-radius:8px;}
+.crop label {display:block;color:#435771;font-size:12px;}
+@media(max-width:600px){.grid {grid-template-columns:repeat(6,minmax(0,1fr));}}
+
+.fileInput {display:none!important;}
+.changeButton {border-radius:8px;border-color:#dce5f1;color:#425a78;box-shadow:none;}
+.changeButton :global(.anticon) {font-size:10px;color:#71839a;}
+.options {margin-top:14px;padding:12px;border:1px solid #e2eaf4;border-radius:12px;background:#f7faff;}
+.optionsHeader {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;color:#425a78;font-size:12px;}
+.optionsHeader :global(.ant-btn) {border-radius:7px;font-size:12px;}
+.options .grid {padding:0;border:0;background:transparent;}
+.optionsFooter {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;font-size:11px;color:#65758b;flex-wrap:wrap;}
+.optionsFooter :global(.ant-btn-link) {padding:0;font-size:11px;height:auto;}

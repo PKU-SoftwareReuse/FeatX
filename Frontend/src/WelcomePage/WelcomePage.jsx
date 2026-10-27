@@ -5,6 +5,10 @@ import styles from './WelcomePage.module.css';
 import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, Progress, Spin, Tag, Tooltip} from "antd";
 import {ArrowRightOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
+import ProjectTag from "../components/ProjectTag";
+import {projectIcon, fallbackIcon} from "../utils/projectIcon";
+import ProjectIconPicker from "./ProjectIconPicker/ProjectIconPicker";
+import ProjectTagEditor, {tagCatalog, tagKey, tagMatches} from "./ProjectTagEditor/ProjectTagEditor";
 import {repositoryDisplay} from "../utils/repositoryDisplay";
 import FolderUploadModal from "./FolderUploadModal/FolderUploadModal";
 import GitDownModal from "./GitDownModal/GitDownModal";
@@ -16,9 +20,7 @@ import {
     localizeSummaryStepDetail,
 } from "../utils/progressText";
 
-const projectIcons = ["projects/01-cube.svg", "projects/02-hexagon.svg", "projects/03-prism.svg", "projects/04-rings.svg", "projects/05-puzzle.svg", "projects/06-mountain.svg", "projects/07-leaf.svg", "projects/08-sun.svg", "projects/09-moon.svg", "projects/10-wave.svg", "projects/11-rocket.svg", "projects/12-planet.svg", "projects/13-compass.svg", "projects/14-telescope.svg", "projects/15-flag.svg", "projects/16-lighthouse.svg", "projects/17-bridge.svg", "projects/18-castle.svg", "projects/19-tent.svg", "projects/20-house.svg", "projects/21-key.svg", "projects/22-gear.svg", "projects/23-toolbox.svg", "projects/24-hourglass.svg", "projects/25-magnet.svg", "projects/26-spiral.svg", "projects/27-orbit.svg", "projects/28-blocks.svg", "projects/29-crystal.svg", "projects/30-paper-plane.svg"];
 const asset = (file) => `/assets/welcome/${file}`;
-const projectIcon = (id) => asset(projectIcons[Array.from(String(id)).reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % projectIcons.length]);
 
 const WELCOME_COPY = {
         headline: "面向大语言模型编程的功能特征导向界面",
@@ -108,9 +110,11 @@ const WelcomePage = () => {
     const [projectOptions, setProjectOptions] = useState(null);
     const [search, setSearch] = useState("");
     const [sourceFilter, setSourceFilter] = useState("all");
+    const [tagFilter, setTagFilter] = useState([]);
     const [sortOrder, setSortOrder] = useState("newest");
     const [settingsProject, setSettingsProject] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
+    const [iconCropping, setIconCropping] = useState(false);
     const [settingsAction, setSettingsAction] = useState(null);
     const [summaryProgressByRepo, setSummaryProgressByRepo] = useState({});
     const [settingsForm] = Form.useForm();
@@ -127,6 +131,8 @@ const WelcomePage = () => {
         settingsForm.resetFields();
         settingsForm.setFieldsValue({
             projectName: settingsProject.projectName || "",
+            icon: settingsProject.icon || null,
+            tags: settingsProject.tags || [],
             gitLink: getGitLink(settingsProject),
             ["description"]:
                 settingsProject.description || "",
@@ -186,16 +192,17 @@ const WelcomePage = () => {
     }, [hasPendingSummary]);
 
     const handleConfirmButton = async (repoId) => {
+        if (projectOptions?.find(project => project.id === repoId)?.summaryPending) {
+            message.info('项目正在总结，请等待完成后再打开。');
+            return;
+        }
         setLoadingAnalyse(true);
         try {
-            const currentProject = await API.getCurrentProject().catch(() => null);
-            if (String(currentProject?.repoId) !== String(repoId)) {
-                await API.postProjectPath(repoId);
-            }
+            await API.postProjectPath(repoId);
             navigate('/working')
         } catch (error) {
             console.log(error)
-            if (error?.response?.status === 409) {
+            if (error?.response?.status === 409 && ['AGENT_PENDING', 'PENDING_CHANGES'].includes(error.response.data?.error?.code)) {
                 modal.confirm({
                     title: copy.discardBeforeSwitchTitle,
                     icon: <ExclamationCircleOutlined/>,
@@ -228,8 +235,11 @@ const WelcomePage = () => {
     }
 
     const handleResummaryButton = (repoId) => {
+        if (!repoId || settingsAction || projectOptions?.find(project => project.id === repoId)?.summaryPending) return;
         setSettingsAction("resummary");
-        API.postResummary(repoId).then(() => {
+        API.postResummary(repoId).then(task => {
+            setProjectOptions(current => current?.map(project => project.id === repoId
+                ? {...project, analysis:task, summaryPending:['queued','running'].includes(task.status)} : project));
             message.success("分析请求已提交。");
             setSettingsProject(null);
             getProjects();
@@ -385,9 +395,14 @@ const WelcomePage = () => {
         );
     }
 
+    const currentSettingsProject = projectOptions?.find(project => project.id === settingsProject?.id) || settingsProject;
+    const settingsSummaryRunning = Boolean(currentSettingsProject?.summaryPending);
+
+    const availableTags = tagCatalog(projectOptions);
     const visibleProjects = (projectOptions || []).filter(project => {
         const isUpload = project.source?.kind === "upload";
         return (sourceFilter === "all" || (sourceFilter === "upload" ? isUpload : !isUpload))
+            && tagMatches(project.tags, tagFilter)
             && `${project.projectName} ${getGitLink(project)}`.toLowerCase().includes(search.trim().toLowerCase());
     }).sort((a, b) => sortOrder === "name"
         ? a.projectName.localeCompare(b.projectName, "zh-CN")
@@ -408,15 +423,15 @@ const WelcomePage = () => {
             <section id="workflow" className={styles.hero}>
                 <div className={styles.heroInner}>
                     <div className={styles.heroCopy}>
-                        <span className={styles.eyebrow}>功能摘要 · 代码关联 · 修改审阅</span>
-                        <h1>编辑功能需求<br/><em>修改项目代码</em></h1>
-                        <p>导入项目后，查看功能摘要及其关联代码。<br/>提交需求变更，由智能体修改代码，再审阅并提交。</p>
+                        <span className={styles.eyebrow}>功能特征驱动的软件编辑</span>
+                        <h1>编辑功能特征<br/><em>修改项目代码</em></h1>
+                        <p>导入项目，生成包含功能主题与功能项的摘要。<br/>编辑功能项，定位关联代码，由智能体修改，最后审阅并提交。</p>
                     </div>
                     <div className={styles.workflow}>
                         {[
-                            ["edit-features", "编辑功能特征", "新增、修改或删除功能项，说明需要怎样改动"],
-                            ["file-graph", "定位相关代码", "查看功能关联的文件与代码元素"],
-                            ["agent-edit", "智能体编辑", "根据需求修改代码，由你审阅并决定是否提交"],
+                            ["edit-features", "编辑功能特征", "新增、修改或删除功能项，描述需求变化"],
+                            ["file-graph", "定位相关代码", "根据功能描述与需求变化，查看关联文件和代码元素"],
+                            ["agent-edit", "智能体编辑", "按需求修改代码，由你审阅后提交或放弃"],
                         ].map(([image, title, description], index) => <div key={image} className={styles.flowCard}>
                             <img src={asset(`illustrations/${image}.svg`)} alt=""/>
                             <h2><span>{index + 1}</span>{title}</h2>
@@ -429,14 +444,18 @@ const WelcomePage = () => {
                 <div className={styles.repositoryHeading}>
                     <div><h2><AppstoreOutlined/> 项目仓库 <span>{projectOptions?.length ?? "—"}</span></h2>
                         <p>选择已有项目，或从 Git、本地文件夹导入。</p></div>
+                    <Input className={styles.projectSearch} allowClear prefix={<SearchOutlined/>} placeholder="搜索项目名称或仓库地址" aria-label="搜索项目" value={search} onChange={event => setSearch(event.target.value)}/>
+                </div>
+                <div className={styles.toolbar}>
                     <div className={styles.uploadModalWrapper}>
                         <GitDownModal reloadGetProjectsInfo={getProjects}/>
                         <FolderUploadModal reloadGetProjectsInfo={getProjects}/>
                     </div>
-                </div>
-                <div className={styles.toolbar}>
-                    <Input allowClear prefix={<SearchOutlined/>} placeholder="搜索项目名称或仓库地址" aria-label="搜索项目" value={search} onChange={event => setSearch(event.target.value)}/>
                     <div className={styles.filters}>
+                        <Select className={styles.tagFilter} mode="multiple" aria-label="筛选项目标签" placeholder="筛选标签" allowClear maxTagCount="responsive" value={tagFilter} onChange={setTagFilter}
+                            optionFilterProp="label" options={availableTags.map(tag=>({value:tagKey(tag.name),label:tag.name}))}
+                            optionRender={option=><ProjectTag color={availableTags.find(tag=>tagKey(tag.name)===option.value)?.color}>{option.label}</ProjectTag>}
+                            tagRender={({value,label,closable,onClose})=><ProjectTag color={availableTags.find(tag=>tagKey(tag.name)===value)?.color || 'blue'} closable={closable} onClose={onClose} onMouseDown={event=>{event.preventDefault();event.stopPropagation();}}>{label}</ProjectTag>}/>
                         <Select aria-label="项目来源" value={sourceFilter} onChange={setSourceFilter} options={[{value:"all",label:"全部来源"},{value:"git",label:"Git 导入"},{value:"upload",label:"本地上传"}]}/>
                         <Select aria-label="项目排序" value={sortOrder} onChange={setSortOrder} options={[{value:"newest",label:"最新创建"},{value:"name",label:"按名称排序"}]}/>
                     </div>
@@ -447,14 +466,14 @@ const WelcomePage = () => {
                             {visibleProjects.map(project => {
                                 const progress = progressForProject(project);
                                 const repository = repositoryDisplay(project);
-                                const state = progress?.status || project.analysis?.status;
+                                const state = project.analysis?.status || progress?.status;
                                 const pending = project.summaryPending;
                                 const failed = state === "failed";
                                 const label = pending ? "总结中" : failed ? "总结失败" : project.summaryFlag ? "已就绪" : "待总结";
                                 const revision = project.git?.refName || project.git?.branch || project.source?.commitId || project.git?.commit?.slice(0, 8);
                                 return <Card key={project.id} className={styles.projectCard}>
                                     <div className={styles.cardTop}>
-                                        <img className={styles.projectIcon} src={projectIcon(project.id)} alt=""/>
+                                        <img className={styles.projectIcon} src={projectIcon(project)} alt="" onError={event => {const fallback = fallbackIcon(project.id); if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;}}/>
                                         <div className={styles.cardIdentity}><Tooltip title={project.projectName}><h3>{project.projectName}</h3></Tooltip>
                                             <span>{project.source?.kind === "upload" ? "本地上传" : "Git 导入"}</span></div>
                                         <Tooltip title={copy.settings}><Button type="text" icon={<SettingOutlined/>} aria-label={`${project.projectName} 项目设置`} onClick={() => openSettings(project)}/></Tooltip>
@@ -462,6 +481,7 @@ const WelcomePage = () => {
                                     <div className={styles.cardMeta}>
                                         <Tag color={pending ? "processing" : failed ? "error" : project.summaryFlag ? "success" : "default"}>{label}</Tag>
                                         {revision && <span title={revision} className={styles.revision}>{revision}</span>}
+                                        {(project.tags || []).map(tag=><ProjectTag key={tagKey(tag.name)} color={tag.color} title={tag.name}>{tag.name}</ProjectTag>)}
                                     </div>
                                     <div className={styles.cardSummary}>
                                         <p className={styles.projectDescription} title={project.description || undefined}>{project.description || (pending ? "正在生成项目简介……" : failed ? "总结未完成，可查看详情或重新生成。" : project.summaryFlag ? "暂无项目简介" : "尚未生成功能摘要。")}</p>
@@ -479,7 +499,7 @@ const WelcomePage = () => {
                                         <span className={styles.createdAt}>{project.createdAt ? new Date(project.createdAt).toLocaleDateString("zh-CN") : ""}</span>
                                         <div className={styles.buttonContainer}>
                                             {(!project.summaryFlag || pending || failed) && <Popover title={copy.summaryProgressTitle} content={renderSummaryProgress(project)} trigger="click"><Button type="text">进度详情</Button></Popover>}
-                                            <Tooltip title={!project.summaryFlag ? summaryTooltip(project) : ""}><Button type="primary" disabled={!project.summaryFlag || loadingAnalyse} onClick={() => handleConfirmButton(project.id)}>打开项目 <ArrowRightOutlined/></Button></Tooltip>
+                                            <Tooltip title={pending ? "项目正在总结，请等待完成后再打开。" : !project.summaryFlag ? summaryTooltip(project) : ""}><Button type="primary" disabled={pending || !project.summaryFlag || loadingAnalyse} onClick={() => handleConfirmButton(project.id)}>打开项目 <ArrowRightOutlined/></Button></Tooltip>
                                         </div>
                                     </div>
                                 </Card>;
@@ -488,7 +508,7 @@ const WelcomePage = () => {
                         {projectOptions && !visibleProjects.length && <div className={styles.emptyState}>
                             <img src={asset("illustrations/empty-projects.svg")} alt=""/>
                             <h3>{projectOptions.length ? "没有找到匹配的项目" : "从你的第一个项目开始"}</h3>
-                            <p>{projectOptions.length ? "试试其他关键词，或调整来源筛选。" : "点击上方 Git 导入或上传文件夹，开始整理功能摘要。"}</p>
+                            <p>{projectOptions.length ? "试试其他关键词，或调整来源与标签筛选。" : "点击上方 Git 导入或上传文件夹，开始整理功能摘要。"}</p>
                             {projectOptions.length > 0 && <Button type="link" onClick={() => {setSearch("");setSourceFilter("all");}}>清除筛选</Button>}
                         </div>}
                     </Spin>
@@ -502,23 +522,29 @@ const WelcomePage = () => {
                 okText={copy.save}
                 cancelText={copy.close}
                 confirmLoading={settingsSaving}
-                okButtonProps={{disabled: Boolean(settingsAction)}}
+                okButtonProps={{disabled: Boolean(settingsAction) || iconCropping}}
                 maskClosable={false}
                 width={620}
             >
                 <Form form={settingsForm} layout="vertical" requiredMark={false}>
+                    <Form.Item name="icon" label="项目图标">
+                        <ProjectIconPicker project={settingsProject} disabled={settingsSaving || Boolean(settingsAction)} onCroppingChange={setIconCropping}/>
+                    </Form.Item>
                     <Form.Item
                         name="projectName"
                         label={copy.projectName}
                         rules={[{required: true, whitespace: true, message: copy.projectNameRequired}]}
                     >
-                        <Input maxLength={255}/>
+                        <Input maxLength={160}/>
                     </Form.Item>
-                    {<Form.Item name="description" label={copy.description}>
-                            <Input.TextArea autoSize={{minRows: 3, maxRows: 6}}/>
+                    <Form.Item name="tags" label="项目标签">
+                        <ProjectTagEditor catalog={availableTags} disabled={settingsSaving || Boolean(settingsAction)}/>
+                    </Form.Item>
+                    {<Form.Item name="description" label="项目描述（来自功能摘要）">
+                            <Input.TextArea readOnly autoSize={{minRows: 2, maxRows: 4}}/>
                         </Form.Item>}
                     <Form.Item name="gitLink" label={copy.gitRepository}>
-                        <Input placeholder={copy.gitRepositoryPlaceholder} maxLength={2048}/>
+                        <Input readOnly placeholder="本地上传项目" maxLength={2048}/>
                     </Form.Item>
                 </Form>
 
@@ -531,12 +557,12 @@ const WelcomePage = () => {
                             onConfirm={() => handleResummaryButton(settingsProject?.id)}
                             okText={copy.confirm}
                             cancelText={copy.cancel}
-                            disabled={!settingsProject?.summaryFlag}
+                            disabled={!settingsProject || settingsSummaryRunning || settingsSaving || Boolean(settingsAction)}
                         >
                             <Button
                                 icon={<SyncOutlined/>}
                                 loading={settingsAction === "resummary"}
-                                disabled={settingsSaving || !settingsProject?.summaryFlag}
+                                disabled={!settingsProject || settingsSaving || settingsSummaryRunning || Boolean(settingsAction)}
                             >
                                 {copy.resummary}
                             </Button>

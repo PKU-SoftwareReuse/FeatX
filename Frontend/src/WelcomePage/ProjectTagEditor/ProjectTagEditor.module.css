@@ -1,0 +1,8 @@
+.colors {display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;}
+.colors > span {color:#65758b;font-size:11px;margin-right:3px;}
+.colorButton {padding:0;border:0;background:none;cursor:pointer;max-width:100%;}
+.colorButton :global(.ant-tag) {margin:0;}
+.palette {display:flex;gap:7px;}
+.palette button {width:26px;height:26px;border:2px solid transparent;border-radius:7px;color:#fff;cursor:pointer;}
+.palette button[aria-pressed=true] {outline:2px solid #a5b6ce;outline-offset:2px;}
+.palette button:focus-visible {outline:2px solid #244e8b;outline-offset:2px;}

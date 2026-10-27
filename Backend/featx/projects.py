@@ -1,7 +1,10 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from secrets import compare_digest
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from typing import Literal
+from .project_icons import default_icon, validate_icon, owner_avatar
 from .errors import AppError
 from fastapi import APIRouter, Request
 from .models import ProjectInput, Source
@@ -13,6 +16,8 @@ router = APIRouter(prefix='/projects', tags=['projects'])
 
 def public(record, shared=None):
     result = {k: v for k, v in record.items() if k not in ('result', 'uploadToken')}
+    result['icon'] = record.get('icon') or default_icon(record)
+    result['tags'] = record.get('tags', [])
     result['description'] = ''
     if shared is not None:
         try:
@@ -49,6 +54,7 @@ def create_project(body: ProjectInput, request: Request):
         git_info = importer.clone(source, body.source.commitId)
         record = {'id': project_id, **body.model_dump(mode='json'), 'git': git_info,
                   'createdAt': datetime.now(timezone.utc).isoformat(), 'analysis': None}
+        record['icon'] = default_icon(record)
         with store.lock:
             store.write(record)
         saved = True
@@ -101,3 +107,60 @@ def download_archive(project_id: str, request: Request, token: str = ''):
         if not archive.is_file():
             raise AppError(404, 'UPLOAD_MISSING', '上传文件不存在')
         return FileResponse(archive, media_type='application/zip', filename=project['source']['filename'])
+
+
+class ProjectTag(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(min_length=1, max_length=24)
+    color: Literal['blue', 'cyan', 'green', 'purple', 'magenta', 'orange', 'gold', 'red'] = 'blue'
+
+    @field_validator('name')
+    @classmethod
+    def clean_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError('标签名称不能为空')
+        return value
+
+
+class ProjectSettings(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    icon: dict | None = None
+    tags: list[ProjectTag] = Field(default_factory=list, max_length=12)
+
+    @field_validator('tags')
+    @classmethod
+    def unique_tags(cls, value):
+        if len({tag.name.casefold() for tag in value}) != len(value):
+            raise ValueError('标签名称不能重复')
+        return value
+
+
+@router.patch('/{project_id}')
+def update_project(project_id: str, body: ProjectSettings, request: Request):
+    store = request.app.state.store
+    with store.lock:
+        record = store.read(project_id)
+        if body.name is not None:
+            if not body.name.strip():
+                raise AppError(400, 'EMPTY_NAME', '项目名称不能为空')
+            record['name'] = body.name.strip()
+        if 'icon' in body.model_fields_set:
+            record['icon'] = validate_icon(body.icon, record)
+        if 'tags' in body.model_fields_set:
+            record['tags'] = [tag.model_dump() for tag in body.tags]
+        store.write(record)
+        return public(record, request.app.state.shared)
+
+
+@router.get('/{project_id}/icon')
+def project_icon(project_id: str, request: Request):
+    store = request.app.state.store
+    with store.lock:
+        record = store.read(project_id)
+        icon = default_icon(record)
+    if not icon:
+        raise AppError(404, 'NO_GITHUB_ICON', '此项目没有 GitHub 头像')
+    raw, mime = owner_avatar(store.root, icon['owner'])
+    return Response(raw, media_type=mime, headers={'Cache-Control': 'private, max-age=3600'})

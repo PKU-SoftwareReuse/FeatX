@@ -5,6 +5,7 @@ import '@xyflow/react/dist/style.css';
 import styles from './WorkspaceGraph.module.css';
 import {iconForFile} from '../../utils/fileIcon';
 import GraphPreviewOverlay from '../GraphPreview/GraphPreviewOverlay';
+import {fileGrid} from './gridLayout';
 
 const FileNode = memo(({data, selected}) => {
     const [expanded, setExpanded] = useState(false);
@@ -36,11 +37,10 @@ const FileNode = memo(({data, selected}) => {
 });
 const nodeTypes = {file: FileNode};
 
-function positions(nodes, edges) {
+function positions(nodes, edges, viewport, heights) {
     // Display layout only; never create semantic relationships.
     if (!edges.length) {
-        const columns = nodes.length <= 4 ? 2 : 3;
-        return new Map(nodes.map((n, i) => [String(n.id), {x:(i % columns) * 370, y:Math.floor(i / columns) * 330}]));
+        return fileGrid(nodes, viewport, heights).positions;
     }
     const incoming = new Map(nodes.map(n => [String(n.id), 0]));
     const next = new Map(nodes.map(n => [String(n.id), []]));
@@ -60,7 +60,7 @@ function positions(nodes, edges) {
     }));
 }
 
-function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false, preview = null}) {
+function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false, preview = null, layoutReferenceWidth}) {
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const host = useRef(null);
     const [frameSize, setFrameSize] = useState({width:0,height:0});
@@ -88,6 +88,22 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         observer.observe(element);
         return () => {observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame);};
     }, []);
+    // Drawer visibility changes the viewport, not the layout reference. Preserve the
+    // reference height too: wrapping headers during opening must not reshuffle files.
+    const [layoutSize, setLayoutSize] = useState({width:0,height:0,windowHeight:0});
+    const windowHeight = window.innerHeight;
+    useEffect(() => {
+        if (!frameSize.width || !frameSize.height) return;
+        const timer = setTimeout(() => setLayoutSize(current => {
+            const width = layoutReferenceWidth || frameSize.width;
+            const height = current.windowHeight
+                ? Math.max(1, current.height + windowHeight - current.windowHeight)
+                : frameSize.height;
+            if (current.width === width && current.height === height && current.windowHeight === windowHeight) return current;
+            return {width,height,windowHeight};
+        }), 180);
+        return () => clearTimeout(timer);
+    }, [frameSize, layoutReferenceWidth, windowHeight]);
     const flow = useReactFlow();
     const {zoom} = useViewport();
     const callbacks = useRef({onNodeClick, onBackgroundClick});
@@ -114,12 +130,16 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     }, [structure]);
     const arrange = useCallback(() => {
         const source = latest.current?.nodes || [];
-        const points = positions(source, graphEdges);
+        const heights = new Map(flow.getNodes().map(node => [node.id, node.measured?.height]));
+        const points = positions(source, graphEdges, layoutSize, heights);
         const connected = new Set(graphEdges.flatMap(e => [e.source, e.target]));
-        setNodes(source.map(n => ({id:String(n.id),type:'file',position:points.get(String(n.id)),
-            data:{path:n.funcFile || String(n.id), elements:(n.methods || []).map(String),state:n.type, connected:connected.has(String(n.id))}})));
-        requestAnimationFrame(() => flow.fitView({padding:0.2, maxZoom:1, duration:180}));
-    }, [graphEdges, setNodes, flow]);
+        setNodes(current => {
+            const old = new Map(current.map(node => [node.id, node]));
+            return source.map(n => ({...old.get(String(n.id)),id:String(n.id),type:'file',position:points.get(String(n.id)),
+                data:{path:n.funcFile || String(n.id), elements:(n.methods || []).map(String),state:n.type, connected:connected.has(String(n.id))}}));
+        });
+        requestAnimationFrame(() => flow.fitView({padding:0.1, maxZoom:1, duration:180}));
+    }, [graphEdges, setNodes, flow, layoutSize]);
     useEffect(() => {if (!previewMode) arrange();}, [arrange, previewMode]);
     useEffect(() => {
         if (!previewMode) return;
@@ -129,7 +149,7 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
             previewPositions.current = {id:preview.id,positions:new Map(flow.getNodes().filter(node => initialFiles.has(node.id)).map(node => [node.id,node.position]))};
         }
         const cache = previewPositions.current.positions;
-        const columns = source.length <= 4 ? 2 : Math.max(2, Math.ceil(Math.sqrt(source.length * 1.4)));
+        const columns = fileGrid(source, layoutSize).columns;
         let slot = 0;
         for (const node of source) {
             const id = String(node.id);
@@ -145,7 +165,7 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
             cache.set(id, point);
         }
         const compact = ['final','transition'].includes(preview.phase);
-        const finalPositions = compact ? positions(source, []) : cache;
+        const finalPositions = compact ? positions(source, [], layoutSize) : cache;
         setNodes(current => {
             const old = new Map(current.map(node => [node.id,node]));
             return source.map(node => ({...old.get(String(node.id)),id:String(node.id),type:'file',selected:false,
@@ -154,11 +174,11 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
                 data:{path:node.funcFile || String(node.id),elements:(node.methods || []).map(String),state:'Default',connected:false}}));
         });
         if (!['retrieving','expanding','final'].includes(preview.phase)) return;
-        const timer = setTimeout(() => flow.fitView({padding:.18,maxZoom:1,minZoom:.03,duration:preview.reduced ? 0 : 650}), 140);
+        const timer = setTimeout(() => flow.fitView({padding:.1,maxZoom:1,minZoom:.03,duration:preview.reduced ? 0 : 650}), 140);
         return () => clearTimeout(timer);
         // Stages share node identities and preserve positions; no per-frame React updates.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [previewMode, preview?.id, preview?.phase, structure, setNodes, flow]);
+    }, [previewMode, preview?.id, preview?.phase, structure, setNodes, flow, layoutSize]);
     useEffect(() => {
         if (previewMode) return;
         const types = new Map((graphData?.nodes || []).map(n => [String(n.id), n.type]));
@@ -172,9 +192,9 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     }, [searchQuery, flow, previewMode]);
     useEffect(() => {
         if (previewActive) return;
-        const timer = setTimeout(() => flow.fitView({padding:0.2,maxZoom:1,duration:180}), 300);
+        const timer = setTimeout(() => flow.fitView({padding:0.1,maxZoom:1,duration:180}), 300);
         return () => clearTimeout(timer);
-    }, [viewportKey, flow, previewActive]);
+    }, [viewportKey, flow, previewActive, frameSize]);
     const handleNodeClick = (_, node) => {
         if (previewActive) return;
         const original = latest.current?.nodes?.find(n => String(n.id) === node.id);
@@ -198,10 +218,10 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         {frameSize.width > 0 && frameSize.height > 0 && <ReactFlow proOptions={{hideAttribution:true}} nodes={shownNodes} edges={graphEdges} nodeTypes={nodeTypes} onNodesChange={changes => onNodesChange(changes.filter(c => c.type !== 'select'))}
             onNodeClick={handleNodeClick} onPaneClick={() => {if (!previewActive && callbacks.current.onBackgroundClick?.(clear) !== false) clear();}}
             nodesConnectable={false} nodesDraggable={!previewActive} panOnDrag={!previewActive} zoomOnScroll={!previewActive} zoomOnPinch={!previewActive} zoomOnDoubleClick={!previewActive}
-            deleteKeyCode={null} selectionKeyCode={null} nodesFocusable={!previewActive} minZoom={previewMode ? .03 : .15} maxZoom={1.8}
-            fitView fitViewOptions={{padding:0.2,maxZoom:1}}>
+            deleteKeyCode={null} selectionKeyCode={null} nodesFocusable={!previewActive} minZoom={.03} maxZoom={1.8}
+            fitView fitViewOptions={{padding:0.1,maxZoom:1}}>
             <Background color="#dbe5f2" gap={24} size={1}/>
-            {!previewActive && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{padding:0.2,maxZoom:1}}>
+            {!previewActive && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{padding:0.1,maxZoom:1}}>
                 <ControlButton onClick={arrange} title="整理布局" aria-label="整理布局"><AppstoreOutlined/></ControlButton>
                 <div className={styles.zoom}>{Math.round(zoom * 100)}%</div>
             </Controls>}

@@ -2424,6 +2424,10 @@ const WorkingPage = () => {
         FEATURE_PANEL_MINIMAL_WIDTH,
         Math.min(420, workspaceWidthWithDrawer - GRAPH_PANEL_TARGET_WIDTH)
     ));
+    // Always arrange for the space available with the code drawer open, even while closed.
+    const graphLayoutReferenceWidth = Math.max(1, workspaceWidthWithDrawer
+        - (sidebarCollapsed ? 0 : viewportWidth > DIFF_DRAWER_OVERLAY_BREAKPOINT ? featurePanelDrawerSize : featurePanelSize)
+        - 34);
     const openAddFeature = (epicId = null) => {
         if (graphPreview?.active || agentStarting) return;
         const open = () => {setAddEpic(epicId || activeKey || featureData[0]?.moduleId || null); setAddDescription(''); setAddOpen(true);};
@@ -2735,6 +2739,7 @@ const WorkingPage = () => {
                                             onBackgroundClick={handleGraphBackgroundClick}
                                             searchQuery={fileQuery}
                                             reviewMode={confirmEnabled}
+                                            layoutReferenceWidth={graphLayoutReferenceWidth}
                                             viewportKey={`${diffDrawerOpen}-${diffDrawerWidth}-${sidebarCollapsed}-${graphLayoutRevision}`}
                                         />
                                     </Spin>

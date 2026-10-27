@@ -4,6 +4,9 @@ import {featureView} from './viewModels';
 export async function loadResult() {
     const base = projectPath();
     const {data: task} = await http.get(`${base}/summary/status`);
+    if (['queued', 'running'].includes(task.status)) {
+        throw new Error('项目正在总结，请等待完成后再打开。');
+    }
     if (!task.hasSummary) {
         if (task.status === 'not_started') {
             const {data: health} = await http.get('/integrations/reposummary');

@@ -4,6 +4,11 @@ from .errors import AppError
 router = APIRouter(prefix='/projects/{project_id}', tags=['summary'])
 
 
+def require_summary_idle(project):
+    if (project.get('analysis') or {}).get('status') in ('queued', 'running'):
+        raise AppError(409, 'SUMMARY_RUNNING', '项目正在总结，请等待完成后再打开')
+
+
 def refresh_task(app, project):
     task = project.get('analysis')
     if not task or not task.get('runId') or task['status'] in ('complete', 'failed'):

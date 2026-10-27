@@ -1,4 +1,4 @@
-import {http, getSelectedRepositoryId, setSelectedRepositoryId, projectPath, unavailable, notifyUnavailable} from './client';
+import {http, getSelectedRepositoryId, setSelectedRepositoryId, projectPath, notifyUnavailable} from './client';
 import {projectView, progressView} from './viewModels';
 
 const data = promise => promise.then(response => response.data);
@@ -22,6 +22,14 @@ const projectApi = {
     testConnect: () => http.get('/health'),
     getProjectsInfo: async () => (await data(http.get('/projects'))).map(projectView),
     postProjectPath: async id => {
+        const task = await data(http.get(`${projectPath(id)}/summary/status`));
+        const running = ['queued', 'running'].includes(task.status);
+        if (running || !task.hasSummary) {
+            const detail = running ? '项目正在总结，请等待完成后再打开。' : '项目尚无可用摘要，请先重新生成。';
+            const error = new Error(detail);
+            error.response = {status:409, data:{message:detail, error:{code:running ? 'SUMMARY_RUNNING' : 'RESULT_NOT_READY', message:detail}}};
+            throw error;
+        }
         const project = await data(http.get(projectPath(id)));
         setSelectedRepositoryId(project.id);
         return {data: projectView(project)};
@@ -55,7 +63,7 @@ const projectApi = {
         statusErrors.delete(String(id));
         if (String(getSelectedRepositoryId()) === String(id)) setSelectedRepositoryId(null);
     },
-    updateProject: () => unavailable('项目设置修改'),
+    updateProject: async (id, values) => projectView(await data(http.patch(projectPath(id), {name:values.projectName,icon:values.icon,tags:values.tags}))),
     uploadProject: (form, onUploadProgress) => http.post('/projects/upload', form, {timeout: 120000, onUploadProgress}).then(response => projectView(response.data)),
     gitDownRepo: async (gitName, commitId) => data(http.post('/projects/git/check', {
         url: normalizeGitUrl(gitName), commitId: commitId.trim() || null,
