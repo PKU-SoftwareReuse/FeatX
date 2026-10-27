@@ -1,4 +1,5 @@
 import {fileGrid} from '../WorkspaceGraph/gridLayout';
+import {relationLayout} from '../WorkspaceGraph/relationLayout';
 
 const order = (a,b) => a < b ? -1 : a > b ? 1 : 0;
 export function mergeReferences(candidates, ids) {
@@ -63,12 +64,20 @@ export function focusReferences(selected, candidates, nodes, points, focus) {
     return [...selected.filter(e=>e.source!==focus && e.target!==focus),...related];
 }
 
-export function extendPositions(nodes, initial, viewport) {
+export function extendPositions(nodes, initial, viewport, edges=[]) {
     const points=new Map(initial), columns=fileGrid(nodes,viewport).columns;
     let slot=0;
     for(const node of nodes) {
         const id=String(node.id);
         if(points.has(id)) continue;
+        const neighbors=edges.filter(edge=>edge.source===id || edge.target===id)
+            .map(edge=>points.get(edge.source===id ? edge.target : edge.source)).filter(Boolean);
+        const near=neighbors.flatMap(anchor=>[{x:anchor.x,y:anchor.y+330},{x:anchor.x+370,y:anchor.y},
+            {x:anchor.x-370,y:anchor.y},{x:anchor.x,y:anchor.y-330}]);
+        const free=near.filter(p=>![...points.values()].some(other=>Math.abs(other.x-p.x)<330&&Math.abs(other.y-p.y)<300));
+        const distance=p=>neighbors.reduce((sum,anchor)=>sum+Math.hypot(p.x-anchor.x,p.y-anchor.y),0);
+        free.sort((a,b)=>distance(a)-distance(b)||a.y-b.y||a.x-b.x);
+        if(free.length){points.set(id,free[0]);continue;}
         let point,collision;
         do {
             point={x:(slot%columns)*370,y:Math.floor(slot/columns)*330};slot++;
@@ -83,10 +92,10 @@ export function extendPositions(nodes, initial, viewport) {
 }
 
 export function referenceSnapshots(data, viewport, initialPoints) {
-    const initial=fileGrid(data.stages.initial.nodes,viewport).positions;
+    const initial=relationLayout(data.stages.initial.nodes,data.stages.initial.edges,viewport);
     for(const [id,point] of initialPoints) if(initial.has(id)) initial.set(id,point);
-    const layouts={initial,expanded:extendPositions(data.stages.expanded.nodes,initial,viewport),
-        pruned:fileGrid(data.stages.pruned.nodes,viewport).positions};
+    const layouts={initial,expanded:extendPositions(data.stages.expanded.nodes,initial,viewport,data.stages.expanded.edges),
+        pruned:relationLayout(data.stages.pruned.nodes,data.stages.pruned.edges,viewport)};
     return {
         referenceLayouts:Object.fromEntries(Object.entries(layouts).map(([stage,points])=>[stage,[...points]])),
         referenceDisplay:Object.fromEntries(Object.entries(layouts).map(([stage,points])=>

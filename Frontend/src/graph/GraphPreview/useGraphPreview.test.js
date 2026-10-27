@@ -23,7 +23,7 @@ test('normal playback resolves once; timeout resolves without stalling or accept
     API.previewFeatureGraph.mockResolvedValue(data);
     const {result}=renderHook(()=>useGraphPreview());let done;
     await act(async()=>{done=result.current.startPreview('p',{operation:'add',description:'登录'},graph(0));});
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     expect(result.current.preview.active).toBe(false);
     expect(result.current.preview.data.stages).toEqual(data.stages);
     let late;API.previewFeatureGraph.mockImplementation(()=>new Promise(resolve=>{late=resolve;}));
@@ -49,7 +49,7 @@ test('replay survives clearing and remounting, reuses snapshots without another 
     let view=renderHook(()=>useGraphPreview('replay-project'));let done;
     await act(async()=>{done=view.result.current.startPreview('replay-project',{operation:'modify',featureId:'f',description:'登录'},graph(2));});
     act(()=>view.result.current.bindReplay('run-1'));
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     act(()=>view.result.current.clearPreview());
     view.unmount();
     view=renderHook(()=>useGraphPreview('replay-project'));
@@ -57,7 +57,7 @@ test('replay survives clearing and remounting, reuses snapshots without another 
     await act(async()=>{done=view.result.current.replayPreview({runId:'run-1'});});
     expect(view.result.current.preview.replaying).toBe(true);
     expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     expect(view.result.current.preview).toBeNull();
     expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
     view.unmount();sessionStorage.clear();
@@ -69,10 +69,10 @@ test('replay while the agent is running holds the pruned snapshot instead of res
     const {result,unmount}=renderHook(()=>useGraphPreview('running-project'));let done;
     await act(async()=>{done=result.current.startPreview('running-project',{operation:'modify',description:'登录'},graph(2));});
     act(()=>result.current.bindReplay('run-2'));
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     act(()=>result.current.clearPreview());
     await act(async()=>{done=result.current.replayPreview({keepFinal:true,runId:'run-2'});});
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     expect(result.current.preview.phase).toBe('final');
     expect(result.current.preview.active).toBe(false);
     expect(result.current.preview.replaying).toBe(false);
@@ -87,7 +87,7 @@ test('resolved tasks invalidate replay and a different task cannot replay a save
     const {result,unmount}=renderHook(()=>useGraphPreview('p'));let done;
     await act(async()=>{done=result.current.startPreview('p',{operation:'modify',description:'登录'},graph(2));});
     act(()=>result.current.bindReplay('current-run'));
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     expect(await result.current.replayPreview({runId:'other-run'})).toEqual({cancelled:true});
     act(()=>result.current.clearReplay());
     expect(result.current.lastReplay).toBeNull();
@@ -105,14 +105,31 @@ test('references lock before expansion; a late response cannot change playback o
     const {result,unmount}=renderHook(()=>useGraphPreview('p'));let done;
     await act(async()=>{done=result.current.startPreview('p',{operation:'modify',description:'登录'},graph(1));});
     act(()=>result.current.bindReplay('r'));
-    await act(async()=>{jest.advanceTimersByTime(500);});
+    await act(async()=>{jest.advanceTimersByTime(1500);});
     expect(result.current.preview.data.referencesLocked).toBe(true);
     await act(async()=>{late({projectId:'p',edges:[{source:'a.js',target:'b.js'}]});});
     expect(result.current.preview.data.stages.expanded.edges).toEqual([]);
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     await act(async()=>{done=result.current.replayPreview({runId:'r',keepFinal:true});});
-    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     expect(API.getGraphReferences).toHaveBeenCalledTimes(1);
     expect(result.current.preview.data.stages.expanded.edges).toEqual([]);
+    unmount();sessionStorage.clear();
+});
+
+
+test('first expansion waits an additional second for reference results', async()=>{
+    const rich={...data,stages:{...data.stages,expanded:{...graph(2),nodes:[{id:'a.js'},{id:'b.js'}]}}};
+    let resolveReferences;API.getGraphReferences.mockImplementation(()=>new Promise(resolve=>{resolveReferences=resolve;}));
+    API.previewFeatureGraph.mockResolvedValue(rich);
+    const {result,unmount}=renderHook(()=>useGraphPreview('p'));let done;
+    await act(async()=>{done=result.current.startPreview('p',{operation:'add',description:'登录'},graph(0));});
+    await act(async()=>{jest.advanceTimersByTime(800);});
+    expect(result.current.preview.phase).toBe('retrieving');
+    await act(async()=>{resolveReferences({projectId:'p',edges:[{source:'a.js',target:'b.js'}]});});
+    await act(async()=>{jest.advanceTimersByTime(650);});
+    expect(result.current.preview.phase).toBe('expanding');
+    expect(result.current.preview.data.stages.expanded.edges).toHaveLength(1);
+    await act(async()=>{jest.advanceTimersByTime(10100);await done;});
     unmount();sessionStorage.clear();
 });

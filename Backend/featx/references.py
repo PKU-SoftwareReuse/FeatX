@@ -21,12 +21,12 @@ SCAN_LIMIT = 150
 SECONDS = .3
 REFERENCE_LIMIT = 128
 CACHE_LIMIT = 512
-EXTENSIONS = ('.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.py', '.pyi',
+EXTENSIONS = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.py', '.pyi',
               '.java', '.kt', '.cs', '.c', '.h', '.cc', '.cpp', '.hpp', '.rs', '.go', '.rb',
               '.php', '.swift', '.dart', '.scala', '.sh', '.ex', '.exs', '.lua', '.pl', '.jl')
 # Quoted strings are kept, comments/docstrings are blanked without changing line numbers.
 LEX = re.compile(r'''(?P<comment>"""[\s\S]*?(?:"""|\Z)|\x27\x27\x27[\s\S]*?(?:\x27\x27\x27|\Z)|/\*[\s\S]*?(?:\*/|\Z)|//[^\n]*|(?m:^[ \t]*(?:--|;)[^\n]*)|\#[^\n]*)|(?P<string>"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)''')
-QUOTED = re.compile(r'''(?P<kind>\b(?:import|export))\s+(?:type\s+)?[^;\n]{0,400}?\bfrom\s*["'](?P<spec>[^"'\n]{1,512})["']|(?P<direct>\b(?:import|require|require_once|include|include_once|source|load|use))\s*(?:\(\s*)?["'](?P<path>[^"'\n]{1,512})["']''')
+QUOTED = re.compile(r'''(?P<kind>\b(?:import|export))\s+(?:type\s+)?(?:\{[^}]{0,1800}\}|[\w$]+(?:\s*,\s*\{[^}]{0,1800}\})?|\*\s*(?:as\s+\w+)?)\s*\bfrom\s*["'](?P<spec>[^"'\n]{1,512})["']|(?P<direct>\b(?:import|require|require_once|include|include_once|source|load|use))\s*(?:\(\s*)?["'](?P<path>[^"'\n]{1,512})["']''')
 INCLUDE = re.compile(r'^[ \t]*#\s*include\s*[<"]([^>"\n]{1,512})[>"]', re.M)
 FROM = re.compile(r'^[ \t]*from\s+([.\w]+)\s+import\s+([^\n;]{1,512})', re.M)
 MODULE = re.compile(r'^[ \t]*(?:(?:pub|global)\s+)?(import|using|use|mod|source|load)\s+(?:static\s+)?([\w.\\:/-]+)([^\n;]{0,256})', re.M)
@@ -46,7 +46,7 @@ def extract(text):
     lines = [0] + [match.end() for match in re.finditer('\n', text)]
     refs, seen = [], set()
 
-    def emit(offset, spec, kind, python_relative=False, literal=False):
+    def emit(offset, spec, kind, python_relative=False, literal=False, statement=None):
         index = bisect.bisect_right(starts, offset) - 1
         if index >= 0 and strings[index][0] < offset < strings[index][1]:
             return
@@ -60,12 +60,12 @@ def extract(text):
         seen.add(key)
         end = text.find('\n', offset)
         refs.append({'specifier': spec, 'type': kind, 'pythonRelative': python_relative, 'literal': literal,
-                     'line': line, 'statement': text[lines[line-1]:end if end >= 0 else len(text)].strip()[:240]})
+                     'line': line, 'statement': (statement or text[lines[line-1]:end if end >= 0 else len(text)].strip())[:240]})
 
     for match in QUOTED.finditer(clean):
         if clean[match.end():].lstrip(' \t').startswith(('+', '.', '$', '[', '?')):
             continue  # Literal prefix of a computed path is not an explicit reference.
-        emit(match.start(), match['spec'] or match['path'], match['kind'] or match['direct'], literal=True)
+        emit(match.start(), match['spec'] or match['path'], match['kind'] or match['direct'], literal=True, statement=re.sub(r'\s+', ' ', match.group()))
     for match in INCLUDE.finditer(clean):
         emit(match.start() + len(match.group()) - len(match.group().lstrip()), match[1], 'include', literal=True)
     for match in FROM.finditer(clean):
@@ -94,6 +94,10 @@ class PathIndex:
             suffix = PurePosixPath(path).suffix
             if suffix in EXTENSIONS:
                 variants.add(path[:-len(suffix)])
+            # ESM TypeScript often names the emitted JS file in source imports.
+            emitted = {'.ts': ('.js',), '.tsx': ('.js', '.jsx'), '.mts': ('.mjs',), '.cts': ('.cjs',)}
+            for extension in emitted.get(suffix, ()):
+                variants.add(path[:-len(suffix)] + extension)
             stem = PurePosixPath(path).stem
             if stem in ('index', '__init__', 'mod', 'init'):
                 variants.add(posixpath.dirname(path))

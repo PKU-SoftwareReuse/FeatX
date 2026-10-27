@@ -44,3 +44,6 @@
 /* Handles stay mounted so asynchronously arriving edges do not change card geometry. */
 .canvas :global(.react-flow__handle) {opacity:0;pointer-events:none;}
 .canvas :global(.react-flow__edge:hover .react-flow__edge-path) {stroke:#4f8bc7;stroke-width:1.8;}
+
+.relationPosition:not(:global(.dragging)) {transition:transform .3s cubic-bezier(.2,.7,.2,1);}
+@media(prefers-reduced-motion:reduce){.relationPosition{transition:none!important;}}

@@ -5,7 +5,7 @@ import '@xyflow/react/dist/style.css';
 import styles from './WorkspaceGraph.module.css';
 import {iconForFile} from '../../utils/fileIcon';
 import GraphPreviewOverlay from '../GraphPreview/GraphPreviewOverlay';
-import {fileGrid} from './gridLayout';
+import {relationLayout} from './relationLayout';
 import useFileReferences from '../References/useFileReferences';
 import ReferenceEdge from '../References/ReferenceEdge';
 import {selectReferences,focusReferences,referenceSnapshots,extendPositions} from '../References/referenceGraph';
@@ -44,8 +44,8 @@ const FileNode = memo(({data, selected}) => {
 const nodeTypes = {file: FileNode};
 
 const edgeTypes = {reference:ReferenceEdge};
-function positions(nodes, viewport, heights) {
-    return fileGrid(nodes, viewport, heights).positions;
+function positions(nodes, viewport, heights, edges=[]) {
+    return relationLayout(nodes,edges,viewport,heights);
 }
 
 function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', viewportKey, reviewMode = false, preview = null, layoutReferenceWidth, projectId, onReferenceSnapshot}) {
@@ -108,20 +108,30 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
     const structure = JSON.stringify((effectiveGraph?.nodes || []).map(n => [n.id, n.funcFile, n.methods]));
     const references = useFileReferences(projectId, graphData, !previewMode);
     const referenceCandidates = useMemo(()=>previewMode ? effectiveGraph?.edges || [] : references,[previewMode,effectiveGraph?.edges,references]);
-    const arrange = useCallback(() => {
+    const referenceStructure = JSON.stringify(referenceCandidates.map(edge=>[edge.source,edge.target]).sort());
+    const lastArrangement = useRef(null);
+    const arrange = useCallback((force=false) => {
         const source = latest.current?.nodes || [];
         const heights = new Map(flow.getNodes().map(node => [node.id, node.measured?.height]));
-        const points = positions(source, layoutSize, heights);
+        const baseKey=JSON.stringify([projectId,structure,layoutSize]);
+        // Do not fall back to a grid while a refreshed reference request is pending.
+        if(!force && !referenceCandidates.length && lastArrangement.current===baseKey)return;
+        const points = positions(source, layoutSize, heights, referenceCandidates);
+        lastArrangement.current=baseKey;
         setNodes(current => {
             const old = new Map(current.map(node => [node.id, node]));
-            return source.map(n => ({...old.get(String(n.id)),id:String(n.id),type:'file',position:points.get(String(n.id)),
+            return source.map(n => ({...old.get(String(n.id)),id:String(n.id),type:'file',className:styles.relationPosition,position:points.get(String(n.id)),
                 data:{path:n.funcFile || String(n.id), elements:(n.methods || []).map(String),state:n.type}}));
         });
-        requestAnimationFrame(() => flow.fitView({padding:0.1, maxZoom:1, duration:180}));
-        // Node layout depends only on node structure, never on arriving edges.
+        requestAnimationFrame(() => flow.fitView({padding:0.1, maxZoom:1, duration:300}));
+        // Reflow once when references arrive, not on hover or viewport zoom.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [structure, setNodes, flow, layoutSize]);
-    useEffect(() => {if (!previewMode) arrange();}, [arrange, previewMode]);
+    }, [structure, referenceStructure, projectId, setNodes, flow, layoutSize]);
+    const wasPreview = useRef(false);
+    useEffect(() => {
+        if (!previewMode) arrange(wasPreview.current);
+        wasPreview.current = previewMode;
+    }, [arrange, previewMode]);
     useEffect(() => {
         if (!previewMode) return;
         const source = latest.current?.nodes || [];
@@ -129,12 +139,12 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         if (previewPositions.current.id !== preview.id) {
             previewPositions.current = {id:preview.id,positions:new Map(flow.getNodes().filter(node => initialFiles.has(node.id)).map(node => [node.id,node.position]))};
         }
-        const cache = extendPositions(source, previewPositions.current.positions, layoutSize);
+        const cache = extendPositions(source, previewPositions.current.positions, layoutSize, effectiveGraph?.edges || []);
         previewPositions.current.positions = cache;
         const compact = ['final','transition'].includes(preview.phase);
         const stage = compact ? 'pruned' : preview.phase==='retrieving' ? 'initial' : 'expanded';
         const saved = preview.data?.referenceLayouts?.[stage];
-        const finalPositions = saved ? new Map(saved) : compact ? positions(source, layoutSize) : cache;
+        const finalPositions = saved ? new Map(saved) : compact ? positions(source, layoutSize,undefined,effectiveGraph?.edges || []) : cache;
         setNodes(current => {
             const old = new Map(current.map(node => [node.id,node]));
             return source.map(node => ({...old.get(String(node.id)),id:String(node.id),type:'file',selected:false,
@@ -190,17 +200,17 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
         const focus = previewActive ? null : hoveredFile;
         const selected = focusReferences(selectedReferences,referenceCandidates,nodes,points,focus);
         const nodeMap = new Map(nodes.map(node=>[node.id,node]));
-        const left = Math.min(...nodes.map(node=>node.position.x))-28;
-        const right = Math.max(...nodes.map(node=>node.position.x+290))+28;
         return selected.flatMap(edge=>{
             const source=nodeMap.get(edge.source),target=nodeMap.get(edge.target);
             if (!source || !target) return [];
             const a=source.position,b=target.position,dx=b.x-a.x,dy=b.y-a.y;
-            let from,to,detourX;
-            if (Math.abs(dy)>380 || (Math.abs(dy)<40 && Math.abs(dx)>420)) {
-                from=to=Position.Top;
-                detourX = Math.abs(a.x-left)+Math.abs(b.x-left) <= Math.abs(a.x+290-right)+Math.abs(b.x+290-right) ? left : right;
-            } else if (Math.abs(dy)>80) {
+            const distant = Math.abs(dy)>380 || Math.abs(dx)>420;
+            let from,to,localArc;
+            if (distant && Math.abs(dx)<40) {
+                from=to=Position.Right;localArc='right';
+            } else if (distant && Math.abs(dy)<40) {
+                from=to=Position.Bottom;localArc='bottom';
+            } else if (Math.abs(dy)>80 && (!distant || Math.abs(dy)>Math.abs(dx)*.65)) {
                 from=dy>0 ? Position.Bottom : Position.Top;to=dy>0 ? Position.Top : Position.Bottom;
             } else {
                 from=dx>=0 ? Position.Right : Position.Left;to=dx>=0 ? Position.Left : Position.Right;
@@ -214,7 +224,7 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
                 selectable:false,focusable:true,zIndex:0,
                 ariaLabel:`文件引用：${edge.source} ${edge.forward && edge.backward ? '与' : edge.forward ? '引用' : '被引用于'} ${edge.target}`,
                 style:{stroke,strokeWidth:adjacent ? 1.8 : 1.2,opacity:focus && !adjacent ? .45 : .8},
-                data:{evidence:edge.evidence,detourX,dropping,duration:preview?.phaseDuration},
+                data:{evidence:edge.evidence,distant,localArc,dropping,duration:preview?.phaseDuration},
             }];
         });
     },[selectedReferences,referenceCandidates,nodes,points,hoveredFile,previewActive,preview?.phase,preview?.phaseDuration,keptFiles]);
@@ -235,7 +245,7 @@ function Canvas({graphData, onNodeClick, onBackgroundClick, searchQuery = '', vi
             fitView fitViewOptions={{padding:0.1,maxZoom:1}}>
             <Background color="#dbe5f2" gap={24} size={1}/>
             {!previewActive && <Controls showInteractive={false} position="bottom-left" fitViewOptions={{padding:0.1,maxZoom:1}}>
-                <ControlButton onClick={arrange} title="整理布局" aria-label="整理布局"><AppstoreOutlined/></ControlButton>
+                <ControlButton onClick={()=>arrange(true)} title="整理布局" aria-label="整理布局"><AppstoreOutlined/></ControlButton>
                 <div className={styles.zoom}>{Math.round(zoom * 100)}%</div>
             </Controls>}
             <MiniMap style={{width:128,height:86}} pannable={!previewActive} zoomable={!previewActive} nodeColor="#cce2ff" maskColor="rgba(239,245,253,.65)"/>

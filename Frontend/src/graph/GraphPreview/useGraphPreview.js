@@ -164,7 +164,9 @@ export default function useGraphPreview(projectId) {
                     }).catch(()=>lockReferences([],true));
                 }
             }
-            current.readyAt = Math.max(current.startedAt + 400, performance.now());
+            // Give the bounded reference request its full one-second window before expansion.
+            // Replays already have frozen edges and need no extra wait.
+            current.readyAt = Math.max(current.startedAt + 400, performance.now()) + (cached ? 0 : 1000);
             current.timeline = previewTimeline(data, current.reduced,
                 PREVIEW_DEADLINE - (current.readyAt - current.startedAt) - 50);
             current.tick();
