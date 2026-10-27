@@ -6,6 +6,7 @@ import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, 
 import {ArrowRightOutlined, LockOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
 import ProjectLanguages from "./ProjectLanguages";
+import {useLanguageCatalog, summaryLanguages} from "./projectLanguageData";
 import ProjectTag from "../components/ProjectTag";
 import {projectIcon, fallbackIcon} from "../utils/projectIcon";
 import ProjectIconPicker from "./ProjectIconPicker/ProjectIconPicker";
@@ -112,6 +113,8 @@ const WelcomePage = () => {
     const [search, setSearch] = useState("");
     const [sourceFilter, setSourceFilter] = useState("all");
     const [tagFilter, setTagFilter] = useState([]);
+    const [languageFilter, setLanguageFilter] = useState([]);
+    const languageCatalog = useLanguageCatalog(projectOptions);
     const [sortOrder, setSortOrder] = useState("newest");
     const [settingsProject, setSettingsProject] = useState(null);
     const [settingsSaving, setSettingsSaving] = useState(false);
@@ -402,10 +405,13 @@ const WelcomePage = () => {
     const settingsSummaryRunning = Boolean(currentSettingsProject?.summaryPending);
 
     const availableTags = tagCatalog(projectOptions);
+    const languagesLoading = (projectOptions || []).some(project=>!languageCatalog[project.id]);
+    const availableLanguages = [...new Set((projectOptions || []).flatMap(project=>summaryLanguages(languageCatalog[project.id]?.data).map(item=>item.name)))].sort();
     const visibleProjects = (projectOptions || []).filter(project => {
         const isUpload = project.source?.kind === "upload";
         return (sourceFilter === "all" || (sourceFilter === "upload" ? isUpload : !isUpload))
             && tagMatches(project.tags, tagFilter)
+            && (!languageFilter.length || summaryLanguages(languageCatalog[project.id]?.data).some(item=>languageFilter.includes(item.name)))
             && `${project.projectName} ${getGitLink(project)}`.toLowerCase().includes(search.trim().toLowerCase());
     }).sort((a, b) => sortOrder === "name"
         ? a.projectName.localeCompare(b.projectName, "zh-CN")
@@ -459,6 +465,9 @@ const WelcomePage = () => {
                             optionFilterProp="label" options={availableTags.map(tag=>({value:tagKey(tag.name),label:tag.name}))}
                             optionRender={option=><ProjectTag color={availableTags.find(tag=>tagKey(tag.name)===option.value)?.color}>{option.label}</ProjectTag>}
                             tagRender={({value,label,closable,onClose})=><ProjectTag color={availableTags.find(tag=>tagKey(tag.name)===value)?.color || 'blue'} closable={closable} onClose={onClose} onMouseDown={event=>{event.preventDefault();event.stopPropagation();}}>{label}</ProjectTag>}/>
+                        <Select className={`${styles.tagFilter} ${styles.languageFilter}`} mode="multiple" aria-label="筛选编程语言" placeholder="筛选语言" allowClear maxTagCount="responsive"
+                            value={languageFilter} onChange={setLanguageFilter} loading={languagesLoading} optionFilterProp="label"
+                            options={availableLanguages.map(name=>({value:name,label:name}))}/>
                         <Select aria-label="项目来源" value={sourceFilter} onChange={setSourceFilter} options={[{value:"all",label:"全部来源"},{value:"git",label:"Git 导入"},{value:"upload",label:"本地上传"}]}/>
                         <Select aria-label="项目排序" value={sortOrder} onChange={setSortOrder} options={[{value:"newest",label:"最新创建"},{value:"name",label:"按名称排序"}]}/>
                     </div>
@@ -479,7 +488,7 @@ const WelcomePage = () => {
                                         <img className={styles.projectIcon} src={projectIcon(project)} alt="" onError={event => {const fallback = fallbackIcon(project.id); if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;}}/>
                                         <div className={styles.cardIdentity}><Tooltip title={project.projectName}><h3>{project.projectName}</h3></Tooltip>
                                             <span>{project.source?.kind === "upload" ? "本地上传" : "Git 导入"}</span></div>
-                                        <ProjectLanguages projectId={project.id}/>
+                                        <ProjectLanguages entry={languageCatalog[project.id]}/>
                                         <Tooltip title={copy.settings}><Button type="text" icon={<SettingOutlined/>} aria-label={`${project.projectName} 项目设置`} onClick={() => openSettings(project)}/></Tooltip>
                                     </div>
                                     <div className={styles.cardMeta}>
@@ -512,7 +521,7 @@ const WelcomePage = () => {
                         {projectOptions && !visibleProjects.length && <div className={styles.emptyState}>
                             <img src={asset("illustrations/empty-projects.svg")} alt=""/>
                             <h3>{projectOptions.length ? "没有找到匹配的项目" : "从你的第一个项目开始"}</h3>
-                            <p>{projectOptions.length ? "试试其他关键词，或调整来源与标签筛选。" : "点击上方 Git 导入或上传文件夹，开始整理功能摘要。"}</p>
+                            <p>{languageFilter.length > 0 && languagesLoading ? "正在读取项目语言，请稍候……" : projectOptions.length ? "试试其他关键词，或调整来源、标签与语言筛选。" : "点击上方 Git 导入或上传文件夹，开始整理功能摘要。"}</p>
                             {projectOptions.length > 0 && <Button type="link" onClick={() => {setSearch("");setSourceFilter("all");}}>清除筛选</Button>}
                         </div>}
                     </Spin>

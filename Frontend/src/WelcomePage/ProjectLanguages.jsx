@@ -1,6 +1,5 @@
-import {useEffect, useState} from 'react';
 import {Popover} from 'antd';
-import {http, projectPath} from '../api/client';
+import {visibleLanguages as getVisibleLanguages, summaryLanguages as getSummaryLanguages} from './projectLanguageData';
 import styles from './ProjectLanguages.module.css';
 
 const colors = {JavaScript:'#f1e05a',TypeScript:'#3178c6',Python:'#3572a5',Java:'#b07219',Vue:'#41b883',
@@ -9,17 +8,10 @@ const colors = {JavaScript:'#f1e05a',TypeScript:'#3178c6',Python:'#3572a5',Java:
     Svelte:'#ff3e00',Scala:'#c22d40',SQL:'#e38c00',Dockerfile:'#384d54',Makefile:'#427819'};
 const colorOf = name => colors[name] || `hsl(${Array.from(name).reduce((sum,char)=>sum*31+char.charCodeAt(0),0)%360},50%,45%)`;
 const percent = item => item.percent < .1 ? '<0.1%' : `${item.percent.toFixed(1)}%`;
-export default function ProjectLanguages({projectId}) {
-    const [data,setData] = useState(null), [failed,setFailed] = useState(false);
-    useEffect(()=>{
-        const controller = new AbortController();setData(null);setFailed(false);
-        http.get(`${projectPath(projectId)}/languages`,{signal:controller.signal}).then(response=>setData(response.data))
-            .catch(()=>{if(!controller.signal.aborted)setFailed(true);});
-        return ()=>controller.abort();
-    },[projectId]);
-    const visibleLanguages = (data?.items || []).filter(item => item.percent >= 0.1).sort((a,b)=>b.percent-a.percent);
-    const showTwo = visibleLanguages[1]?.percent > 20 || visibleLanguages.every(item=>item.percent < 20);
-    const summaryLanguages = visibleLanguages.slice(0, showTwo ? 2 : 1);
+export default function ProjectLanguages({entry}) {
+    const data=entry?.data,failed=entry?.failed;
+    const visibleLanguages=getVisibleLanguages(data);
+    const summaryLanguages=getSummaryLanguages(data);
     const title = visibleLanguages.length ? <div className={styles.details}>
         <strong>代码语言</strong>
         <div className={styles.bar}>{visibleLanguages.map(item=><span key={item.name} style={{background:colorOf(item.name),flexGrow:item.bytes}}/>)}</div>

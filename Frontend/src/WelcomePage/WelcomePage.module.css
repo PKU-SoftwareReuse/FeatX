@@ -141,3 +141,7 @@
 .readonlyRepository {background:#f5f7fa!important;color:#53637a;}
 .readonlyRepository :global(.ant-input) {background:transparent;color:#53637a;}
 .readonlyRepository :global(.ant-input-prefix) {color:#7b8ba1;margin-right:8px;}
+
+.toolbar {flex-wrap:wrap;align-items:flex-start;}
+.filters .languageFilter {width:185px;min-width:155px;}
+.languageFilter :global(.ant-select-selection-item) {margin:0;}
