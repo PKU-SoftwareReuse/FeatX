@@ -1,6 +1,6 @@
 // Presentation only: clone URLs stay unchanged in project records and import requests.
 export function repositoryDisplay(project) {
-    if (project.source?.kind === 'upload') return {platform: 'local', label: '本地项目', href: null};
+    if (project.source?.kind === 'upload' && !project.gitLink) return {platform: 'local', label: '本地项目', href: null};
     const raw = project.gitLink || project.githubLink || project.source?.url || project.git?.remoteUrl || '';
     if (!raw) return {platform: 'git', label: 'Git 仓库', href: null};
     const normalized = /^[\w.-]+@[^/:]+:.+$/.test(raw) ? `ssh://${raw.replace(':', '/')}` : raw;

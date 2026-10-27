@@ -127,6 +127,7 @@ class ProjectSettings(BaseModel):
     model_config = ConfigDict(extra='forbid')
     name: str | None = Field(default=None, min_length=1, max_length=160)
     icon: dict | None = None
+    gitLink: str | None = Field(default=None, max_length=2048)
     tags: list[ProjectTag] = Field(default_factory=list, max_length=12)
 
     @field_validator('tags')
@@ -142,6 +143,10 @@ def update_project(project_id: str, body: ProjectSettings, request: Request):
     store = request.app.state.store
     with store.lock:
         record = store.read(project_id)
+        if 'gitLink' in body.model_fields_set:
+            if record['source'].get('kind') != 'upload':
+                raise AppError(400, 'GIT_SOURCE_READONLY', 'Git 导入项目的仓库地址不能修改')
+            record['gitLink'] = (body.gitLink or '').strip()
         if body.name is not None:
             if not body.name.strip():
                 raise AppError(400, 'EMPTY_NAME', '项目名称不能为空')

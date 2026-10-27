@@ -17,7 +17,9 @@ export default function ProjectLanguages({projectId}) {
             .catch(()=>{if(!controller.signal.aborted)setFailed(true);});
         return ()=>controller.abort();
     },[projectId]);
-    const visibleLanguages = (data?.items || []).filter(item => item.percent >= 0.1);
+    const visibleLanguages = (data?.items || []).filter(item => item.percent >= 0.1).sort((a,b)=>b.percent-a.percent);
+    const showTwo = visibleLanguages[1]?.percent > 20 || visibleLanguages.every(item=>item.percent < 20);
+    const summaryLanguages = visibleLanguages.slice(0, showTwo ? 2 : 1);
     const title = visibleLanguages.length ? <div className={styles.details}>
         <strong>代码语言</strong>
         <div className={styles.bar}>{visibleLanguages.map(item=><span key={item.name} style={{background:colorOf(item.name),flexGrow:item.bytes}}/>)}</div>
@@ -26,7 +28,7 @@ export default function ProjectLanguages({projectId}) {
     </div> : failed ? '语言统计暂不可用' : data ? '未识别到支持统计的源码文件' : '正在统计代码语言';
     return <Popover content={title} overlayClassName={styles.popover} placement="bottomRight" autoAdjustOverflow trigger={['hover','focus']} mouseLeaveDelay={0.15}>
         <button type="button" className={styles.languages} aria-label="查看项目代码语言占比">
-            {visibleLanguages.length ? visibleLanguages.slice(0,2).map(item=><span key={item.name}><i style={{background:colorOf(item.name)}}/>{item.name}</span>)
+            {visibleLanguages.length ? summaryLanguages.map(item=><span key={item.name}><i style={{background:colorOf(item.name)}}/>{item.name}</span>)
                 : <span className={styles.empty}>{failed ? '统计不可用' : data ? '暂无语言信息' : '统计中…'}</span>}
         </button>
     </Popover>;

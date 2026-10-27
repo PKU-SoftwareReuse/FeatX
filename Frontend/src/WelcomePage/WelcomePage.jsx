@@ -3,7 +3,7 @@ import {useEffect, useState} from "react";
 import usePageNavigation from "../utils/usePageNavigation";
 import styles from './WelcomePage.module.css';
 import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, Progress, Spin, Tag, Tooltip} from "antd";
-import {ArrowRightOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
+import {ArrowRightOutlined, LockOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
 import ProjectLanguages from "./ProjectLanguages";
 import ProjectTag from "../components/ProjectTag";
@@ -285,7 +285,9 @@ const WelcomePage = () => {
         try {
             const values = await settingsForm.validateFields();
             setSettingsSaving(true);
-            const updatedProject = await API.updateProject(settingsProject.id, values);
+            const {gitLink, ...otherValues} = values;
+            const updatedProject = await API.updateProject(settingsProject.id,
+                settingsProject.source?.kind === 'upload' ? {...otherValues,gitLink} : otherValues);
             setProjectOptions((projects) => projects.map((project) =>
                 project.id === updatedProject.id ? updatedProject : project
             ));
@@ -546,7 +548,8 @@ const WelcomePage = () => {
                             <Input.TextArea readOnly autoSize={{minRows: 2, maxRows: 4}}/>
                         </Form.Item>}
                     <Form.Item name="gitLink" label={copy.gitRepository}>
-                        <Input readOnly placeholder="本地上传项目" maxLength={2048}/>
+                        <Input readOnly={settingsProject?.source?.kind !== 'upload'} prefix={settingsProject?.source?.kind !== 'upload' ? <LockOutlined/> : undefined}
+                            className={settingsProject?.source?.kind !== 'upload' ? styles.readonlyRepository : undefined} placeholder="可填写项目链接，也可留空" maxLength={2048}/>
                     </Form.Item>
                 </Form>
 

@@ -137,3 +137,7 @@
 .filters .tagFilter :global(.ant-select-selection-wrap) {height:100%;align-self:stretch;display:flex;align-items:center;}
 .filters .tagFilter :global(.ant-select-selection-overflow) {width:100%;}
 
+
+.readonlyRepository {background:#f5f7fa!important;color:#53637a;}
+.readonlyRepository :global(.ant-input) {background:transparent;color:#53637a;}
+.readonlyRepository :global(.ant-input-prefix) {color:#7b8ba1;margin-right:8px;}

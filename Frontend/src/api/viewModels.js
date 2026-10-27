@@ -5,7 +5,7 @@ export function projectView(project) {
         ...project,
         repoId: project.id, repositoryId: project.id,
         projectName: project.name, projectType: 'GENERIC',
-        gitLink: project.source.url || '', gitName: project.source.kind === 'upload' ? '本地上传' : project.source.url,
+        gitLink: project.source.kind === 'upload' ? project.gitLink || '' : project.source.url || '', gitName: project.source.kind === 'upload' ? '本地上传' : project.source.url,
         description: project.description || '',
         summaryFlag: project.analysis?.status === 'complete' || Boolean(project.summaryRunId),
         summaryPending: ['queued', 'running'].includes(project.analysis?.status),
