@@ -23,10 +23,27 @@ export function previewTimeline(data, reduced = false, budget = Infinity) {
     });
 }
 
-export default function useGraphPreview() {
+const replayKey = projectId => `featx.graphReplay.${projectId}`;
+const validSnapshots = data => ['initial','expanded','pruned'].every(key => Array.isArray(data?.stages?.[key]?.nodes))
+    && Array.isArray(data?.keptElementIds) && Array.isArray(data?.removedElementIds);
+function readReplay(projectId) {
+    if (!projectId) return null;
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(replayKey(projectId)));
+        if (saved?.projectId === projectId && saved.runId && validSnapshots(saved.data)) return saved;
+        sessionStorage.removeItem(replayKey(projectId));
+        return null;
+    } catch (_) {return null;}
+}
+
+export default function useGraphPreview(projectId) {
     const [preview, setPreview] = useState(null);
+    const [lastReplay, setLastReplay] = useState(() => readReplay(projectId));
+    const previewRef = useRef(preview);
+    previewRef.current = preview;
     const session = useRef(null);
     const sequence = useRef(0);
+    const boundRun = useRef(null);
     const mounted = useRef(true);
     const cancel = useCallback((clear = true) => {
         const current = session.current;
@@ -46,9 +63,30 @@ export default function useGraphPreview() {
         return () => {mounted.current = false; cancel(false);};
     }, [cancel]);
 
-    const start = useCallback((projectId, body, fallbackGraph) => {
+    useEffect(() => {cancel();boundRun.current = null;setLastReplay(readReplay(projectId));}, [projectId, cancel]);
+    const clearReplay = useCallback(() => {
+        cancel();boundRun.current = null;setLastReplay(null);
+        try {sessionStorage.removeItem(replayKey(projectId));} catch (_) { /* Storage may be unavailable. */ }
+    }, [cancel, projectId]);
+    const bindReplay = useCallback(runId => {
+        boundRun.current = runId;
+        setLastReplay(saved => {
+            if (!saved || saved.projectId !== projectId) return saved;
+            const next = {...saved,runId};
+            try {sessionStorage.setItem(replayKey(projectId), JSON.stringify(next));} catch (_) { /* Keep in memory. */ }
+            return next;
+        });
+    }, [projectId]);
+
+    const start = useCallback((projectId, body, fallbackGraph, cached = null, keepFinal = false) => {
+        const previous = previewRef.current;
         cancel();
-        const initial = body.operation === 'add' ? emptyGraph : fallbackGraph || emptyGraph;
+        if (!cached) {
+            boundRun.current = null;setLastReplay(null);
+            try {sessionStorage.removeItem(replayKey(projectId));} catch (_) { /* Keep in memory. */ }
+        }
+        const replayProps = {replaying:Boolean(cached),description:body.description};
+        const initial = cached ? cached.stages.initial : body.operation === 'add' ? emptyGraph : fallbackGraph || emptyGraph;
         const id = ++sequence.current;
         let resolve;
         const promise = new Promise(done => {resolve = done;});
@@ -56,7 +94,7 @@ export default function useGraphPreview() {
             data:null,readyAt:null,phase:'retrieving',done:false,frame:null,timeout:null,
             reduced:window.matchMedia('(prefers-reduced-motion: reduce)').matches};
         session.current = current;
-        setPreview({id,active:true,phase:'retrieving',data:null,initial,reduced:current.reduced,direction:1});
+        setPreview({...replayProps,id,active:true,phase:'retrieving',data:null,initial,reduced:current.reduced,direction:1});
         const finish = outcome => {
             if (session.current !== current || current.done) return;
             current.done = true;
@@ -65,7 +103,7 @@ export default function useGraphPreview() {
             clearTimeout(current.timeout);
             document.removeEventListener('visibilitychange', current.tick);
             session.current = null;
-            if (mounted.current) setPreview({id,active:false,phase:'final',data:current.data,initial,reduced:current.reduced,direction:-1});
+            if (mounted.current) setPreview(cached && !keepFinal ? previous : {...replayProps,replaying:false,id,active:false,phase:'final',data:current.data,initial,reduced:current.reduced,direction:-1});
             resolve(outcome || {cancelled:false});
         };
         current.tick = () => {
@@ -78,7 +116,7 @@ export default function useGraphPreview() {
                 if (!phase) {finish(); return;}
                 if (current.phase !== phase.phase) {
                     current.phase = phase.phase;
-                    setPreview({id,active:true,phase:phase.phase,data:current.data,initial,
+                    setPreview({...replayProps,id,active:true,phase:phase.phase,data:current.data,initial,
                         phaseStartedAt:current.readyAt + phase.start,phaseDuration:phase.duration,
                         reduced:current.reduced,direction:['reversing','pruning','final','transition'].includes(phase.phase) ? -1 : 1});
                 }
@@ -87,14 +125,20 @@ export default function useGraphPreview() {
         };
         document.addEventListener('visibilitychange', current.tick);
         current.frame = requestAnimationFrame(current.tick);
-        current.timeout = setTimeout(() => finish({cancelled:false,notice:'关联图谱准备超时，继续等待智能体任务。'}), 2000);
-        API.previewFeatureGraph(projectId, body, current.controller.signal).then(data => {
+        if (!cached) current.timeout = setTimeout(() => finish({cancelled:false,notice:'关联图谱准备超时，继续等待智能体任务。'}), 2000);
+        const result = cached ? Promise.resolve(cached) : API.previewFeatureGraph(projectId, body, current.controller.signal);
+        result.then(data => {
             if (session.current !== current || current.done) return;
-            if (!['initial','expanded','pruned'].every(key => Array.isArray(data?.stages?.[key]?.nodes)) || !Array.isArray(data?.keptElementIds) || !Array.isArray(data?.removedElementIds)) {
+            if (!validSnapshots(data)) {
                 throw new Error('预览数据不完整');
             }
             clearTimeout(current.timeout);
             current.data = data;
+            if (!cached) {
+                const snapshot = {projectId,body,data,runId:boundRun.current};
+                setLastReplay(snapshot);
+                try {sessionStorage.setItem(replayKey(projectId), JSON.stringify(snapshot));} catch (_) { /* In-memory replay remains available. */ }
+            }
             current.readyAt = Math.max(current.startedAt + 400, performance.now());
             current.timeline = previewTimeline(data, current.reduced,
                 PREVIEW_DEADLINE - (current.readyAt - current.startedAt) - 50);
@@ -105,5 +149,9 @@ export default function useGraphPreview() {
         });
         return promise;
     }, [cancel]);
-    return {preview,startPreview:start,clearPreview:cancel};
+    const replayPreview = useCallback(({keepFinal = false, runId} = {}) => {
+        if (session.current || !lastReplay || lastReplay.projectId !== projectId || !runId || lastReplay.runId !== runId) return Promise.resolve({cancelled:true});
+        return start(lastReplay.projectId, lastReplay.body, lastReplay.data.stages.initial, lastReplay.data, keepFinal);
+    }, [lastReplay, projectId, start]);
+    return {preview,startPreview:start,clearPreview:cancel,replayPreview,lastReplay,clearReplay,bindReplay};
 }

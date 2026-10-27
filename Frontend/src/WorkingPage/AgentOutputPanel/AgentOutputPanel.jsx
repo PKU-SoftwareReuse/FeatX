@@ -114,7 +114,7 @@ export default function AgentOutputPanel({runId, snapshot, activities = [], conn
                 const warning = item.status === 'warning' || interrupted;
                 return <li key={item.id} className={warning ? styles.warning : ''}>
                     <span className={styles.activityIcon}>{warning ? <ExclamationCircleOutlined/> : item.status === 'running' ? <LoadingOutlined/> : <CheckCircleOutlined/>}</span>
-                    <div><span>{item.title}</span>{warning && <small>{interrupted ? '未收到这项操作的完成记录' : '这项操作未成功，不代表整个任务失败'}</small>}</div>
+                    <div><span>{item.title}</span>{warning && interrupted && <small>未收到这项操作的完成记录</small>}</div>
                     {item.status !== 'running' && item.elapsedMs > 0 && <small className={styles.elapsed}>{duration(item.elapsedMs)}</small>}
                 </li>;
             })}</ol>

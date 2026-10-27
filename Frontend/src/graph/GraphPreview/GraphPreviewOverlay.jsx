@@ -87,10 +87,10 @@ export default function GraphPreviewOverlay({preview}) {
     }, [preview.id]);
     const data = preview.data;
     const stage = data?.stages[['final','transition'].includes(preview.phase) ? 'pruned' : preview.phase === 'retrieving' ? 'initial' : 'expanded'];
-    return <div ref={root} data-preview-phase={preview.phase} data-preview-direction={preview.direction} className={`${styles.overlay} ${preview.phase === 'transition' ? styles.leaving : ''}`} aria-live="polite">
+    return <div ref={root} data-preview-phase={preview.phase} data-preview-direction={preview.direction} className={`${styles.overlay} ${preview.phase === 'transition' && !preview.replaying ? styles.leaving : ''}`} aria-live="polite">
         <canvas ref={canvas} className={styles.dots} aria-hidden="true"/>
         <div className={styles.caption}>
-            <span className={styles.signal}/><div><strong>{titles[preview.phase]}</strong><small>
+            <span className={styles.signal}/><div><strong>{preview.replaying ? preview.phase === 'transition' ? '回看完成' : `回看 · ${titles[preview.phase]}` : titles[preview.phase]}</strong><small>
                 {stage ? `${stage.fileCount} 个文件 · ${stage.elementCount} 个元素${data.relatedFeatureCount ? ` · ${data.relatedFeatureCount} 个相关功能` : ''}` : '基于现有功能描述进行本地匹配'}
             </small></div>
         </div>

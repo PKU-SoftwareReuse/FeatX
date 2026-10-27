@@ -9,7 +9,7 @@ import {
     CloseOutlined, DownOutlined, LoadingOutlined,
     ExclamationCircleOutlined,
     SearchOutlined,
-    ApartmentOutlined,
+    HistoryOutlined,
     CheckOutlined,
     CheckCircleOutlined, CarryOutOutlined,
     UndoOutlined
@@ -509,7 +509,11 @@ const WorkingPage = () => {
     const [sourcePreview, setSourcePreview] = useState(null);
     const [sourceError, setSourceError] = useState("");
     const sourceRequest = useRef(0);
-    const {preview:graphPreview, startPreview, clearPreview} = useGraphPreview();
+    const {preview:graphPreview, startPreview, clearPreview, replayPreview, lastReplay, clearReplay, bindReplay} = useGraphPreview(API.getSelectedRepositoryId());
+    const graphPreviewRef = useRef(null);
+    graphPreviewRef.current = graphPreview;
+    const deferredGraphRefresh = useRef(null);
+    const deferredFailureView = useRef(false);
     const graphLaunch = useRef(null);
     const pageMounted = useRef(true);
     const [agentStarting, setAgentStarting] = useState(false);
@@ -537,6 +541,8 @@ const WorkingPage = () => {
     const eventSourceRef = useRef(null);
 
     const clearPostAgentTimers = () => {
+        deferredGraphRefresh.current = null;
+        deferredFailureView.current = false;
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -693,6 +699,10 @@ const WorkingPage = () => {
     }, [activeRunId, activeRunStorageReady, currentProject]);
 
     const getFeatureGraphData = (featureId, selectedType, runId = activeRunId) => {
+        if (graphPreviewRef.current?.active && graphPreviewRef.current.replaying) {
+            deferredGraphRefresh.current = {featureId, selectedType, runId};
+            return;
+        }
         clearPreview();
         setLoadingFeatureGraph(true);
         setLoadingCode(false);
@@ -746,6 +756,19 @@ const WorkingPage = () => {
         }
 
     }
+
+    useEffect(() => {
+        if (graphPreview?.active) return;
+        const refresh = deferredGraphRefresh.current;
+        deferredGraphRefresh.current = null;
+        if (refresh) getFeatureGraphData(refresh.featureId, refresh.selectedType, refresh.runId);
+        if (deferredFailureView.current) {
+            deferredFailureView.current = false;
+            setChatMode(true);
+        }
+        // Completion callbacks queue work while replay owns the canvas.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [graphPreview?.active]);
 
     const [codeDiff, setCodeDiff] = useState('');
     const [diffDrawerOpen, setDiffDrawerOpen] = useState(false);
@@ -1702,7 +1725,8 @@ const WorkingPage = () => {
             setSubmitEnabled(true)
             setRequestDraftDirty(true)
             setModeTrans(true)
-            setChatMode(true)
+            if (graphPreviewRef.current?.active && graphPreviewRef.current.replaying) deferredFailureView.current = true;
+            else setChatMode(true);
             setOperationProgress((current) => ({
                 ...(current || {}),
                 stage: "failed",
@@ -1759,6 +1783,14 @@ const WorkingPage = () => {
     }, [outputToStart, chatMode, graphPreview?.active]);
 
     const [confirmEnabled, setConfirmEnabled] = useState(false)
+    useEffect(() => {
+        if (!activeRunStorageReady || agentStarting || graphLaunch.current?.busy || !lastReplay) return;
+        if (!activeRunId || lastReplay.projectId !== API.getSelectedRepositoryId() || lastReplay.runId !== activeRunId) clearReplay();
+    }, [activeRunStorageReady, activeRunId, agentStarting, lastReplay, clearReplay]);
+    const canReplayGraph = Boolean(lastReplay && activeRunId
+        && lastReplay.projectId === API.getSelectedRepositoryId() && lastReplay.runId === activeRunId
+        && (operationProgress?.running || confirmEnabled));
+
     const [submitEnabled, setSubmitEnabled] = useState(false)
     const restoredRunRef = useRef(null)
 
@@ -1770,6 +1802,7 @@ const WorkingPage = () => {
         API.getAgentRun(activeRunId)
             .then(async (snapshot) => {
                 if (['COMMITTED', 'DISCARDED'].includes(snapshot.status)) {
+                    clearReplay();
                     setActiveRunId(null); setLoadingFeatureList(false); setSubmitEnabled(true);
                     restoreSelectedFeature(featureData, null); return;
                 }
@@ -1878,6 +1911,7 @@ const WorkingPage = () => {
         try {
             const discardedRunId = activeRunId;
             const status = await API.discardFeatureChanges();
+            clearReplay();
             if (agentViewRunRef.current) loadAgentSnapshot(agentViewRunRef.current);
             setGitStatus(status || EMPTY_GIT_STATUS);
             eventSourceRef.current?.close()
@@ -2181,6 +2215,7 @@ const WorkingPage = () => {
             storeActiveRunId(projectId, runId);
             if (!valid()) return;
             launch.runId = runId;
+            bindReplay(runId);
             restoredRunRef.current = runId;
             setActiveRunId(runId);
             setRequestDraftDirty(false); clearFeatureRequestDraft();
@@ -2188,7 +2223,7 @@ const WorkingPage = () => {
         }).catch(error => {
             if (!valid()) return;
             launch.failed = true; launch.busy = false;
-            clearPreview(); stopProgressPolling();
+            clearReplay(); stopProgressPolling();
             setOutputToStart(null); setAgentStarting(false); setChatMode(false); setGraphData(initial);
             setLoadingFeatureGraph(false); setLoadingFeatureList(false); setSubmitEnabled(true);
             setOperationProgress({operation:expectedOperation,stage:'failed',messageKey:'progress.operation.failed',
@@ -2215,6 +2250,7 @@ const WorkingPage = () => {
 
     const commitPreparedFeatureChanges = async () => {
         const result = await API.commitFeatureChanges(selectedType, null, activeRunId);
+        clearReplay();
         if (agentViewRunRef.current) loadAgentSnapshot(agentViewRunRef.current);
         setGitStatus(result.status || EMPTY_GIT_STATUS);
         resetGraphDiffDrawer();
@@ -2368,9 +2404,6 @@ const WorkingPage = () => {
         });
     };
 
-    const hasFocusGraphStages = supportsReasoningGraphStages(selectedType)
-        && Array.isArray(focusGraphStages)
-        && focusGraphStages.length > 0;
     const stagedFileCount = gitStatus.stagedPaths?.length || 0;
     const unstagedCandidateCount = gitStatus.unstagedCandidatePaths?.length || 0;
     const metadataOnlyDeleteReady = Boolean(
@@ -2651,20 +2684,11 @@ const WorkingPage = () => {
                                             </div>
                                         </div>
                                         <div className={styles.panelActions}>
-                                            <Tooltip
-                                                title={hasFocusGraphStages ? copy.focusGraphReady : copy.focusGraphPending}
-                                            >
-                                                <Button
-                                                    type="text"
-                                                    icon={<ApartmentOutlined/>}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        setFocusGraphModalOpen(true);
-                                                    }}
-                                                    className={styles.icon}
-                                                    disabled={!hasFocusGraphStages || graphPreview?.active}
-                                                />
-                                            </Tooltip>
+                                            {!chatMode && (canReplayGraph || (graphPreview?.active && graphPreview.replaying)) && <Tooltip title={graphPreview?.active ? '图谱动画播放中' : `回看本次图谱推理：${lastReplay?.body.description || ''}`}>
+                                                <span className={styles.replayControl}><Button className={styles.replayButton} icon={<HistoryOutlined/>}
+                                                    disabled={!canReplayGraph || Boolean(graphPreview?.active)}
+                                                    onClick={() => {if (!canReplayGraph) return;setFileQuery('');replayPreview({runId:activeRunId,keepFinal:Boolean(agentStarting || operationProgress?.running || ['PREPARED','RUNNING'].includes(agentSnapshot?.status))});}}>{graphPreview?.active && graphPreview.replaying ? '回放中' : '回看推理'}</Button></span>
+                                            </Tooltip>}
                                             {!chatMode && <Input.Search disabled={graphPreview?.active} className={styles.fileSearch} aria-label="查找文件" placeholder="查找文件或元素" allowClear value={fileQuery} onChange={event => setFileQuery(event.target.value)}/>}
                                         </div>
                                     </div>
@@ -2673,7 +2697,7 @@ const WorkingPage = () => {
                                 bodyStyle={{paddingTop: 12, paddingBottom: 4}}
                             >
                                 {agentNotice && <Alert type="info" showIcon message={agentNotice} style={{borderRadius:0,fontSize:12}}/>}
-                                {showGitOperationActions && <div className={styles.reviewBar}>
+                                {showGitOperationActions && !graphPreview?.replaying && <div className={styles.reviewBar}>
                                     <div className={styles.reviewStatus}>
                                         <span className={styles.reviewStatusIcon}><CheckCircleOutlined/></span>
                                         <div><strong>{gitStatus.requiresCleanup ? '工作区需要处理' : metadataOnlyDeleteReady ? '功能项变更待提交' : `已选择 ${stagedFileCount} / ${gitStatus.candidatePaths?.length || 0} 个文件`}</strong>
@@ -2704,7 +2728,7 @@ const WorkingPage = () => {
                                 <div className={styles.featureContext}>
                                     <span className={styles.contextIcon} role="img" aria-label={chatMode ? "智能体输出" : "代码图谱"} title={chatMode ? "智能体输出" : "代码图谱"}>{chatMode ? <AgentViewIcon/> : <GraphViewIcon/>}</span>
                                     <div><small>{featureData.find(epic => epic.featureList.some(item => item.featureId === selectedFeatureItem?.featureId))?.moduleDesc || '功能主题'}</small>
-                                        <strong title={selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : ''}>{selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : '请选择功能项'}</strong></div>
+                                        <strong title={selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : ''}>{graphPreview?.replaying ? graphPreview.description : selectedFeatureItem ? getFeatureDescription(selectedFeatureItem) : '请选择功能项'}</strong></div>
                                     <span className={styles.contextCount}>{displayedGraph?.nodes?.length || 0} 个文件</span>
                                     <span className={styles.contextCount}>{displayedElementCount} 个元素</span>
                                 </div>
@@ -2723,7 +2747,7 @@ const WorkingPage = () => {
                                     onClick={(event) => event.stopPropagation()}
                                     className={classNames(styles.panelView, {
                                         [styles.panelViewHidden]: chatMode,
-                                        [styles.graphPreviewLeaving]: graphPreview?.active && graphPreview.phase === 'transition',
+                                        [styles.graphPreviewLeaving]: graphPreview?.active && !graphPreview.replaying && graphPreview.phase === 'transition',
                                     })}
                                 >
                                     <Spin

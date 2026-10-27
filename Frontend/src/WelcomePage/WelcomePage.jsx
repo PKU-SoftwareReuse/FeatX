@@ -5,6 +5,7 @@ import styles from './WelcomePage.module.css';
 import {Button, Card, Select, Form, Input, message, Modal, Popconfirm, Popover, Progress, Spin, Tag, Tooltip} from "antd";
 import {ArrowRightOutlined, TeamOutlined, AppstoreOutlined, FolderOutlined, GitlabOutlined, LinkOutlined, ForkOutlined, SearchOutlined, DeleteOutlined, ExclamationCircleOutlined, GithubOutlined, SettingOutlined, SyncOutlined} from "@ant-design/icons";
 import API from "../api";
+import ProjectLanguages from "./ProjectLanguages";
 import ProjectTag from "../components/ProjectTag";
 import {projectIcon, fallbackIcon} from "../utils/projectIcon";
 import ProjectIconPicker from "./ProjectIconPicker/ProjectIconPicker";
@@ -476,6 +477,7 @@ const WelcomePage = () => {
                                         <img className={styles.projectIcon} src={projectIcon(project)} alt="" onError={event => {const fallback = fallbackIcon(project.id); if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback;}}/>
                                         <div className={styles.cardIdentity}><Tooltip title={project.projectName}><h3>{project.projectName}</h3></Tooltip>
                                             <span>{project.source?.kind === "upload" ? "本地上传" : "Git 导入"}</span></div>
+                                        <ProjectLanguages projectId={project.id}/>
                                         <Tooltip title={copy.settings}><Button type="text" icon={<SettingOutlined/>} aria-label={`${project.projectName} 项目设置`} onClick={() => openSettings(project)}/></Tooltip>
                                     </div>
                                     <div className={styles.cardMeta}>

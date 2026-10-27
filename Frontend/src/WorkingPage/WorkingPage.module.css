@@ -960,3 +960,10 @@
 .discardDetails small {display:block;margin-top:8px;color:#69798e;font-size:11px;}
 @media(max-width:960px){.topbarModel .modelSelect{width:170px;}}
 @media(max-width:650px){.topbarModel .modelLabel{display:none;}.topbarModel .modelControl{padding-left:2px;}.topbarModel .modelSelect{width:130px;}.confirmDialog :global(.ant-modal-content){padding:20px;}.confirmHeading{font-size:15px;}}
+
+.replayControl {display:inline-flex;align-items:center;flex-shrink:0;}
+.panelActions .replayButton {display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:1px solid #dce7f5;border-radius:8px;background:#f3f7fd;color:#3c608b;font-size:12px;font-weight:500;box-shadow:none;transition:background .18s,border-color .18s,color .18s;}
+.panelActions .replayButton :global(.anticon) {font-size:14px;color:#5489cc;}
+.panelActions .replayButton:not(:disabled):hover {background:#eaf2fe;border-color:#adc9ed;color:#285d9e;}
+.panelActions .replayButton:disabled {background:#f4f5f7;border-color:#e4e7ec;color:#929ba8;cursor:not-allowed;}
+.panelActions .replayButton:disabled :global(.anticon) {color:#a2aab5;}

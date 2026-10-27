@@ -42,3 +42,56 @@ test('unmount cancels presentation without creating another task request', async
     unmount();expect(await done).toEqual({cancelled:true});
     expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
 });
+
+test('replay survives clearing and remounting, reuses snapshots without another request, restores graph', async () => {
+    sessionStorage.clear();
+    API.previewFeatureGraph.mockResolvedValue(data);
+    let view=renderHook(()=>useGraphPreview('replay-project'));let done;
+    await act(async()=>{done=view.result.current.startPreview('replay-project',{operation:'modify',featureId:'f',description:'登录'},graph(2));});
+    act(()=>view.result.current.bindReplay('run-1'));
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    act(()=>view.result.current.clearPreview());
+    view.unmount();
+    view=renderHook(()=>useGraphPreview('replay-project'));
+    expect(view.result.current.lastReplay.data).toEqual(data);
+    await act(async()=>{done=view.result.current.replayPreview({runId:'run-1'});});
+    expect(view.result.current.preview.replaying).toBe(true);
+    expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    expect(view.result.current.preview).toBeNull();
+    expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
+    view.unmount();sessionStorage.clear();
+});
+
+
+test('replay while the agent is running holds the pruned snapshot instead of restoring the seed graph', async () => {
+    sessionStorage.clear();API.previewFeatureGraph.mockResolvedValue(data);
+    const {result,unmount}=renderHook(()=>useGraphPreview('running-project'));let done;
+    await act(async()=>{done=result.current.startPreview('running-project',{operation:'modify',description:'登录'},graph(2));});
+    act(()=>result.current.bindReplay('run-2'));
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    act(()=>result.current.clearPreview());
+    await act(async()=>{done=result.current.replayPreview({keepFinal:true,runId:'run-2'});});
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    expect(result.current.preview.phase).toBe('final');
+    expect(result.current.preview.active).toBe(false);
+    expect(result.current.preview.replaying).toBe(false);
+    expect(result.current.preview.data.stages.pruned.elementCount).toBe(4);
+    expect(API.previewFeatureGraph).toHaveBeenCalledTimes(1);
+    unmount();sessionStorage.clear();
+});
+
+
+test('resolved tasks invalidate replay and a different task cannot replay a saved snapshot', async () => {
+    sessionStorage.clear();API.previewFeatureGraph.mockResolvedValue(data);
+    const {result,unmount}=renderHook(()=>useGraphPreview('p'));let done;
+    await act(async()=>{done=result.current.startPreview('p',{operation:'modify',description:'登录'},graph(2));});
+    act(()=>result.current.bindReplay('current-run'));
+    await act(async()=>{jest.advanceTimersByTime(9900);await done;});
+    expect(await result.current.replayPreview({runId:'other-run'})).toEqual({cancelled:true});
+    act(()=>result.current.clearReplay());
+    expect(result.current.lastReplay).toBeNull();
+    expect(sessionStorage.getItem('featx.graphReplay.p')).toBeNull();
+    expect(await result.current.replayPreview({runId:'current-run'})).toEqual({cancelled:true});
+    unmount();sessionStorage.clear();
+});
